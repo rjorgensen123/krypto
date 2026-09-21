@@ -1,0 +1,18 @@
+# Locked Python dependencies for the CLI parity tests — the Python side's Cargo.lock.
+#
+# WHY PINNED: `cryptography` and `argon2-cffi` are not test dependencies here —
+# they ARE the independent implementations the parity tests check krypto-cli
+# against. An unannounced version drift there is as serious as one in Cargo.lock.
+#
+# Usage:  python3 -m venv .venv && .venv/bin/pip install -r krav-ci.txt
+#         cargo build --bin krypto-cli && .venv/bin/pytest -q
+argon2-cffi==25.1.0
+argon2-cffi-bindings==25.1.0
+cffi==2.1.1
+cryptography==50.0.0
+iniconfig==2.3.0
+packaging==26.3
+pluggy==1.6.0
+pycparser==3.0
+Pygments==2.20.0
+pytest==9.1.1

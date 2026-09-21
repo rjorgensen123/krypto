@@ -1,0 +1,164 @@
+# CI for krypto. Runs on every push to main and on pull requests.
+#
+# Requires an Actions runner registered for the repository or the org; without
+# one, nothing runs. Adjust `runs-on` if your runner carries another label.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1-bookworm
+      # The tests mlock memory; without the limit raised, fail-closed kicks in.
+      options: --ulimit memlock=-1:-1
+    steps:
+      # Checkout without actions/checkout, which is fetched from github. Clone
+      # directly with the job token instead; rust:1-bookworm has git + base64.
+      - name: Checkout (no third-party action)
+        run: |
+          git config --global --add safe.directory '*'
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
+          git -c http.extraheader="Authorization: basic ${AUTH}" \
+              fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q --detach FETCH_HEAD
+
+      - name: Add clippy + rustfmt
+        run: rustup component add clippy rustfmt
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --all-targets
+
+  # Rust <-> Python parity (0.5.0): pytest drives the REAL binary as a
+  # subprocess, the way a non-Rust caller does, and checks every answer against
+  # an INDEPENDENT implementation (cryptography/argon2-cffi/hashlib), both
+  # directions. Two implementations that must agree are tested against each
+  # other — not each against itself.
+  python-parity:
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1-bookworm
+      options: --ulimit memlock=-1:-1
+    steps:
+      - name: Checkout (no third-party action)
+        run: |
+          git config --global --add safe.directory '*'
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
+          git -c http.extraheader="Authorization: basic ${AUTH}" \
+              fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q --detach FETCH_HEAD
+
+      - name: Build krypto-cli
+        run: cargo build --locked --bin krypto-cli
+
+      # Pinned, like the Rust side: python/krav-ci.txt fixes exact versions of
+      # cryptography and argon2-cffi. These are not test dependencies — they
+      # ARE the counterpart the parity tests check against.
+      - name: Python + dependencies (pinned versions)
+        run: |
+          apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install -q -r python/krav-ci.txt
+
+      - name: Parity tests (pytest)
+        run: /tmp/venv/bin/pytest python/ -q
+
+  # Dependency audit: RustSec advisories, license allowlist, bans and source
+  # control. The configuration lives in deny.toml.
+  deny:
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1-bookworm
+    steps:
+      - name: Checkout (no third-party action)
+        run: |
+          git config --global --add safe.directory '*'
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
+          git -c http.extraheader="Authorization: basic ${AUTH}" \
+              fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q --detach FETCH_HEAD
+
+      # Prebuilt binary at a pinned version — compiling cargo-deny on every run
+      # costs about five minutes. Bump the version here when needed.
+      - name: Fetch cargo-deny
+        run: |
+          curl -sSfL -o /tmp/cd.tgz \
+            https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz
+          tar -xzf /tmp/cd.tgz -C /tmp --strip-components=1
+          install /tmp/cargo-deny /usr/local/bin/
+
+      - name: cargo deny check
+        run: cargo deny check
+
+  # Miri over the unsafe/ffi layer. Miri runs no real syscalls — mlock, madvise
+  # and prctl are no-ops under it (src/ffi.rs) — so what it verifies is the
+  # crate's own pointer and memory handling around them: the `secret` module
+  # alone (SecretBuf/SecretString, the layer above ffi). aead and store cannot
+  # run under miri (aegis is C behind FFI), and argon2 and curve arithmetic in
+  # an interpreter are prohibitively slow. The ASan job below runs natively and
+  # covers the whole suite instead.
+  miri:
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1-bookworm
+    steps:
+      - name: Checkout (no third-party action)
+        run: |
+          git config --global --add safe.directory '*'
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
+          git -c http.extraheader="Authorization: basic ${AUTH}" \
+              fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q --detach FETCH_HEAD
+
+      - name: Nightly + miri
+        run: |
+          rustup toolchain install nightly --profile minimal --component miri
+          rustup override set nightly
+
+      - name: Miri (secret + harden — the tests above the unsafe layer)
+        run: cargo miri test --test secret --test harden
+
+  # AddressSanitizer: the whole suite with runtime memory checking (needs nightly).
+  asan:
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1-bookworm
+      options: --ulimit memlock=-1:-1
+    steps:
+      - name: Checkout (no third-party action)
+        run: |
+          git config --global --add safe.directory '*'
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
+          git -c http.extraheader="Authorization: basic ${AUTH}" \
+              fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q --detach FETCH_HEAD
+
+      - name: Nightly + rust-src
+        run: |
+          rustup toolchain install nightly --profile minimal --component rust-src
+          rustup override set nightly
+
+      - name: ASan (full suite, std rebuilt instrumented)
+        env:
+          RUSTFLAGS: -Zsanitizer=address
+        run: cargo test -Zbuild-std --target x86_64-unknown-linux-gnu --lib --tests

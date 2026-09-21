@@ -1,0 +1,30 @@
+# cargo-deny — audit of the dependency tree. Run in CI (`cargo deny check`):
+# a vulnerable or wrongly licensed dependency must fail the build, not be
+# discovered afterwards.
+
+[advisories]
+# The RustSec database: known vulnerabilities and maintenance advisories.
+yanked = "deny"
+
+[licenses]
+# The crate is MIT OR Apache-2.0; the tree stays within the permissive norms.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+# Duplicate versions are noise rather than errors — but we want to see them.
+multiple-versions = "warn"
+# RSA is not in the tree today and must not slip in the back way: the `rsa`
+# crate has an open timing side channel (RUSTSEC-2023-0071).
+deny = [{ name = "rsa" }]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

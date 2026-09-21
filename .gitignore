@@ -1,0 +1,19 @@
+# ── Rust / Cargo ──
+/target/
+debug/
+**/*.rs.bk
+*.pdb
+# Cargo.lock IS committed on purpose: this crate handles secrets, and a
+# reproducible build is worth more than a tidy diff.
+
+# ── Editor / OS ──
+/.idea/
+/.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# ── Python (the parity tests) ──
+python/.venv/
+python/__pycache__/

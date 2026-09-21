@@ -1,0 +1,34 @@
+[package]
+name = "krypto"
+version = "0.7.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Secure in-memory secret handling, AEAD at rest, and process hardening."
+repository = "https://github.com/rjorgensen123/krypto"
+license = "MIT OR Apache-2.0"
+authors = ["Roger Jorgensen <rogerj@gmail.com>"]
+
+[dependencies]
+libc = "0.2"
+zeroize = "1"
+getrandom = "0.2"
+aegis = "0"
+chacha20poly1305 = "0.10"
+aes-gcm = "0.10"
+hkdf = "0.12"
+hmac = "0.12"
+sha2 = "0.10"
+argon2 = "0.5"
+subtle = "2"
+ed25519-dalek = "2"
+p256 = { version = "0.13", features = ["ecdsa", "pkcs8"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+
+# argon2 in debug builds is painfully slow (the High preset costs ~30 s per
+# hash); optimize just that dependency so `cargo test` stays usable. Release
+# builds are unaffected.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[dev-dependencies]
+libc = "0.2"
