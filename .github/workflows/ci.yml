@@ -1,0 +1,100 @@
+# CI for krypto on GitHub. Runs on every push to main and on pull requests.
+#
+# The jobs run in a container rather than on the runner directly, for one
+# reason: the tests mlock memory, and the crate is fail-closed about it. With
+# the default memlock limit those tests fail for the wrong reason.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1-bookworm
+      options: --ulimit memlock=-1:-1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add clippy + rustfmt
+        run: rustup component add clippy rustfmt
+
+      - name: Format check
+        run: cargo fmt --all --check
+
+      - name: Clippy (warnings are errors)
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test --locked --all-targets
+
+  # Rust <-> Python parity: pytest drives the REAL binary as a subprocess, the
+  # way a non-Rust caller does, and checks every answer against an INDEPENDENT
+  # implementation (cryptography/argon2-cffi/hashlib), both directions. Two
+  # implementations that must agree are tested against each other — not each
+  # against itself.
+  python-parity:
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1-bookworm
+      options: --ulimit memlock=-1:-1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build krypto-cli
+        run: cargo build --locked --bin krypto-cli
+
+      # Pinned, like the Rust side: python/krav-ci.txt fixes exact versions of
+      # cryptography and argon2-cffi. These are not test dependencies — they
+      # ARE the counterpart the parity tests check against.
+      - name: Python + dependencies (pinned versions)
+        run: |
+          apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install -q -r python/krav-ci.txt
+
+      - name: Parity tests (pytest)
+        run: /tmp/venv/bin/pytest python/ -q
+
+  # Dependency audit: RustSec advisories, license allowlist, bans and source
+  # control. The configuration lives in deny.toml.
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # A pinned binary rather than a third-party action. An action runs with
+      # access to this repository and can change under its own tag; a release
+      # artifact at a fixed version cannot. For a crate whose whole point is not
+      # trusting things unnecessarily, one fewer party in the chain is worth the
+      # three extra lines. It is also what the internal CI does, so both run the
+      # same tool the same way.
+      - name: Fetch cargo-deny
+        run: |
+          curl -sSfL -o /tmp/cd.tgz \
+            https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz
+          tar -xzf /tmp/cd.tgz -C /tmp --strip-components=1
+          install /tmp/cargo-deny /usr/local/bin/
+
+      - name: cargo deny check
+        run: cargo deny check
+
+  # Miri over the unsafe/ffi layer. Miri runs no real syscalls — mlock, madvise
+  # and prctl are no-ops under it (src/ffi.rs) — so what it verifies is the
+  # crate's own pointer and memory handling around them: the `secret` module
+  # alone. aead and store cannot run under miri (aegis is C behind FFI).
+  miri:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nightly + miri
+        run: |
+          rustup toolchain install nightly --profile minimal --component miri
+          rustup override set nightly
+
+      - name: Miri (secret + harden — the tests above the unsafe layer)
+        run: cargo miri test --test secret --test harden

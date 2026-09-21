@@ -2,6 +2,11 @@
 
 *(Codename: Fafnir — directory `krypto/`.)*
 
+> **This repository is a mirror.** Development happens elsewhere and is pushed here;
+> every sync overwrites what is here, so a pull request cannot be merged and a commit
+> made here is lost. Issues are read — see [CONTRIBUTING.md](CONTRIBUTING.md) for the
+> form a change has to arrive in, and [SECURITY.md](SECURITY.md) for vulnerabilities.
+
 Standalone crypto and secret-handling crate. It grew out of building a real application, but
 is fully self-contained — nothing here depends on that app.
 
