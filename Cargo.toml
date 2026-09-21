@@ -7,6 +7,8 @@ description = "Secure in-memory secret handling, AEAD at rest, and process harde
 repository = "https://github.com/rjorgensen123/krypto"
 license = "MIT OR Apache-2.0"
 authors = ["Roger Jorgensen <rogerj@gmail.com>"]
+keywords = ["secrets", "zeroize", "mlock", "aegis256", "encryption"]
+categories = ["cryptography", "memory-management", "command-line-utilities"]
 
 [dependencies]
 libc = "0.2"
