@@ -27,7 +27,18 @@ fn run(args: &[&str], stdin: &[u8]) -> (i32, Vec<u8>) {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(stdin).unwrap();
+    // A usage error is rejected before stdin is read, so the child can already
+    // be gone by the time we write — that is the CLI failing fast, which is what
+    // it is supposed to do. EPIPE here is not a test failure; the exit code is
+    // what we came for, and `wait_with_output` still returns it. Any OTHER write
+    // error is still a failure and still panics.
+    if let Some(mut si) = child.stdin.take() {
+        match si.write_all(stdin) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+            Err(e) => panic!("writing to cli stdin: {e}"),
+        }
+    }
     let out = child.wait_with_output().unwrap();
     (out.status.code().unwrap_or(-1), out.stdout)
 }
