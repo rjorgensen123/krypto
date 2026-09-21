@@ -17,7 +17,7 @@ jobs:
       image: rust:1-bookworm
       options: --ulimit memlock=-1:-1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Add clippy + rustfmt
         run: rustup component add clippy rustfmt
@@ -42,7 +42,7 @@ jobs:
       image: rust:1-bookworm
       options: --ulimit memlock=-1:-1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build krypto-cli
         run: cargo build --locked --bin krypto-cli
@@ -64,7 +64,7 @@ jobs:
   deny:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # A pinned binary rather than a third-party action. An action runs with
       # access to this repository and can change under its own tag; a release
@@ -89,7 +89,7 @@ jobs:
   miri:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Nightly + miri
         run: |
