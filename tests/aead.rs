@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Integration tests for the AEAD/blob layer (seal/open + master key + HKDF).
 
 use krypto::{open, seal, Alg, Error, MasterKey, SecretBuf};

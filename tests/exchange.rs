@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! X25519 key agreement: RFC 7748 vectors + failure modes.
 
 use krypto::exchange::{x25519_keypair, x25519_public, x25519_shared};

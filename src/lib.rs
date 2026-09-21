@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! # krypto
 //!
 //! Secure handling of secrets in memory and at rest. A thin, opinionated

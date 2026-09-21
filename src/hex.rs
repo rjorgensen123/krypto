@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Canonical hex: lowercase out, strictly lowercase in.
 //!
 //! One canonical form on purpose. Hex strings end up in

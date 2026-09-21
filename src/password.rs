@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Argon2id password hashing via presets. Consumers never pick raw parameters.
 //!
 //! This is one-way hashing to *verify* passwords — not encryption.

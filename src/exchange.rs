@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! X25519 key agreement (RFC 7748) — the primitive under sealed envelopes.
 //!
 //! krypto provides the *primitive*; the envelope **format** (header, AAD

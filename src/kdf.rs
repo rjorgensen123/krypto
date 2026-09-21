@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Master key and key derivation (HKDF-SHA256).
 //!
 //! The master key comes from OUTSIDE krypto (Docker secret / passphrase). It is

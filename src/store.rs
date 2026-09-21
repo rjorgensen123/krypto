@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! `SecretStore` — encrypted key-value store on file.
 //!
 //! Every value is encrypted with a **per-key-name** derived DEK

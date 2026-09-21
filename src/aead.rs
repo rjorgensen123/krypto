@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! AEAD (`seal`/`open`) + the self-describing blob format (`FAFN`).
 //!
 //! Blob layout:

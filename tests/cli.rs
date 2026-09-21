@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Integration tests for `krypto-cli` — the contract a non-Rust caller builds
 //! on. Spawns the built binary and verifies the stdin/stdout
 //! pipe, roundtrips and exit codes.

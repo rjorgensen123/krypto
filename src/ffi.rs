@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! The ONLY place in the crate with `unsafe` — thin wrappers around libc
 //! (mlock/munlock/madvise/setrlimit/prctl). The rest of the crate is
 //! `#![deny(unsafe_code)]`; this module allows unsafe locally.

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Small utilities every consumer was rolling on its own: plain SHA-256,
 //! constant-time comparison, and randomness for values that are NOT secrets.
 

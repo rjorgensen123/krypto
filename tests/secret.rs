@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Integration tests against the public API surface of `krypto`.
 
 use krypto::{SecretBuf, SecretString};

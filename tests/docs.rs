@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Doc guard (0.6.0): every public name in the crate must appear in the
 //! shipped reference doc (`docs/API.md`). A surface
 //! change that skips the docs fails `cargo test` — the same fence

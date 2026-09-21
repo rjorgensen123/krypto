@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Process hardening tests.
 //!
 //! The dangerous calls run in a FORKED CHILD so that a success (e.g. the

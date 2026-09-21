@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Process hardening — every call is fail-closed, and each is a separate,
 //! deliberate choice, because they carry different costs:
 //!

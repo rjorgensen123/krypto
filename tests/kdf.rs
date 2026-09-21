@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Integration tests for the KDF layer: HMAC-SHA256 over a derived key,
 //! the shape an audit chain uses.
 

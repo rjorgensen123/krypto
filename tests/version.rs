@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Version guard: 0.4.3 and 0.4.4 shipped without the
 //! `VERSION` file or the changelog following along. These tests make that
 //! impossible to repeat — a version bump that skips either file fails `cargo test`.

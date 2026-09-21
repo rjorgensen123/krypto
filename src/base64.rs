@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Canonical base64 (STANDARD alphabet): one spelling out, strictly that
 //! spelling in.
 //!

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: MIT OR Apache-2.0
 """Rust ↔ Python parity for krypto-cli.
 
 Every test drives the REAL binary (subprocess, exactly like a non-Rust

@@ -103,5 +103,29 @@ Reviewed independently by DeepSeek, Qwen, Gemini and Fable.
 
 ## License
 
-MIT **or** Apache-2.0, at the recipient's choice — the Rust ecosystem norm for libraries.
+MIT **or** Apache-2.0, at the recipient's choice.
 See [`LICENSE-MIT`](LICENSE-MIT) and [`LICENSE-APACHE`](LICENSE-APACHE).
+
+Both permit the same use. They differ on patents, and that is the reason for offering both:
+MIT is silent on them, Apache-2.0 grants one explicitly and withdraws it from anyone who sues
+over it (§3). Organisations differ on which of the two their own rules already accept — and in
+cryptography the question comes up more often than elsewhere. Offering both means you take the
+one you are already cleared for, without having to ask.
+
+### Contributions
+
+**Reports are what is wanted here — not patches.** If something behaves differently from what
+the documentation says, or a guarantee does not hold, say so and show how to see it. That is
+the most useful thing anyone outside can send. The crate is deliberately narrow, with one
+canonical way of doing each thing, so a fix has to fit that canon — and it is quicker and safer
+for the fix to be made here than for a patch to be reviewed and reshaped into it.
+
+Code is not refused. It is simply not what is being asked for, and it is not prioritised.
+**If you do send it, it is accepted only under the same terms as the crate.** By submitting
+code for inclusion you license it as MIT **or** Apache-2.0, at the recipient's choice, with no
+additional conditions. Code offered on other terms cannot be merged — not as a judgement on it,
+but because the choice this crate gives its users only holds if it holds for every line in it.
+A single file on other terms breaks that promise for everyone downstream.
+
+[CONTRIBUTING.md](CONTRIBUTING.md) says how to file a report. [SECURITY.md](SECURITY.md) covers
+anything security-related, which does not belong in an issue.

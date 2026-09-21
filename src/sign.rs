@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Signatures: Ed25519 (raw keys) and ECDSA P-256 (PKCS#8 / SEC1 / DER).
 //!
 //! Exists so no consumer rolls its own signature layer — nettls went straight

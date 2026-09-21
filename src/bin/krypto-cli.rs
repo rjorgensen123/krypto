@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! krypto-cli — the bridge for non-Rust consumers.
 //!
 //! A caller that is not Rust — Python, say — runs this binary as a subprocess

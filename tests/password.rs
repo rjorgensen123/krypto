@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
 //! Tests for argon2id password hashing.
 
 use krypto::password::{self, Preset};

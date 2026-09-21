@@ -33,6 +33,10 @@ It will be read. Whether it lands, and when, depends on whether it fits what the
 is for — and on time, of which there is not much. Do not expect a quick answer, and do
 not take silence as rejection.
 
+Code is accepted only under the crate's own terms: MIT **or** Apache-2.0, at the
+recipient's choice. See [Contributions](README.md#contributions) in the README for
+what that means and why.
+
 **Feature requests.** Possible, and worth asking about. But the crate offers one
 canonical way of doing each thing on purpose, so a second way is not a small change:
 it is a decision about what every consumer then has to agree on. Say what you are
