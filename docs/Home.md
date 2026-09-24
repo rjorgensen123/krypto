@@ -106,39 +106,6 @@ on top. If you need both TLS and secret handling, they belong together — but e
 The library is in active use and covers what is needed today. The format of encrypted data has been
 stable since early on.
 
-**0.6.0 (module round, 2026-08):** key rotation (`reseal` + the store's `rotate` — see below),
-and the library now reports its own version
-(`VERSION` + `krypto-cli version`), the command-line tool gained `rand` (randomness for
-non-secrets, so no other side rolls its own source), the middle preset `Balanced` got adjusted
-numbers, and the build is now audited automatically: dependencies are checked against known
-vulnerabilities and licenses, and the memory handling is verified with dedicated tools (Miri, ASan).
-
-**0.5.0 was the library's first major revision** — it grew the surface and deliberately broke what had to break:
-
-- **The surface grew on purpose:** signatures (Ed25519, ECDSA P-256), X25519 key agreement,
-  canonical hex, plain SHA-256, constant-time comparison and randomness for non-secrets — what
-  consumers used to pull from their own crypto libraries now lives in one place.
-- **The language:** the entire API is English now. Two names changed (`utled_noekkel` →
-  `derive_key`, the `Moderate` preset → `High`), and all error messages went from Norwegian to
-  English. The changelog carries the full Norwegian ⇄ English table — the transition is complete;
-  the table remains as history.
-- **The presets:** a real middle profile arrived (`Balanced`), and the strictest one got a name
-  that says what it is. Old stored password hashes verify unchanged.
-- **A real fix in the default algorithm:** new, official test vectors revealed that the AEGIS-256
-  layer had swapped the key and the nonce — self-consistent (krypto could open everything it had
-  sealed), but not standard AEGIS-256. Fixed and verified against the official vectors.
-  **Consequence: AEGIS blobs made before 0.5.0 must be re-encrypted.** Blobs using the two other
-  algorithms are unaffected.
-
-One older tightening is also worth knowing: which names the encrypted store accepts was narrowed
-to printable ASCII (0.4.3). Old data can still be read, but your code may need adjusting if it
-used other characters.
-
-**Key rotation arrived in 0.6.0**: `reseal` moves a single blob to a new key generation, and
-the store's `rotate` re-encrypts everything under a new master key in one atomic operation.
-Krypto is stateless — both keys come from the caller, which owns when and why a switch happens.
-What does not exist yet is a **direct Python binding** (today that path goes through the
-command-line tool).
 
 ## Possible future extensions
 
@@ -151,6 +118,19 @@ Not planned — but thought through, and the format is laid out so they can arri
 - **Peppered HMAC for passwords.** A second layer on top of Argon2id, keyed with a secret that
   lives outside the database — whoever steals only the database then has nothing to brute-force
   against. The pepper would live with whoever owns login policy, not in the library.
+
+## Author
+
+**Roger Jorgensen** — rogerj@gmail.com
+
+Design, architecture and structure; the security model and what it means to fail closed; the
+contracts the crate presents outwards; and the decisions about what it does and deliberately
+does not do. 
+
+The code is written by Claude AI (Opus and Fable).
+
+Reviewed independently by DeepSeek, Qwen, Gemini and Fable.
+
 
 ## License
 

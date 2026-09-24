@@ -97,7 +97,9 @@ cargo build --bin krypto-cli && python/.venv/bin/pytest python/ -q
 
 Design, architecture and structure; the security model and what it means to fail closed; the
 contracts the crate presents outwards; and the decisions about what it does and deliberately
-does not do. The code is written by Claude AI (Opus and Fable).
+does not do. 
+
+The code is written by Claude AI (Opus and Fable).
 
 Reviewed independently by DeepSeek, Qwen, Gemini and Fable.
 
