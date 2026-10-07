@@ -4,6 +4,24 @@ Every notable change to this crate is recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] — 2026-10-07
+
+*No functional change. Not one public signature moved. The release exists because
+the crates.io page shows the README from the package, and the one in 0.7.0 told
+readers to install krypto from a registry they cannot reach.*
+
+### Fixed — the install snippets
+
+`README.md` said `krypto = { version = "0.6", registry = "gitea" }`: a private
+registry and an old version. `docs/Usage.md` still said `0.6`. Both now read
+`krypto = "0.7"`. `docs/API.md` annotated `VERSION` with a bare "0.6.0", which
+read as its value; it now says "new in 0.6.0", like the rest of the reference.
+
+### Changed — CI configuration is no longer packaged
+
+`exclude` keeps `.gitea/` and `.github/` out of the published crate, and
+`publish = ["crates-io"]` refuses any other destination.
+
 ## [0.7.0] — 2026-09-21
 
 *Found by two independent reviews of the crate. Three of these refuse input that
