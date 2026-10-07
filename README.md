@@ -46,7 +46,7 @@ The curiosity behind it comes from work on data-plane confidentiality — see
 
 ```toml
 [dependencies]
-krypto = { version = "0.6", registry = "gitea" }
+krypto = "0.7"
 ```
 
 ```rust

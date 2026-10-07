@@ -25,7 +25,7 @@ with the module. Two normative rules bind whoever *changes* the surface:
 ## Root
 
 ```rust
-pub const VERSION: &str;  // 0.6.0 — the crate version (mirrors Cargo.toml), for About pages
+pub const VERSION: &str;  // new in 0.6.0 — the crate version (mirrors Cargo.toml), for About pages
 
 pub use secret::{SecretBuf, SecretString};
 pub use kdf::{MasterKey, DerivedKey, hmac_sha256, MAX_MASTER_KEY_BYTES, MAX_DERIVE_INPUT_BYTES};

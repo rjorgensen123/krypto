@@ -10,7 +10,7 @@ specific type or function, **[API](API.md)** is the reference.
 
 ```toml
 [dependencies]
-krypto = "0.6"
+krypto = "0.7"
 ```
 
 And first of all in `main`, before anything else:
