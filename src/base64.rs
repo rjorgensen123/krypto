@@ -167,9 +167,9 @@ mod tests {
 
     #[test]
     fn padding_rules_are_strict() {
-        assert!(matches!(decode("Zm9vYmE"), Err(Error::Format(_)))); // mangler pad
-        assert!(matches!(decode_nopad("Zm9vYmE="), Err(Error::Format(_)))); // har pad
-        assert!(matches!(decode("Zm9vY==="), Err(Error::Format(_)))); // for mye pad
+        assert!(matches!(decode("Zm9vYmE"), Err(Error::Format(_)))); // missing padding
+        assert!(matches!(decode_nopad("Zm9vYmE="), Err(Error::Format(_)))); // has padding
+        assert!(matches!(decode("Zm9vY==="), Err(Error::Format(_)))); // too much padding
     }
 
     #[test]

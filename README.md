@@ -87,7 +87,7 @@ cargo audit                    # RustSec advisory scan
 
 # Rust ↔ Python parity: pytest drives the real binary against independent
 # implementations (cryptography / argon2-cffi) — both directions; also a CI job
-python3 -m venv python/.venv && python/.venv/bin/pip install -r python/krav-ci.txt
+python3 -m venv python/.venv && python/.venv/bin/pip install -r python/requirements-ci.txt
 cargo build --bin krypto-cli && python/.venv/bin/pytest python/ -q
 ```
 

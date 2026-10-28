@@ -45,7 +45,6 @@ fn foreign_hash_gives_format_not_auth() {
 
 /// The three presets are a public contract: the parameters behind each name
 /// end up in the PHC string, so a consumer can see exactly what it got.
-/// (0.5.0: `Moderate` → `High`, and `Balanced` is new.)
 #[test]
 fn presets_encode_their_parameters_in_the_phc_string() {
     let pw = SecretString::from_string("preset-check".to_string()).unwrap();

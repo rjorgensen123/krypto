@@ -103,21 +103,7 @@ on top. If you need both TLS and secret handling, they belong together — but e
 
 ## Maturity
 
-The library is in active use and covers what is needed today. The format of encrypted data has been
-stable since early on.
-
-
-## Possible future extensions
-
-Not planned — but thought through, and the format is laid out so they can arrive without breakage:
-
-- **Multiple key generations in the store** (`active`/`historic`/`retired`). Rotation exists
-  today as an action (`reseal` and the store's `rotate`); this would let a store know several
-  generations at once, so re-encryption can happen gradually — and a leaked old backup can be
-  made worthless. The format already carries a generation id per entry, precisely for this.
-- **Peppered HMAC for passwords.** A second layer on top of Argon2id, keyed with a secret that
-  lives outside the database — whoever steals only the database then has nothing to brute-force
-  against. The pepper would live with whoever owns login policy, not in the library.
+The format of encrypted data has been stable since early on.
 
 ## Author
 

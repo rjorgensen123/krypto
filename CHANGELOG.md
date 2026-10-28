@@ -44,6 +44,16 @@ reading the number from there, so the promise is checked rather than assumed. Th
 build job now also builds the documentation with warnings as errors. The crate's
 top-level documentation linked to the private `ffi` module; it names it as text.
 
+### Changed — the documentation stands on its own
+
+Roadmap sections that did not hold are gone: "What does not exist yet" in
+`docs/Usage.md` listed key rotation, which has existed since 0.6.0, and "Possible
+future extensions" in `docs/Home.md` promised nothing. Notes about the names used
+before 0.5.0 are gone from the reference, the guides and the comments. Comments,
+test names and the CI file no longer refer to private systems, and two status
+sentences are removed. The Python parity requirements file is now
+`python/requirements-ci.txt` (it was `python/krav-ci.txt`).
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because

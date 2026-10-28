@@ -3,9 +3,8 @@
 //!
 //! This is one-way hashing to *verify* passwords — not encryption.
 //! (A peppered-HMAC layer on top of Argon2id is deliberately NOT built here:
-//! if the portfolio ever wants that two-layer defence, the pepper belongs in
-//! the consumer that owns login policy, not in this crate. Parked as a
-//! possible future extension — see docs/Home.md.)
+//! if an application wants that two-layer defence, the pepper belongs in
+//! the consumer that owns login policy, not in this crate.)
 
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
@@ -19,19 +18,14 @@ use crate::secret::SecretString;
 /// The crate owns the numbers; the consumer picks a profile and stores its
 /// **name**, never the parameters (they also live in the PHC string, so old
 /// hashes keep verifying unchanged after a profile revision).
-// 0.5.0: `Moderate` (256 MiB) was renamed to `High` — the name said "middle",
-// the numbers were the strictest we have. `Balanced` is NEW and is the middle
-// profile that was always missing.
 #[derive(Clone, Copy, Debug)]
 pub enum Preset {
     /// Interactive login: m = 64 MiB, t = 3, p = 2.
     Interactive,
     /// The middle ground: m = 128 MiB, t = 3, p = 3. For secrets worth more
     /// than a login round-trip but not worth 256 MiB per concurrent caller.
-    /// (Numbers set 2026-08-26; free to tune — the PHC string carries them.)
     Balanced,
     /// High-value / offline-attackable targets: m = 256 MiB, t = 4, p = 4.
-    /// (Named `Moderate` before 0.5.0 — same parameters, honest name.)
     High,
 }
 
@@ -107,7 +101,6 @@ pub fn verify(password: &SecretString, phc: &str) -> Result<(), Error> {
 /// Must be at least 16 bytes and is stored in plaintext next to the
 /// ciphertext. It is not a secret — its job is to make precomputed tables
 /// useless, and it does that just as well in the open.
-// 0.5.0: renamed from `utled_noekkel` (Norwegian → English; see CHANGELOG [0.5.0]).
 pub fn derive_key(
     password: &SecretString,
     salt: &[u8],

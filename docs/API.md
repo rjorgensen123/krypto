@@ -230,12 +230,12 @@ Argon2id, in **two roles that must not be confused**:
 | Give me the key this password unlocks | `derive_key` | **nothing** — only the salt |
 
 ```rust
-pub enum Preset { Interactive, Balanced, High }   // before 0.5.0: { Interactive, Moderate }
+pub enum Preset { Interactive, Balanced, High }
 
 pub fn hash(password: &SecretString, preset: Preset) -> Result<String, Error>;
 pub fn verify(password: &SecretString, phc: &str) -> Result<(), Error>;
 pub fn derive_key(password: &SecretString, salt: &[u8], preset: Preset)
-    -> Result<SecretBuf, Error>;   // named `utled_noekkel` before 0.5.0
+    -> Result<SecretBuf, Error>;
 ```
 
 - `verify` is constant-time. `Auth` means **wrong password**; `Format` means the PHC string itself
@@ -255,7 +255,7 @@ The crate owns the numbers. You pick a profile and store its **name**, not the n
 |---|---|---|
 | `Interactive` | 64 MiB (t=3, p=2) | login |
 | `Balanced` | 128 MiB (t=3, p=3) | the middle ground *(new in 0.5.0; p adjusted 2 → 3 in 0.6.0 — note that `derive_key` then yields a different key than 0.5.x)* |
-| `High` | 256 MiB (t=4, p=4) | high value, or anything an attacker can attack offline *(named `Moderate` before 0.5.0 — same numbers)* |
+| `High` | 256 MiB (t=4, p=4) | high value, or anything an attacker can attack offline |
 
 The floor is `m ≥ 64 MiB, t ≥ 2, p ≥ 1` — every preset sits on or above it. The numbers may be
 tuned: old PHC strings keep verifying unchanged (the parameters live in the string; *rehash on

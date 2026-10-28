@@ -88,10 +88,10 @@ def test_mac_matches_python_hkdf_hmac(master_file):
     path, master = master_file
     data = b"audit chain payload"
     out = run_ok(
-        ["mac", "--key-file", str(path), "--context", "l2/audit/v1", "--salt", "s1"],
+        ["mac", "--key-file", str(path), "--context", "example/audit/v1", "--salt", "s1"],
         data,
     ).decode().strip()
-    dk = hkdf_derive(master, b"l2/audit/v1", b"s1")
+    dk = hkdf_derive(master, b"example/audit/v1", b"s1")
     assert out == py_hmac.new(dk, data, hashlib.sha256).hexdigest()
 
 
@@ -270,7 +270,7 @@ def test_x25519_shared_matches_python(tmp_path):
 # Passwords — argon2id parity (derivation AND PHC hashing)
 # --------------------------------------------------------------------------- #
 
-# The preset numbers are the crate's public contract (API-krypto-v0.6.md).
+# The preset numbers are the crate's public contract (docs/API.md).
 PRESETS = {
     "interactive": dict(memory_cost=65_536, iterations=3, lanes=2),
     "balanced": dict(memory_cost=131_072, iterations=3, lanes=3),

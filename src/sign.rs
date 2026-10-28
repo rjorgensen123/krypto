@@ -21,7 +21,7 @@
 use crate::error::Error;
 use crate::secret::SecretBuf;
 
-/// Length of a raw Ed25519 seed (the private key as the services store it).
+/// Length of a raw Ed25519 seed (the private key in its stored form).
 pub const ED25519_SEED_LEN: usize = 32;
 /// Length of a raw Ed25519 public key.
 pub const ED25519_PUBLIC_LEN: usize = 32;

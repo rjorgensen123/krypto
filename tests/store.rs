@@ -26,8 +26,8 @@ fn put_get_roundtrip() {
     let path = store_path("rt");
     let mut s = SecretStore::open(&path, &mk).unwrap();
     let secret = SecretBuf::from_vec(b"ssh-private-key".to_vec()).unwrap();
-    s.put("device/pe1/ssh-key", &secret).unwrap();
-    let out = s.get("device/pe1/ssh-key").unwrap();
+    s.put("service/alpha/ssh-key", &secret).unwrap();
+    let out = s.get("service/alpha/ssh-key").unwrap();
     out.expose(|b| assert_eq!(b, b"ssh-private-key"));
     let _ = std::fs::remove_file(&path);
 }

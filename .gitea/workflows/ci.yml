@@ -99,14 +99,14 @@ jobs:
       - name: Build krypto-cli
         run: cargo build --locked --bin krypto-cli
 
-      # Pinned, like the Rust side: python/krav-ci.txt fixes exact versions of
+      # Pinned, like the Rust side: python/requirements-ci.txt fixes exact versions of
       # cryptography and argon2-cffi. These are not test dependencies — they
       # ARE the counterpart the parity tests check against.
       - name: Python + dependencies (pinned versions)
         run: |
           apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv
           python3 -m venv /tmp/venv
-          /tmp/venv/bin/pip install -q -r python/krav-ci.txt
+          /tmp/venv/bin/pip install -q -r python/requirements-ci.txt
 
       - name: Parity tests (pytest)
         run: /tmp/venv/bin/pytest python/ -q

@@ -4,7 +4,7 @@
 # they ARE the independent implementations the parity tests check krypto-cli
 # against. An unannounced version drift there is as serious as one in Cargo.lock.
 #
-# Usage:  python3 -m venv .venv && .venv/bin/pip install -r krav-ci.txt
+# Usage:  python3 -m venv .venv && .venv/bin/pip install -r requirements-ci.txt
 #         cargo build --bin krypto-cli && .venv/bin/pytest -q
 argon2-cffi==25.1.0
 argon2-cffi-bindings==25.1.0

@@ -207,8 +207,6 @@ let key = password::derive_key(&password, &salt, Preset::High)?;
 let master = MasterKey::from_bytes(key)?;
 ```
 
-*(Named `utled_noekkel` before 0.5.0 — same behavior, English name.)*
-
 The salt must be **at least 16 bytes** and is stored in plaintext next to the data. It is not a
 secret — its job is to make precomputed tables useless, and it does that just as well in the open.
 
@@ -224,7 +222,6 @@ code or your documentation — that makes two places to keep in sync, and sooner
 - `Interactive` — for login, where someone is waiting for an answer.
 - `Balanced` — the middle ground: worth more than a login, not worth 256 MiB per concurrent call.
 - `High` — for what is worth the most, or sits on a disk someone can walk away with.
-  *(Named `Moderate` before 0.5.0 — same numbers, honest name: it was never a middle option.)*
 
 **Store the profile's name** with the data where it is not self-evident. Then profiles can be
 tuned later without old data becoming unreadable. For password hashing you do not need to think
@@ -254,7 +251,7 @@ signature layer lives here, so you do not pull in a separate crypto library:
 ```rust
 use krypto::sign;
 
-// Ed25519 — raw 32-byte keys, the form the services distribute
+// Ed25519 — raw 32-byte keys, the form public keys are usually distributed in
 let (seed, public) = sign::ed25519_keypair()?;
 let sig = sign::ed25519_sign(&seed, message)?;
 sign::ed25519_verify(&public, message, &sig)?;        // Auth if it does not hold
@@ -387,22 +384,7 @@ None of them carry key material or plaintext. You can log them as they are.
 | **0.2.0** | Encryption, the blob format, master key and key derivation |
 | **0.1.0** | The two secret types · process hardening |
 
-**Upgrading to 0.5.0:** two names changed (`utled_noekkel` → `derive_key`, `Preset::Moderate` →
-`Preset::High`) — the compiler shows you every call site. Error messages are English; if your code
-matches on Norwegian substrings, adjust it. And **AEGIS blobs made before 0.5.0 must be
-re-encrypted** (open with 0.4.x, reseal with 0.5.0); XChaCha and AES-GCM blobs are unaffected. The
-blob format itself has been stable since 0.2. The full Norwegian ⇄ English table is in the
-repository changelog.
-
 One older exception is worth knowing: **0.4.3 tightened which names the store accepts** (see the
 rules above). If your code writes names with e.g. `æøå`, or names longer than 512 bytes, `put`
 will start failing. Existing data is unaffected — validation happens only on writes, so old names
 can still be read, listed and deleted.
-
----
-
-## What does not exist yet
-
-- **Key rotation.** The format is prepared — every blob carries its key generation — but actually
-  switching keys and re-encrypting is not built.
-- **A direct Python binding.** Today that path goes through the command-line tool.
