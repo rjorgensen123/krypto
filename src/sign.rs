@@ -118,7 +118,7 @@ pub fn ecdsa_p256_keypair() -> Result<(SecretBuf, Vec<u8>), Error> {
 
 fn ecdsa_public_from_key(key: &p256::ecdsa::SigningKey) -> Vec<u8> {
     key.verifying_key()
-        .to_encoded_point(false) // false = uncompressed (65 bytes, 0x04 …)
+        .to_sec1_point(false) // false = uncompressed (65 bytes, 0x04 …)
         .as_bytes()
         .to_vec()
 }

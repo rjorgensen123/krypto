@@ -7,8 +7,8 @@
 //! the consumer that owns login policy, not in this crate. Parked as a
 //! possible future extension — see docs/Home.md.)
 
-use argon2::password_hash::rand_core::OsRng;
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::phc::PasswordHash;
+use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::{Algorithm, Argon2, Params, Version};
 
 use crate::error::Error;
@@ -53,10 +53,10 @@ fn hasher(preset: Preset) -> Argon2<'static> {
 /// Hash a password → PHC string (includes salt + params). Use when creating
 /// or changing a password.
 pub fn hash(password: &SecretString, preset: Preset) -> Result<String, Error> {
-    let salt = SaltString::generate(&mut OsRng);
     password.expose_str(|pw| {
+        // `hash_password` draws a fresh 16-byte salt from the OS CSPRNG.
         hasher(preset)
-            .hash_password(pw.as_bytes(), &salt)
+            .hash_password(pw.as_bytes())
             .map(|h| h.to_string())
             .map_err(|e| Error::Hardening(format!("argon2 hashing failed: {e}")))
     })
@@ -75,7 +75,7 @@ pub fn verify(password: &SecretString, phc: &str) -> Result<(), Error> {
         // verify_password uses the params from the hash itself (parsed).
         match Argon2::default().verify_password(pw.as_bytes(), &parsed) {
             Ok(()) => Ok(()),
-            Err(PhError::Password) => Err(Error::Auth),
+            Err(PhError::PasswordInvalid) => Err(Error::Auth),
             Err(e) => Err(Error::Format(format!("cannot verify hash: {e}"))),
         }
     })

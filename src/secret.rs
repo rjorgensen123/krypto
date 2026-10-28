@@ -52,7 +52,7 @@ impl SecretBuf {
         let mut s = SecretBuf {
             buf: Self::locked_zeroed(len)?,
         };
-        getrandom::getrandom(&mut s.buf[..])
+        getrandom::fill(&mut s.buf[..])
             .map_err(|e| Error::Hardening(format!("getrandom failed: {e}")))?;
         Ok(s)
     }

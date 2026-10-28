@@ -68,7 +68,7 @@ pub fn seal(
     alg: Alg,
 ) -> Result<Vec<u8>, Error> {
     let mut nonce = [0u8; NONCE_FIELD];
-    getrandom::getrandom(&mut nonce[..alg.nonce_len()])
+    getrandom::fill(&mut nonce[..alg.nonce_len()])
         .map_err(|e| Error::Hardening(format!("getrandom failed: {e}")))?;
 
     let mut header = Vec::with_capacity(HEADER_LEN);
@@ -202,7 +202,11 @@ fn primitive_seal(
             use chacha20poly1305::{XChaCha20Poly1305, XNonce};
             let c = XChaCha20Poly1305::new_from_slice(key)
                 .map_err(|_| Error::Hardening("invalid key length".into()))?;
-            c.encrypt(XNonce::from_slice(nonce), Payload { msg: pt, aad })
+            // 0.7.2: the nonce conversion is fallible (the current `aead` dropped
+            // the panicking one), so a wrong length is `Format`, as for AEGIS-256.
+            let n = <&XNonce>::try_from(nonce)
+                .map_err(|_| Error::Format("XChaCha20-Poly1305 requires a 24 B nonce".into()))?;
+            c.encrypt(n, Payload { msg: pt, aad })
                 .map_err(|_| Error::Hardening("AEAD encryption failed".into()))
         }
         Alg::Aegis256 => {
@@ -221,11 +225,13 @@ fn primitive_seal(
             Ok(ct)
         }
         Alg::Aes256Gcm => {
-            use aes_gcm::aead::{Aead, KeyInit, Payload};
-            use aes_gcm::{Aes256Gcm, Nonce};
+            use aes_gcm::aead::{Aead, KeyInit, Nonce, Payload};
+            use aes_gcm::Aes256Gcm;
             let c = Aes256Gcm::new_from_slice(key)
                 .map_err(|_| Error::Hardening("invalid key length".into()))?;
-            c.encrypt(Nonce::from_slice(nonce), Payload { msg: pt, aad })
+            let n = <&Nonce<Aes256Gcm>>::try_from(nonce)
+                .map_err(|_| Error::Format("AES-256-GCM requires a 12 B nonce".into()))?;
+            c.encrypt(n, Payload { msg: pt, aad })
                 .map_err(|_| Error::Hardening("AEAD encryption failed".into()))
         }
     }
@@ -244,7 +250,10 @@ fn primitive_open(
             use chacha20poly1305::{XChaCha20Poly1305, XNonce};
             let c = XChaCha20Poly1305::new_from_slice(key)
                 .map_err(|_| Error::Hardening("invalid key length".into()))?;
-            c.decrypt(XNonce::from_slice(nonce), Payload { msg: body, aad })
+            // 0.7.2: fallible nonce conversion, see `primitive_seal`.
+            let n = <&XNonce>::try_from(nonce)
+                .map_err(|_| Error::Format("XChaCha20-Poly1305 requires a 24 B nonce".into()))?;
+            c.decrypt(n, Payload { msg: body, aad })
                 .map_err(|_| Error::Auth)
         }
         Alg::Aegis256 => {
@@ -265,11 +274,13 @@ fn primitive_open(
             cipher.decrypt(ct, tag_arr, aad).map_err(|_| Error::Auth)
         }
         Alg::Aes256Gcm => {
-            use aes_gcm::aead::{Aead, KeyInit, Payload};
-            use aes_gcm::{Aes256Gcm, Nonce};
+            use aes_gcm::aead::{Aead, KeyInit, Nonce, Payload};
+            use aes_gcm::Aes256Gcm;
             let c = Aes256Gcm::new_from_slice(key)
                 .map_err(|_| Error::Hardening("invalid key length".into()))?;
-            c.decrypt(Nonce::from_slice(nonce), Payload { msg: body, aad })
+            let n = <&Nonce<Aes256Gcm>>::try_from(nonce)
+                .map_err(|_| Error::Format("AES-256-GCM requires a 12 B nonce".into()))?;
+            c.decrypt(n, Payload { msg: body, aad })
                 .map_err(|_| Error::Auth)
         }
     }
@@ -286,7 +297,7 @@ mod official_vectors {
     use super::*;
 
     fn unhex(s: &str) -> Vec<u8> {
-        assert!(s.len() % 2 == 0, "odd hex length");
+        assert!(s.len().is_multiple_of(2), "odd hex length");
         (0..s.len())
             .step_by(2)
             .map(|i| u8::from_str_radix(&s[i..i + 2], 16).expect("valid hex"))

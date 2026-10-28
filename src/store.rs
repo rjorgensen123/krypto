@@ -78,9 +78,9 @@ impl<'a> SecretStore<'a> {
                 // The file does not exist → create a new, empty store.
                 let mut salt = [0u8; SALT_LEN];
                 let mut key_id = [0u8; KEY_ID_LEN];
-                getrandom::getrandom(&mut salt)
+                getrandom::fill(&mut salt)
                     .map_err(|e| Error::Hardening(format!("getrandom: {e}")))?;
-                getrandom::getrandom(&mut key_id)
+                getrandom::fill(&mut key_id)
                     .map_err(|e| Error::Hardening(format!("getrandom: {e}")))?;
                 let store = SecretStore {
                     path,
@@ -201,9 +201,8 @@ impl<'a> SecretStore<'a> {
         // 2. Build the new generation in memory.
         let mut salt = [0u8; SALT_LEN];
         let mut key_id = [0u8; KEY_ID_LEN];
-        getrandom::getrandom(&mut salt).map_err(|e| Error::Hardening(format!("getrandom: {e}")))?;
-        getrandom::getrandom(&mut key_id)
-            .map_err(|e| Error::Hardening(format!("getrandom: {e}")))?;
+        getrandom::fill(&mut salt).map_err(|e| Error::Hardening(format!("getrandom: {e}")))?;
+        getrandom::fill(&mut key_id).map_err(|e| Error::Hardening(format!("getrandom: {e}")))?;
         let mut new_store = SecretStore {
             path: self.path.clone(),
             master: new_master,

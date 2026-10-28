@@ -54,7 +54,7 @@ pub fn encode_nopad(bytes: &[u8]) -> String {
 /// characters, missing/misplaced padding or non-zero discarded trailing bits
 /// are `Error::Format` — never a guess.
 pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
-    if s.len() % 4 != 0 {
+    if !s.len().is_multiple_of(4) {
         return Err(Error::Format(format!(
             "base64 length {} is not a multiple of 4 (padded form required)",
             s.len()

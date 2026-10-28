@@ -37,8 +37,7 @@ pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 /// value must stay secret, use `SecretBuf::random` instead.
 pub fn random_bytes(len: usize) -> Result<Vec<u8>, Error> {
     let mut out = vec![0u8; len];
-    getrandom::getrandom(&mut out)
-        .map_err(|e| Error::Hardening(format!("getrandom failed: {e}")))?;
+    getrandom::fill(&mut out).map_err(|e| Error::Hardening(format!("getrandom failed: {e}")))?;
     Ok(out)
 }
 

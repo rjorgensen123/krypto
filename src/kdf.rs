@@ -132,9 +132,9 @@ impl MasterKey {
 /// Keyed MAC, not a plain hash, so someone who can edit the data
 /// cannot simply recompute the chain without the key.
 pub fn hmac_sha256(key: &DerivedKey, data: &[u8]) -> Result<[u8; 32], Error> {
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     key.with_key(|k| {
-        let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(k)
+        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(k)
             .map_err(|_| Error::Hardening("invalid HMAC key length".into()))?;
         mac.update(data);
         let out = mac.finalize().into_bytes();

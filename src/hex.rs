@@ -21,7 +21,7 @@ pub fn encode(bytes: &[u8]) -> String {
 /// Decode canonical (lowercase) hex. Fail-closed: odd length, uppercase or
 /// any non-hex character is `Error::Format` — never a guess.
 pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err(Error::Format(format!(
             "hex string has odd length {}",
             s.len()
@@ -29,7 +29,8 @@ pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
     }
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(s.len() / 2);
-    for pair in bytes.chunks_exact(2) {
+    let (pairs, _) = bytes.as_chunks::<2>();
+    for pair in pairs {
         let hi = nibble(pair[0])?;
         let lo = nibble(pair[1])?;
         out.push((hi << 4) | lo);

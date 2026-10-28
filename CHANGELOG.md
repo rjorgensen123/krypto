@@ -4,6 +4,39 @@ Every notable change to this crate is recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.2] — 2026-10-28
+
+*Moves every RustCrypto and dalek dependency to its current release line, which
+fixes RUSTSEC-2026-0387. Not one public signature moved, and every output is the
+same as before: the official vectors in the test suite and the Python parity suite
+pin it.*
+
+### ⚠ Security — dependencies on the current RustCrypto line (RUSTSEC-2026-0387)
+
+`crypto-bigint` 0.5, which krypto pulled in through `p256` 0.13, has operations
+meant to run in constant time that can branch on secret values
+(RUSTSEC-2026-0387). The fix exists only from `crypto-bigint` 0.7.6, which needs
+`p256` 0.14. krypto now requires `p256` 0.14, `aes-gcm` 0.11, `chacha20poly1305`
+0.11, `hkdf` 0.13, `hmac` 0.13, `sha2` 0.11, `argon2` 0.6, `ed25519-dalek` 3,
+`x25519-dalek` 3 and `getrandom` 0.4, all on the same line, so a consumer that
+also uses that line carries one copy of it, not two.
+
+None of these types appear in krypto's public API. The blob format, key
+derivation, MACs, signatures, key agreement and password hashes produce exactly
+what they did.
+
+### ⚠ Changed — `rust-version` is 1.89
+
+The current dependency line needs Rust 1.89 (`aes` 0.9). `rust-version` was 1.74;
+a toolchain older than 1.89 cannot build this release.
+
+### Changed — a wrong nonce length is a `Format` error
+
+The current `aead` releases replace the slice conversion that panicked on a wrong
+length with a fallible one. XChaCha20-Poly1305 and AES-256-GCM now return
+`Error::Format` for a nonce of the wrong length, as AEGIS-256 already did. No
+public function can hand them one.
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because
