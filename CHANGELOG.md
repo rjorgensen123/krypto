@@ -37,6 +37,13 @@ length with a fallible one. XChaCha20-Poly1305 and AES-256-GCM now return
 `Error::Format` for a nonce of the wrong length, as AEGIS-256 already did. No
 public function can hand them one.
 
+### Added — CI checks the declared `rust-version` and the docs
+
+A new job builds and tests on the `rust-version` that `Cargo.toml` declares,
+reading the number from there, so the promise is checked rather than assumed. The
+build job now also builds the documentation with warnings as errors. The crate's
+top-level documentation linked to the private `ffi` module; it names it as text.
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because

@@ -41,6 +41,40 @@ jobs:
       - name: Test
         run: cargo test --locked --all-targets
 
+      - name: Docs (warnings are errors)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --no-deps --locked
+
+  # The rust-version that Cargo.toml promises, built and tested as it stands: a
+  # promise no job checks is one nobody knows is kept. The version is read from
+  # Cargo.toml, so it is written in one place only.
+  msrv:
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1-bookworm
+      options: --ulimit memlock=-1:-1
+    steps:
+      - name: Checkout (no third-party action)
+        run: |
+          git config --global --add safe.directory '*'
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
+          git -c http.extraheader="Authorization: basic ${AUTH}" \
+              fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q --detach FETCH_HEAD
+
+      - name: Install the declared rust-version
+        run: |
+          MSRV=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
+          test -n "$MSRV"
+          rustup toolchain install "$MSRV" --profile minimal
+          echo "MSRV=$MSRV" >> "$GITHUB_ENV"
+
+      - name: Test on the declared rust-version
+        run: cargo +"$MSRV" test --locked --all-targets
+
   # Rust <-> Python parity (0.5.0): pytest drives the REAL binary as a
   # subprocess, the way a non-Rust caller does, and checks every answer against
   # an INDEPENDENT implementation (cryptography/argon2-cffi/hashlib), both

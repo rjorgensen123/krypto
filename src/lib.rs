@@ -14,7 +14,7 @@
 //! - Plaintext is only ever exposed through [`SecretBuf::expose`] / [`SecretString::expose_str`].
 //! - `Debug`/`Display` are always redacted (`[REDACTED]`), never contents.
 //! - No `Clone`, no `Serialize`.
-//! - All `unsafe` lives in [`ffi`]; the rest of the crate is `#![deny(unsafe_code)]`.
+//! - All `unsafe` lives in the private `ffi` module; the rest of the crate is `#![deny(unsafe_code)]`.
 
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
