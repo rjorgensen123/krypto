@@ -54,6 +54,14 @@ test names and the CI file no longer refer to private systems, and two status
 sentences are removed. The Python parity requirements file is now
 `python/requirements-ci.txt` (it was `python/krav-ci.txt`).
 
+### Changed — `aegis` is required at 0.9.20
+
+The manifest asked for `aegis = "0"`, which accepts any 0.x release; under Cargo's
+rules each new 0.y may break, so a consumer could resolve an untested one. It now
+asks for 0.9.20, the current release, and stays within 0.9. `libc` was listed
+under both `[dependencies]` and `[dev-dependencies]`; the second entry is gone,
+since tests already see the first.
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because
