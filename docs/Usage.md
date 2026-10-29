@@ -180,6 +180,14 @@ name in the file, `get` fails with `Auth`. Writes are atomic — either the old 
 new one, never half of one. The file gets mode 0600, and an existing one with wider permissions is
 set to 0600 when you open it.
 
+**One handle per file.** The store reads the whole file into memory and writes the whole file
+back, so two handles on the same file would overwrite each other's writes. Making sure you open a
+file only once at a time is your job. krypto also guards against it: while a handle lives, a second
+`open` of the same file — in your process or another — fails with `Io` (`WouldBlock`). You can rely
+on that, or also keep to one handle in your own code; that is your choice. Drop the handle to let
+the next one in. The guard is a lock on an empty `.<name>.lock` beside the file, which the kernel
+releases when the handle or the process goes, so it never gets stuck.
+
 **Rules for names:** non-empty, at most 512 bytes, printable ASCII only (`[\x20-\x7e]`). Names are
 not secret — they are listed by `list()` and may end up in the caller's log. A name with a newline
 could have shifted lines in someone else's log, and an empty name is nothing you can look up

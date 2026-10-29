@@ -235,6 +235,17 @@ Name rules: non-empty, ≤ 512 bytes, printable ASCII only (`[\x20-\x7e]`) — n
 addresses, not secrets, and get listed out. Checked on read as well as on write
 *(0.7.0)*: a store file need not have come from `put`.
 
+*(0.7.2)* **One handle per file.** A `SecretStore` reads the whole file into memory and writes the
+whole file back, so two handles on one file would overwrite each other's writes. Keeping to one
+handle per file is the caller's responsibility. krypto also guards it on its side: `open` takes an
+exclusive lock for as long as the handle lives, and a second `open` of the same file, in this or
+another process, fails at once with `Error::Io` (`WouldBlock`). You can rely on that guard, or keep
+to one handle in your own code as well — your choice. The lock is the kernel's (`flock`) on an
+empty `.<name>.lock` beside the store file: it goes with the handle or the process, also after a
+crash, so it never goes stale. If the directory cannot be written, `open` goes ahead without it,
+since nothing can be saved there either. On a network filesystem the lock may not hold between
+machines.
+
 `rotate` *(0.6.0)* re-encrypts the whole store under a new master key: everything is decrypted
 with the old one FIRST (if anything fails, the file is untouched), and a completely new file
 with a fresh salt and a fresh generation id replaces the old one in a single atomic rename —

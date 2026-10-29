@@ -153,6 +153,19 @@ cap now fails with `Format` and changes nothing. The directory is synced after
 the rename, so a crash right after a write no longer loses it. An existing store
 file with wider permissions gets 0600 when opened, if the process owns it.
 
+### ⚠ Fixed — two handles on one `SecretStore` file no longer lose writes
+
+A store reads its whole file into memory and writes the whole file back. Two
+handles on the same file, in one process or two, therefore overwrote each
+other's writes without an error, and in one process they could even report a
+lost write as stored and a stored one as failed. `open` now takes an exclusive
+lock for as long as the handle lives; a second `open` of the same file fails
+with `Error::Io` (`WouldBlock`) until the first handle is dropped, and `rotate`
+passes the lock on. The lock is the kernel's, on an empty `.<name>.lock` beside
+the store file, so it goes away with the handle or the process and never goes
+stale. Keeping to one handle per file is still the caller's responsibility;
+krypto now guards it too.
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because

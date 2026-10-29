@@ -306,6 +306,7 @@ fn rotate_reencrypts_everything_under_the_new_master() {
         .unwrap()
         .expose(|b| assert_eq!(b, b"first"));
     assert_eq!(rotated.list(""), vec!["a".to_string(), "b".to_string()]);
+    drop(rotated); // one handle per file (0.7.2)
 
     // Reopening the FILE with the new master works; with the old master the
     // per-name DEKs no longer match → Auth on get (the file is one generation).
@@ -314,6 +315,7 @@ fn rotate_reencrypts_everything_under_the_new_master() {
         .get("b")
         .unwrap()
         .expose(|b| assert_eq!(b, b"second"));
+    drop(reopened);
     let stale = SecretStore::open(&path, &old_mk).unwrap();
     assert!(matches!(stale.get("a"), Err(Error::Auth)));
 
@@ -330,6 +332,8 @@ fn rotate_with_the_wrong_master_leaves_the_file_untouched() {
     store
         .put("a", &SecretBuf::from_vec(b"keep me".to_vec()).unwrap())
         .unwrap();
+
+    drop(store); // one handle per file (0.7.2)
 
     // "Rotating" a store opened with the WRONG master fails on decrypt —
     // fail-closed, nothing written.
@@ -423,4 +427,92 @@ fn a_store_never_grows_past_what_open_accepts() {
     let s = SecretStore::open(&path, &mk).unwrap();
     assert_eq!(s.list("big"), vec!["big0", "big1"]);
     let _ = std::fs::remove_file(&path);
+}
+
+/// 0.7.2: one handle per file. A second `open` of the same file while the
+/// first handle lives fails with `Io` (`WouldBlock`), instead of the two
+/// overwriting each other's writes; once the first is dropped, it opens.
+#[test]
+fn a_second_open_of_the_same_file_fails_while_the_first_lives() {
+    let mk = master("lock");
+    let path = store_path("lock");
+    let first = SecretStore::open(&path, &mk).unwrap();
+    match SecretStore::open(&path, &mk) {
+        Err(Error::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::WouldBlock),
+        other => panic!("expected Io(WouldBlock), got {:?}", other.map(|_| ())),
+    }
+    drop(first);
+    SecretStore::open(&path, &mk).unwrap();
+    let _ = std::fs::remove_file(&path);
+}
+
+/// 0.7.2: the handle `rotate` returns keeps the file's lock.
+#[test]
+fn rotate_keeps_the_lock() {
+    let old_mk = master_with("lock-rot-old", 9);
+    let new_mk = master_with("lock-rot-new", 10);
+    let path = store_path("lock-rot");
+    let rotated = SecretStore::open(&path, &old_mk)
+        .unwrap()
+        .rotate(&new_mk)
+        .unwrap();
+    assert!(matches!(
+        SecretStore::open(&path, &new_mk),
+        Err(Error::Io(_))
+    ));
+    drop(rotated);
+    SecretStore::open(&path, &new_mk).unwrap();
+    let _ = std::fs::remove_file(&path);
+}
+
+/// 0.7.2: two threads that each open, put and drop the same file lose
+/// nothing: a thread waits for its turn instead of overwriting the other.
+#[test]
+fn two_threads_writing_the_same_file_lose_nothing() {
+    let path = store_path("lock-threads");
+    let writer = |prefix: &'static str, path: std::path::PathBuf| {
+        std::thread::spawn(move || {
+            let mk = master(prefix);
+            for i in 0..20 {
+                loop {
+                    match SecretStore::open(&path, &mk) {
+                        Ok(mut s) => {
+                            let v = SecretBuf::from_vec(vec![b'v'; 64]).unwrap();
+                            s.put(&format!("{prefix}{i}"), &v).unwrap();
+                            break;
+                        }
+                        Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::yield_now()
+                        }
+                        Err(e) => panic!("open failed: {e}"),
+                    }
+                }
+            }
+        })
+    };
+    let a = writer("a", path.clone());
+    let b = writer("b", path.clone());
+    a.join().unwrap();
+    b.join().unwrap();
+
+    let mk = master("check");
+    let s = SecretStore::open(&path, &mk).unwrap();
+    assert_eq!(s.list("a").len(), 20);
+    assert_eq!(s.list("b").len(), 20);
+    let _ = std::fs::remove_file(&path);
+}
+
+/// 0.7.2: the lock file is private, and it stays after the handle is gone;
+/// the kernel lock goes away with the handle, so the file never blocks.
+#[cfg(unix)]
+#[test]
+fn the_lock_file_is_private_and_never_goes_stale() {
+    let mk = master("lockfile");
+    let dir = store_dir("lockfile");
+    let path = dir.join("store");
+    drop(SecretStore::open(&path, &mk).unwrap());
+    let lock = dir.join(".store.lock");
+    assert_eq!(mode_of(&lock), 0o600);
+    SecretStore::open(&path, &mk).unwrap();
+    let _ = std::fs::remove_dir_all(&dir);
 }

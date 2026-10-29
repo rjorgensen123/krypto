@@ -5,7 +5,8 @@
 //! (`HKDF(master, salt, info = "krypto/store/v1|" + name)`). That binds the
 //! value to its name: a blob cannot be moved to another name without `open`
 //! failing with `Auth`. Key names are plaintext (addresses, not secrets).
-//! Writes are atomic (tmp + fsync + rename), file mode 0600.
+//! Writes are atomic (tmp + fsync + rename), file mode 0600. One handle per
+//! file at a time, held by a lock (0.7.2).
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -55,12 +56,21 @@ fn validate_name(name: &str) -> Result<(), Error> {
 }
 
 /// File-based, encrypted KV store. The master key is borrowed for the store's lifetime.
+///
+/// One handle per file (0.7.2). A store reads the whole file into memory and
+/// writes the whole file back, so two handles on one file would overwrite each
+/// other's writes. The caller is responsible for not opening a file twice at
+/// once; krypto also guards against it, with a lock taken in [`SecretStore::open`].
 pub struct SecretStore<'a> {
     path: PathBuf,
     master: &'a MasterKey,
     salt: [u8; SALT_LEN],
     key_id: [u8; KEY_ID_LEN],
     entries: HashMap<String, Vec<u8>>, // name -> FAFN blob
+    /// The lock that keeps this file to this handle, held while it lives
+    /// (0.7.2). `None` only when the directory cannot be written, so nothing
+    /// can be saved there either.
+    lock: Option<std::fs::File>,
 }
 
 impl<'a> SecretStore<'a> {
@@ -70,12 +80,18 @@ impl<'a> SecretStore<'a> {
     /// ELOOP, …) is propagated instead of being treated as "empty store", so we
     /// never rename a fresh empty store over an existing one we simply failed
     /// to read.
+    ///
+    /// (0.7.2) Takes an exclusive lock on the file for as long as the handle
+    /// lives. If another handle, in this or another process, holds it, `open`
+    /// fails at once with [`Error::Io`] (`WouldBlock`) instead of letting the two
+    /// overwrite each other's writes.
     pub fn open(path: impl AsRef<Path>, master: &'a MasterKey) -> Result<Self, Error> {
         let path = path.as_ref().to_path_buf();
+        let lock = take_lock(&path)?;
         match read_capped(&path, MAX_STORE_BYTES)? {
             Some(data) => {
                 make_private(&path)?;
-                Self::load(path, master, &data)
+                Self::load(path, master, &data, lock)
             }
             None => {
                 // The file does not exist → create a new, empty store.
@@ -91,6 +107,7 @@ impl<'a> SecretStore<'a> {
                     salt,
                     key_id,
                     entries: HashMap::new(),
+                    lock,
                 };
                 store.persist()?;
                 Ok(store)
@@ -212,6 +229,7 @@ impl<'a> SecretStore<'a> {
             salt,
             key_id,
             entries: HashMap::new(),
+            lock: self.lock, // the new handle keeps the file's lock (0.7.2)
         };
         for (name, secret) in &plain {
             let dek = new_store.dek_for(name)?;
@@ -233,7 +251,12 @@ impl<'a> SecretStore<'a> {
         self.master.derive(&info, &self.salt)
     }
 
-    fn load(path: PathBuf, master: &'a MasterKey, data: &[u8]) -> Result<Self, Error> {
+    fn load(
+        path: PathBuf,
+        master: &'a MasterKey,
+        data: &[u8],
+        lock: Option<std::fs::File>,
+    ) -> Result<Self, Error> {
         if data.len() < HEADER_LEN {
             return Err(Error::Format("store header truncated".into()));
         }
@@ -297,6 +320,7 @@ impl<'a> SecretStore<'a> {
             salt,
             key_id,
             entries,
+            lock,
         })
     }
 
@@ -348,6 +372,95 @@ fn read_capped(path: &Path, cap: usize) -> Result<Option<Vec<u8>>, Error> {
     Ok(Some(bytes))
 }
 
+/// The directory and file name of a store path.
+fn dir_and_name(path: &Path) -> (PathBuf, &str) {
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let fname = path.file_name().and_then(|s| s.to_str()).unwrap_or("store");
+    (dir, fname)
+}
+
+/// Take the lock that keeps a store file to one handle at a time (0.7.2).
+///
+/// The lock is the kernel's (`flock`) on an empty `.<name>.lock` beside the
+/// store file, not on the file itself, because every write replaces that.
+/// The kernel drops it when the handle is dropped or the process ends, even in
+/// a crash, so the lock file never goes stale; it is never deleted. `None`
+/// when the directory cannot be written: nothing can be saved there either.
+fn take_lock(path: &Path) -> Result<Option<std::fs::File>, Error> {
+    use std::fs::TryLockError;
+    let (dir, fname) = dir_and_name(path);
+    let lock_path = dir.join(format!(".{fname}.lock"));
+    for _ in 0..3 {
+        let Some(f) = open_lock_file(&lock_path)? else {
+            return Ok(None);
+        };
+        match f.try_lock() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => {
+                return Err(Error::Io(std::io::Error::new(
+                    std::io::ErrorKind::WouldBlock,
+                    "the store file is already open, in this or another process",
+                )))
+            }
+            Err(TryLockError::Error(e)) => return Err(Error::Io(e)),
+        }
+        // The file at the path must still be the one now locked. If someone
+        // replaced or removed it meanwhile, another handle could lock the new
+        // one, so take the lock again.
+        if is_same_file(&f, &lock_path)? {
+            return Ok(Some(f));
+        }
+    }
+    Err(Error::Io(std::io::Error::other(
+        "the store's lock file keeps being replaced",
+    )))
+}
+
+/// Open or create the lock file. `None` when it does not exist and cannot be
+/// created, which means the directory cannot be written.
+fn open_lock_file(lock_path: &Path) -> Result<Option<std::fs::File>, Error> {
+    use std::io::ErrorKind;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true).write(true).create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    match opts.open(lock_path) {
+        Ok(f) => Ok(Some(f)),
+        Err(e) if e.kind() == ErrorKind::ReadOnlyFilesystem => Ok(None),
+        // Not writable for us: an existing lock file can still be locked
+        // through a read-only handle; a missing one means a read-only directory.
+        Err(e) if e.kind() == ErrorKind::PermissionDenied => match std::fs::File::open(lock_path) {
+            Ok(f) => Ok(Some(f)),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(Error::Io(e)),
+        },
+        Err(e) => Err(Error::Io(e)),
+    }
+}
+
+#[cfg(unix)]
+fn is_same_file(f: &std::fs::File, path: &Path) -> Result<bool, Error> {
+    use std::os::unix::fs::MetadataExt;
+    let held = f.metadata()?;
+    match std::fs::metadata(path) {
+        Ok(now) => Ok(held.dev() == now.dev() && held.ino() == now.ino()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(Error::Io(e)),
+    }
+}
+
+#[cfg(not(unix))]
+fn is_same_file(_f: &std::fs::File, _path: &Path) -> Result<bool, Error> {
+    Ok(true)
+}
+
 /// Give an existing store file mode 0600, as every write does (0.7.2). A file
 /// this process does not own is left as it is: changing it is not its right,
 /// and reading it must still work.
@@ -377,12 +490,7 @@ fn make_private(_path: &Path) -> Result<(), Error> {
 /// the rename the tmp file is removed, so an aborted write leaves no `.tmp-*`
 /// files behind.
 fn atomic_write(path: &Path, data: &[u8]) -> Result<(), Error> {
-    let dir = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-    let fname = path.file_name().and_then(|s| s.to_str()).unwrap_or("store");
+    let (dir, fname) = dir_and_name(path);
     // An unpredictable name, and the file must be new (0.7.2): a symlink or a
     // file planted where the tmp file goes is refused, never followed or
     // reused, so the tmp file is always this write's own and always 0600.
