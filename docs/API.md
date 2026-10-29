@@ -189,6 +189,11 @@ magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciph
   yields `Auth`, never a mis-decrypt.
 - The nonce is random per blob from the OS CSPRNG. The 32-byte field is used partially:
   AEGIS-256 all 32, XChaCha 24, AES-GCM 12 — the rest zero.
+- *(0.7.2)* **AES-256-GCM: at most 2³² blobs per key.** With a 12-byte random nonce, NIST SP 800-38D
+  (§8.3) allows one key at most 2³² encryptions. Beyond that a repeated nonce becomes too likely, and
+  one lets an attacker read the XOR of two plaintexts and forge blobs. krypto keeps no count — the
+  caller knows its volume. AEGIS-256 (32-byte nonce) and XChaCha (24-byte) have no limit that matters
+  in practice.
 - **Verified against official vectors** (0.5.0): AEGIS-256 against `draft-irtf-cfrg-aegis-aead`,
   XChaCha against draft-arciszewski A.1, AES-256-GCM against NIST CAVS. ⚠ 0.5.0 fixed a
   key/nonce swap in the AEGIS layer — AEGIS blobs from ≤ 0.4.4 yield `Auth` on ≥ 0.5.0 and must

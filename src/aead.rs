@@ -31,6 +31,12 @@ pub enum Alg {
     /// Variant (format-preserving exit) — `alg_id` 2.
     XChaCha20Poly1305,
     /// Interop bridge for peers that speak only AES-GCM (NIST SP 800-38D) — `alg_id` 3.
+    ///
+    /// (0.7.2) Its nonce is 12 random bytes, so one key should seal at most
+    /// 2^32 blobs (NIST SP 800-38D, section 8.3). Beyond that, two blobs sharing
+    /// a nonce becomes too likely, and a repeated nonce lets an attacker read
+    /// the XOR of the two plaintexts and forge blobs. krypto keeps no count; for
+    /// large volumes use [`Alg::Aegis256`], or derive a new key in time.
     Aes256Gcm,
 }
 

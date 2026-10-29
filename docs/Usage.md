@@ -139,7 +139,9 @@ that is discovered when you call `open` — as an authentication failure, never 
 
 - `XChaCha20Poly1305` — an exit if the analysis of the default should ever turn. Same format, so
   you can switch without converting anything.
-- `Aes256Gcm` — to talk to systems that require exactly that one.
+- `Aes256Gcm` — to talk to systems that require exactly that one. One key should seal at most
+  2³² (about 4.3 billion) blobs with it, because its nonce is only 12 bytes; krypto does not count
+  for you. If you seal more than that, use the default or derive a new key in time.
 
 The blob says for itself which one was used, so the reader does not need to know in advance.
 

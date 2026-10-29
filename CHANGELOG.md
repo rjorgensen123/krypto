@@ -120,6 +120,15 @@ optimised build, two copies remained once the key itself was dropped. `derive`
 now overwrites that memory with zeros when HKDF returns. The overwrite is sized
 to what HKDF uses and adds about 0.25 µs to a call that takes 13 µs.
 
+### Added — the per-key limit of AES-256-GCM is documented, and fresh nonces are tested
+
+With a 12-byte random nonce, one AES-256-GCM key should seal at most 2³² blobs
+(NIST SP 800-38D, section 8.3); a repeated nonce lets an attacker read the XOR
+of two plaintexts and forge blobs. The limit was written nowhere. It now stands
+on `Alg::Aes256Gcm`, in the API reference and in the guide. krypto keeps no
+count; the caller knows its volume. A new test checks that every `seal` draws
+its own nonce, for all three algorithms.
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because

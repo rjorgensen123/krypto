@@ -90,6 +90,27 @@ fn header_tampering_gives_auth_error() {
     }
 }
 
+/// 0.7.2: `seal` draws a fresh nonce for every blob. Two seals of the same
+/// plaintext under the same key must differ in the nonce field, for every
+/// algorithm; a nonce that stopped changing would pass every other test.
+#[test]
+fn every_seal_gets_its_own_nonce() {
+    let mk = test_master("nonce-unique");
+    let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
+    let key_id = [1u8; 16];
+    let secret = SecretBuf::from_vec(b"same plaintext".to_vec()).unwrap();
+    for alg in [Alg::Aegis256, Alg::XChaCha20Poly1305, Alg::Aes256Gcm] {
+        let a = seal(&dk, &key_id, &secret, alg).unwrap();
+        let b = seal(&dk, &key_id, &secret, alg).unwrap();
+        // The nonce field is bytes 22..54 (magic 4 + version 1 + alg 1 + key id 16).
+        assert_ne!(
+            a[22..54],
+            b[22..54],
+            "{alg:?}: two seals got the same nonce"
+        );
+    }
+}
+
 #[test]
 fn nonce_tampering_gives_auth_error() {
     // The nonce field is part of the header, which is AAD → tampering must give Auth.
