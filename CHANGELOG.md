@@ -113,6 +113,13 @@ ordinary memory and copied it into locked memory; they now write it straight
 into locked memory, so no unlocked copy exists and a failure leaves nothing
 behind.
 
+### Fixed — `MasterKey::derive` wipes what HKDF leaves on the stack
+
+HKDF left copies of the derived key in the stack memory it had used: in an
+optimised build, two copies remained once the key itself was dropped. `derive`
+now overwrites that memory with zeros when HKDF returns. The overwrite is sized
+to what HKDF uses and adds about 0.25 µs to a call that takes 13 µs.
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because

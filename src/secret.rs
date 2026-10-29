@@ -147,3 +147,13 @@ impl fmt::Display for SecretString {
         write!(f, "SecretString([REDACTED], len={})", self.inner.len())
     }
 }
+
+/// Overwrite `N` bytes of the stack below the caller with zeros (0.7.2).
+/// Some dependencies leave copies of the key material they work on in the
+/// stack frames they used. The function that called them calls this once
+/// they have returned, with an `N` that covers the stack the dependency uses.
+#[inline(never)]
+pub(crate) fn scrub_stack<const N: usize>() {
+    let mut area = [0u8; N];
+    area.zeroize();
+}

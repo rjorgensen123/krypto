@@ -9,7 +9,6 @@
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::{Algorithm, Argon2, Params, Version};
-use zeroize::Zeroize;
 
 use crate::error::Error;
 use crate::secret::SecretString;
@@ -56,14 +55,6 @@ const SCRUB_BYTES: usize = 16 * 1024;
 #[cfg(debug_assertions)]
 const SCRUB_BYTES: usize = 128 * 1024;
 
-/// Overwrite `SCRUB_BYTES` of the stack below the caller with zeros (0.7.2).
-/// Called once argon2 has returned, on every path.
-#[inline(never)]
-fn scrub_stack() {
-    let mut area = [0u8; SCRUB_BYTES];
-    area.zeroize();
-}
-
 /// Hash a password → PHC string (includes salt + params). Use when creating
 /// or changing a password.
 pub fn hash(password: &SecretString, preset: Preset) -> Result<String, Error> {
@@ -74,7 +65,7 @@ pub fn hash(password: &SecretString, preset: Preset) -> Result<String, Error> {
             .map(|h| h.to_string())
             .map_err(|e| Error::Hardening(format!("argon2 hashing failed: {e}")))
     });
-    scrub_stack();
+    crate::secret::scrub_stack::<SCRUB_BYTES>();
     res
 }
 
@@ -95,7 +86,7 @@ pub fn verify(password: &SecretString, phc: &str) -> Result<(), Error> {
             Err(e) => Err(Error::Format(format!("cannot verify hash: {e}"))),
         }
     });
-    scrub_stack();
+    crate::secret::scrub_stack::<SCRUB_BYTES>();
     res
 }
 
@@ -144,7 +135,7 @@ pub fn derive_key(
                 .map_err(|e| Error::Format(format!("argon2 derivation failed: {e}")))
         })
     });
-    scrub_stack();
+    crate::secret::scrub_stack::<SCRUB_BYTES>();
     res
 }
 

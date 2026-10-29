@@ -11,6 +11,15 @@ use zeroize::Zeroizing;
 use crate::error::Error;
 use crate::secret::SecretBuf;
 
+/// How much of the stack below `derive` is overwritten after HKDF (0.7.2).
+/// HKDF, through HMAC-SHA256, leaves copies of the derived key in the stack
+/// frames it used. The size covers all the stack it uses, with a little to
+/// spare: about 1.3 KiB in an optimised build and 6.9 KiB in a debug build.
+#[cfg(not(debug_assertions))]
+const HKDF_SCRUB_BYTES: usize = 2 * 1024;
+#[cfg(debug_assertions)]
+const HKDF_SCRUB_BYTES: usize = 8 * 1024;
+
 /// Upper bound on a master-key file. A key is 32–64 bytes; 4 KiB is generous
 /// slack and prevents OOM on `/dev/zero`/a bloated file (bounded input).
 pub const MAX_MASTER_KEY_BYTES: usize = 4096;
@@ -112,7 +121,7 @@ impl MasterKey {
                 )));
             }
         }
-        self.key.expose(|ikm| {
+        let res = self.key.expose(|ikm| {
             let hk = Hkdf::<Sha256>::new(Some(salt), ikm);
             // The key is written straight into locked memory (0.7.2).
             SecretBuf::fill_with(32, |okm| {
@@ -120,7 +129,9 @@ impl MasterKey {
                     .map_err(|_| Error::Hardening("HKDF expand failed".into()))
             })
             .map(|key| DerivedKey { key })
-        })
+        });
+        crate::secret::scrub_stack::<HKDF_SCRUB_BYTES>();
+        res
     }
 }
 
