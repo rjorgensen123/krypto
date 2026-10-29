@@ -141,6 +141,18 @@ beside the version each part carries; the guide's version table gains 0.6.1 to
 0.7.2; an empty `salt` for `derive` is documented as allowed; and the cli no
 longer claims to mirror the whole Rust surface.
 
+### Fixed — `SecretStore` no longer follows planted files, outgrows itself or stays open to others
+
+The tmp file a write goes through had a predictable name and was opened even if
+something was already there: a symlink planted at that name made the store
+overwrite the file it pointed to, and a planted file left the store with that
+file's permissions. The tmp file now has an unpredictable name and must be new.
+Ordinary puts could grow the store past `MAX_STORE_BYTES`, after which `open`
+refused it and every secret in it was out of reach; a put that would cross the
+cap now fails with `Format` and changes nothing. The directory is synced after
+the rename, so a crash right after a write no longer loses it. An existing store
+file with wider permissions gets 0600 when opened, if the process owns it.
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because

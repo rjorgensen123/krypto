@@ -73,7 +73,10 @@ impl<'a> SecretStore<'a> {
     pub fn open(path: impl AsRef<Path>, master: &'a MasterKey) -> Result<Self, Error> {
         let path = path.as_ref().to_path_buf();
         match read_capped(&path, MAX_STORE_BYTES)? {
-            Some(data) => Self::load(path, master, &data),
+            Some(data) => {
+                make_private(&path)?;
+                Self::load(path, master, &data)
+            }
             None => {
                 // The file does not exist → create a new, empty store.
                 let mut salt = [0u8; SALT_LEN];
@@ -314,6 +317,13 @@ impl<'a> SecretStore<'a> {
             buf.extend_from_slice(&blen.to_le_bytes());
             buf.extend_from_slice(blob);
         }
+        // `open` refuses a file past MAX_STORE_BYTES, so writing one would lock
+        // every secret in it out (0.7.2). `put` rolls back on this error.
+        if buf.len() > MAX_STORE_BYTES {
+            return Err(Error::Format(format!(
+                "the store would grow past {MAX_STORE_BYTES} bytes, which `open` refuses"
+            )));
+        }
         atomic_write(&self.path, &buf)
     }
 }
@@ -338,6 +348,28 @@ fn read_capped(path: &Path, cap: usize) -> Result<Option<Vec<u8>>, Error> {
     Ok(Some(bytes))
 }
 
+/// Give an existing store file mode 0600, as every write does (0.7.2). A file
+/// this process does not own is left as it is: changing it is not its right,
+/// and reading it must still work.
+#[cfg(unix)]
+fn make_private(path: &Path) -> Result<(), Error> {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(path)?.permissions().mode() & 0o777;
+    if mode == 0o600 {
+        return Ok(());
+    }
+    match std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Ok(()),
+        Err(e) => Err(Error::Io(e)),
+    }
+}
+
+#[cfg(not(unix))]
+fn make_private(_path: &Path) -> Result<(), Error> {
+    Ok(())
+}
+
 /// Write `data` atomically to `path` (tmp + fsync + rename), mode 0600 (unix).
 ///
 /// The tmp file is created **with** 0600 (unix) — not chmod'ed afterwards — so
@@ -351,28 +383,47 @@ fn atomic_write(path: &Path, data: &[u8]) -> Result<(), Error> {
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
     let fname = path.file_name().and_then(|s| s.to_str()).unwrap_or("store");
-    let tmp = dir.join(format!(".tmp-{}-{fname}", std::process::id()));
+    // An unpredictable name, and the file must be new (0.7.2): a symlink or a
+    // file planted where the tmp file goes is refused, never followed or
+    // reused, so the tmp file is always this write's own and always 0600.
+    let mut nonce = [0u8; 8];
+    getrandom::fill(&mut nonce).map_err(|e| Error::Hardening(format!("getrandom: {e}")))?;
+    let tmp = dir.join(format!(
+        ".tmp-{}-{}-{fname}",
+        std::process::id(),
+        crate::hex::encode(&nonce)
+    ));
 
-    let result = write_tmp_then_rename(&tmp, path, data);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let f = opts.open(&tmp)?;
+    let result = write_then_rename(f, &tmp, path, &dir, data);
     if result.is_err() {
         let _ = std::fs::remove_file(&tmp); // clean up a half-written tmp
     }
     result
 }
 
-fn write_tmp_then_rename(tmp: &Path, path: &Path, data: &[u8]) -> Result<(), Error> {
-    let mut opts = std::fs::OpenOptions::new();
-    opts.create(true).write(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    {
-        let mut f = opts.open(tmp)?;
-        f.write_all(data)?;
-        f.sync_all()?;
-    }
+fn write_then_rename(
+    mut f: std::fs::File,
+    tmp: &Path,
+    path: &Path,
+    dir: &Path,
+    data: &[u8],
+) -> Result<(), Error> {
+    f.write_all(data)?;
+    f.sync_all()?;
+    drop(f);
     std::fs::rename(tmp, path)?;
+    // Sync the directory too, so the rename itself survives a crash (0.7.2).
+    #[cfg(unix)]
+    std::fs::File::open(dir)?.sync_all()?;
+    #[cfg(not(unix))]
+    let _ = dir;
     Ok(())
 }

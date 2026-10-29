@@ -345,3 +345,82 @@ fn rotate_with_the_wrong_master_leaves_the_file_untouched() {
 
     let _ = std::fs::remove_file(&path);
 }
+
+/// A fresh directory for one test, so files can be planted next to the store.
+fn store_dir(tag: &str) -> std::path::PathBuf {
+    let d = std::env::temp_dir().join(format!("krypto-store-dir-{}-{tag}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    d
+}
+
+#[cfg(unix)]
+fn mode_of(p: &std::path::Path) -> u32 {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(p).unwrap().mode() & 0o777
+}
+
+/// 0.7.2: the tmp file is new and unpredictable. A symlink planted where the
+/// tmp file used to go (`.tmp-<pid>-<name>`) made the store overwrite the file
+/// it pointed to; now it is not used at all, and no tmp file is left behind.
+#[cfg(unix)]
+#[test]
+fn a_planted_symlink_at_the_tmp_name_is_not_followed() {
+    let mk = master("plant");
+    let dir = store_dir("plant");
+    let victim = dir.join("victim.conf");
+    std::fs::write(&victim, b"important = true\n").unwrap();
+    let planted = dir.join(format!(".tmp-{}-store", std::process::id()));
+    std::os::unix::fs::symlink(&victim, &planted).unwrap();
+
+    let mut s = SecretStore::open(dir.join("store"), &mk).unwrap();
+    s.put("a", &SecretBuf::from_vec(b"x".to_vec()).unwrap())
+        .unwrap();
+
+    assert_eq!(std::fs::read(&victim).unwrap(), b"important = true\n");
+    assert_eq!(mode_of(&dir.join("store")), 0o600);
+    let left: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|n| n.starts_with(".tmp-") && dir.join(n) != planted)
+        .collect();
+    assert!(left.is_empty(), "tmp files left behind: {left:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 0.7.2: an existing store file with wider permissions gets 0600 on open, as
+/// every write gives it. Before, it stayed open until the next write.
+#[cfg(unix)]
+#[test]
+fn an_existing_store_file_gets_0600_on_open() {
+    use std::os::unix::fs::PermissionsExt;
+    let mk = master("perm");
+    let path = store_path("perm");
+    SecretStore::open(&path, &mk).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+    SecretStore::open(&path, &mk).unwrap();
+    assert_eq!(mode_of(&path), 0o600);
+    let _ = std::fs::remove_file(&path);
+}
+
+/// 0.7.2: a store never grows past what `open` accepts. Ordinary puts could
+/// write a file larger than `MAX_STORE_BYTES`, which then no longer opened and
+/// locked every secret in it out. The put that would cross the line now fails
+/// with `Format`, and the store still opens with what it had.
+#[test]
+fn a_store_never_grows_past_what_open_accepts() {
+    let mk = master("cap");
+    let path = store_path("cap");
+    let big = SecretBuf::from_vec(vec![0x5a; 6 * 1024 * 1024]).unwrap();
+    let mut s = SecretStore::open(&path, &mk).unwrap();
+    s.put("big0", &big).unwrap();
+    s.put("big1", &big).unwrap();
+    assert!(matches!(s.put("big2", &big), Err(Error::Format(_))));
+    assert!(!s.contains("big2"));
+    drop(s);
+
+    let s = SecretStore::open(&path, &mk).unwrap();
+    assert_eq!(s.list("big"), vec!["big0", "big1"]);
+    let _ = std::fs::remove_file(&path);
+}

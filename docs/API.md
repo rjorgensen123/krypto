@@ -226,7 +226,11 @@ impl<'a> SecretStore<'a> {
 
 Each entry gets its own key derived from its name (`info = "krypto/store/v1|" + name`). A blob
 therefore cannot be moved to another name — the open fails. Writes are atomic (tmp + fsync +
-rename), and the file is private (0600). File reads are capped at `MAX_STORE_BYTES` (16 MiB).
+rename), and the file is private (0600). *(0.7.2)* The tmp file is new, with an unpredictable name,
+so nothing planted next to the store is followed or reused; the directory is synced after the
+rename; and an existing file with wider permissions gets 0600 when opened, if the process owns it.
+File reads are capped at `MAX_STORE_BYTES` (16 MiB), and *(0.7.2)* so are writes: a `put` that would
+grow the file past it fails with `Format`, so the store always opens again.
 Name rules: non-empty, ≤ 512 bytes, printable ASCII only (`[\x20-\x7e]`) — names are
 addresses, not secrets, and get listed out. Checked on read as well as on write
 *(0.7.0)*: a store file need not have come from `put`.

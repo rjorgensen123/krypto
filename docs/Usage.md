@@ -174,9 +174,11 @@ store.delete("api-token")?;
 ```
 
 The store file is never read past `MAX_STORE_BYTES` (16 MiB) — the same guard against bloated
-files. Each value is encrypted with **its own key derived from its name**. If someone moves a value to
-another name in the file, `get` fails with `Auth`. Writes are atomic — either the old file is
-there, or the new one, never half of one. The file gets mode 0600.
+files — and never written past it either: a `put` that would cross it fails with `Format`. Each
+value is encrypted with **its own key derived from its name**. If someone moves a value to another
+name in the file, `get` fails with `Auth`. Writes are atomic — either the old file is there, or the
+new one, never half of one. The file gets mode 0600, and an existing one with wider permissions is
+set to 0600 when you open it.
 
 **Rules for names:** non-empty, at most 512 bytes, printable ASCII only (`[\x20-\x7e]`). Names are
 not secret — they are listed by `list()` and may end up in the caller's log. A name with a newline
