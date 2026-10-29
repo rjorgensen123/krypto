@@ -13,19 +13,14 @@ use crate::ffi;
 /// - No `Clone`, no `Serialize`.
 /// - `Debug`/`Display` only ever show `SecretBuf([REDACTED], len=N)`.
 /// - Plaintext is only reachable through [`SecretBuf::expose`].
+/// - Each buffer has whole memory pages of its own, locked in RAM and, on
+///   Linux, kept out of core dumps (0.7.2). It therefore counts at least one
+///   page (usually 4 KiB) against `RLIMIT_MEMLOCK`.
 pub struct SecretBuf {
-    buf: Box<[u8]>,
+    pages: ffi::LockedPages,
 }
 
 impl SecretBuf {
-    /// Allocate + `mlock` a zeroed buffer of `len` bytes. Fail-closed on mlock.
-    fn locked_zeroed(len: usize) -> Result<Box<[u8]>, Error> {
-        let buf = vec![0u8; len].into_boxed_slice();
-        ffi::mlock(buf.as_ptr(), buf.len())?;
-        ffi::dontdump(buf.as_ptr(), buf.len());
-        Ok(buf)
-    }
-
     /// Takes ownership of `v`, copies it into locked memory and zeroizes the source.
     pub fn from_vec(mut v: Vec<u8>) -> Result<Self, Error> {
         // The source is wiped on EVERY path, the error path included. An
@@ -34,10 +29,10 @@ impl SecretBuf {
         // that reachable, not hypothetical. `?` here would have skipped the wipe.
         //
         // The buffer becomes a `SecretBuf` before it is filled, the same shape
-        // as `random`: `Drop` (munlock + zeroize) owns it from the first instant.
-        let out = Self::locked_zeroed(v.len()).map(|buf| {
-            let mut s = SecretBuf { buf };
-            s.buf.copy_from_slice(&v);
+        // as `random`: `Drop` (zeroize + unmap) owns it from the first instant.
+        let out = ffi::LockedPages::new(v.len()).map(|pages| {
+            let mut s = SecretBuf { pages };
+            s.pages.as_mut_slice().copy_from_slice(&v);
             s
         });
         v.zeroize();
@@ -47,48 +42,49 @@ impl SecretBuf {
     /// New buffer of `len` bytes filled from the OS CSPRNG.
     pub fn random(len: usize) -> Result<Self, Error> {
         // Construct the `SecretBuf` BEFORE filling it, so a getrandom failure
-        // drops a type with `Drop` (munlock + zeroize) — not a raw `Box<[u8]>`
-        // that would leak the mlock until process exit.
+        // drops a type with `Drop` (zeroize + unmap) — not bare pages that
+        // would be unmapped unwiped.
         let mut s = SecretBuf {
-            buf: Self::locked_zeroed(len)?,
+            pages: ffi::LockedPages::new(len)?,
         };
-        getrandom::fill(&mut s.buf[..])
+        getrandom::fill(s.pages.as_mut_slice())
             .map_err(|e| Error::Hardening(format!("getrandom failed: {e}")))?;
         Ok(s)
     }
 
     /// Number of bytes.
     pub fn len(&self) -> usize {
-        self.buf.len()
+        self.pages.as_slice().len()
     }
 
     /// Whether the buffer is empty.
     pub fn is_empty(&self) -> bool {
-        self.buf.is_empty()
+        self.pages.as_slice().is_empty()
     }
 
     /// Run `f` with the plaintext bytes. The reference cannot escape the scope (lifetime).
     pub fn expose<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R {
-        f(&self.buf)
+        f(self.pages.as_slice())
     }
 }
 
 impl Drop for SecretBuf {
     fn drop(&mut self) {
-        self.buf.zeroize();
-        ffi::munlock(self.buf.as_ptr(), self.buf.len());
+        // Wipe first; dropping `pages` afterwards unmaps them, which also
+        // releases the lock.
+        self.pages.as_mut_slice().zeroize();
     }
 }
 
 impl fmt::Debug for SecretBuf {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SecretBuf([REDACTED], len={})", self.buf.len())
+        write!(f, "SecretBuf([REDACTED], len={})", self.len())
     }
 }
 
 impl fmt::Display for SecretBuf {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SecretBuf([REDACTED], len={})", self.buf.len())
+        write!(f, "SecretBuf([REDACTED], len={})", self.len())
     }
 }
 

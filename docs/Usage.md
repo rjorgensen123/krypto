@@ -64,6 +64,13 @@ region, not in a variable that lives on.
 **Note:** the types cannot be copied and cannot be serialized, and printing them gives you
 `SecretBuf([REDACTED], len=32)`. That is not something you can turn off.
 
+**Locked memory has a limit.** Each secret has memory pages of its own that are locked in RAM, so
+every secret alive at the same time counts at least one page (usually 4 KiB) against the process's
+locked-memory limit (`RLIMIT_MEMLOCK`, `ulimit -l`), decrypted plaintexts and derived keys
+included. At a limit of 8 MiB that is about 2000 at once. When the limit is reached, creating a
+secret fails with `Hardening`: raise the limit (in Docker, `--ulimit memlock=…`) or keep fewer
+secrets alive at once.
+
 ---
 
 ## The master key

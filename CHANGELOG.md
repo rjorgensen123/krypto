@@ -68,6 +68,24 @@ since tests already see the first.
 now takes both characters from a fixed sixteen-character table, the way `base64`
 already does. The output is the same.
 
+### ⚠ Fixed — `SecretBuf` was not kept out of core dumps and could lose its lock
+
+`SecretBuf` is meant to stay locked in memory and out of core dumps. It kept its
+bytes in ordinary heap memory, mixed with other data on the same pages, and
+neither held there. The kernel almost always rejected the request to leave the
+memory out of core dumps, and the error was ignored, so only `harden_process`,
+which turns core dumps off for the whole process, kept secrets out of a dump.
+And since memory is locked per page, dropping one secret also unlocked any other
+secret on the same page.
+
+Each `SecretBuf` now has memory pages of its own, with an inaccessible page on
+each side, so both hold, and a secret is refused with `Error::Hardening` when
+they cannot. Inside the crate, these pages are reached only through one type
+that keeps their address and length together. The public API is unchanged, but
+every secret alive at the same time now uses at least one page (usually 4 KiB)
+of the process's locked-memory limit, plaintexts from `open` and derived keys
+included.
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because

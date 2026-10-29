@@ -62,6 +62,13 @@ The foundation. Anything secret crosses a boundary as one of these — never as 
 
 Owned byte buffer in locked memory. Zeroized when dropped.
 
+*(0.7.2)* Each buffer has whole memory pages of its own, shared with nothing else: they are locked
+in RAM and, on Linux, excluded from core dumps, with an inaccessible guard page on each side. A
+buffer therefore counts at least one page (usually 4 KiB) against `RLIMIT_MEMLOCK`, however short
+it is. If the pages cannot be mapped, locked or excluded from dumps, construction fails with
+`Error::Hardening`. Plaintexts from `open` and `SecretStore::get`, and keys such as `MasterKey` and
+`DerivedKey`, hold a buffer too and count while they live.
+
 ```rust
 impl SecretBuf {
     pub fn from_vec(v: Vec<u8>) -> Result<Self, Error>;   // copies in, zeroizes the source

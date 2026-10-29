@@ -1,75 +1,186 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! The ONLY place in the crate with `unsafe` — thin wrappers around libc
-//! (mlock/munlock/madvise/setrlimit/prctl). The rest of the crate is
-//! `#![deny(unsafe_code)]`; this module allows unsafe locally.
+//! (mmap/mprotect/mlock/madvise/munmap/setrlimit/prctl). The rest of the crate
+//! is `#![deny(unsafe_code)]`; this module allows unsafe locally.
 #![allow(unsafe_code)]
 
 use crate::error::Error;
 #[cfg(not(miri))]
 use std::io;
 
-// Under Miri the libc syscalls below are unsupported and become no-ops: Miri
-// runs no real process, so there is nothing to lock or exclude from dumps.
+// Under Miri the libc syscalls below are unsupported: `LockedPages` falls back
+// to an ordinary heap buffer and the process calls become no-ops. Miri runs no
+// real process, so there is nothing to lock or exclude from dumps.
 // The point of the Miri run is UB-detection in the crate's own memory and
 // pointer handling — not in the kernel calls.
 
-/// Lock `len` bytes from `ptr` in RAM (`mlock`). Fail-closed: failure → `Err`.
+/// The memory of one secret, on pages of its own (0.7.2).
+///
+/// The mapping is one guard page, the data pages and one guard page. The guard
+/// pages are `PROT_NONE`, so an access past either end faults instead of
+/// reaching other memory. The data pages are locked in RAM (`mlock`) and, on
+/// Linux, excluded from core dumps (`MADV_DONTDUMP`). Every step is
+/// fail-closed: a failure → `Err`, and the secret is refused.
+///
+/// No page is shared with any other allocation, so dropping one secret can
+/// never unlock another one's memory. Drop unmaps the whole mapping, which
+/// also releases the lock. It does not wipe: the owner (`SecretBuf`) wipes
+/// in its own `Drop`, which runs first.
 #[cfg(not(miri))]
-pub(crate) fn mlock(ptr: *const u8, len: usize) -> Result<(), Error> {
-    if len == 0 {
-        return Ok(());
-    }
-    // SAFETY: `ptr` points to a valid allocation of at least `len` bytes, owned
-    // by the caller (SecretBuf). mlock does not modify the contents.
-    let rc = unsafe { libc::mlock(ptr as *const libc::c_void, len) };
-    if rc == 0 {
-        Ok(())
-    } else {
-        Err(Error::Hardening(format!(
-            "mlock({len}) failed: {}",
-            io::Error::last_os_error()
-        )))
-    }
+pub(crate) struct LockedPages {
+    /// Start of the whole mapping (the first guard page).
+    map: *mut u8,
+    /// Length of the whole mapping, guard pages included; 0 when `len` is 0.
+    map_len: usize,
+    /// Start of the data pages.
+    data: *mut u8,
+    /// Bytes in use, from `data`.
+    len: usize,
 }
 
-/// Miri: no process memory to lock — see the module note above.
-#[cfg(miri)]
-pub(crate) fn mlock(_ptr: *const u8, _len: usize) -> Result<(), Error> {
-    Ok(())
-}
-
-/// Unlock again (`munlock`). Best effort — errors are ignored (called from Drop).
+// SAFETY: `LockedPages` owns its mapping alone, like a `Box<[u8]>` owns its
+// allocation, and has no interior mutability: `&self` gives only `&[u8]`, and
+// writing needs `&mut self`. Sending or sharing it across threads is as safe as
+// for `Box<[u8]>`. Without these, `SecretBuf` would silently stop being `Send`
+// and `Sync`, which users rely on.
 #[cfg(not(miri))]
-pub(crate) fn munlock(ptr: *const u8, len: usize) {
-    if len == 0 {
-        return;
+unsafe impl Send for LockedPages {}
+#[cfg(not(miri))]
+unsafe impl Sync for LockedPages {}
+
+#[cfg(not(miri))]
+impl LockedPages {
+    /// Map, guard, lock and mark `len` zeroed bytes. Fail-closed: failure → `Err`.
+    pub(crate) fn new(len: usize) -> Result<Self, Error> {
+        if len == 0 {
+            let none = std::ptr::NonNull::<u8>::dangling().as_ptr();
+            return Ok(LockedPages {
+                map: none,
+                map_len: 0,
+                data: none,
+                len: 0,
+            });
+        }
+        let page = page_size()?;
+        let too_large = || Error::Hardening(format!("a secret of {len} bytes is too large"));
+        let data_len = len.checked_next_multiple_of(page).ok_or_else(too_large)?;
+        let map_len = data_len.checked_add(2 * page).ok_or_else(too_large)?;
+
+        // SAFETY: asks for a new private anonymous mapping and touches no
+        // existing memory. The kernel hands it out zero-filled.
+        let map = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                map_len,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+        if map == libc::MAP_FAILED {
+            return Err(os_error(format_args!("mmap({map_len})")));
+        }
+        // From here on `pages` owns the mapping: an error below drops it, and
+        // Drop unmaps it. Nothing has been written to it yet.
+        let pages = LockedPages {
+            map: map.cast(),
+            map_len,
+            data: map.cast::<u8>().wrapping_add(page),
+            len,
+        };
+        let back_guard = pages.data.wrapping_add(data_len);
+
+        // SAFETY (all calls below): each range is whole pages inside the
+        // mapping created above, which nothing else refers to.
+        if unsafe { libc::mprotect(pages.map.cast(), page, libc::PROT_NONE) } != 0
+            || unsafe { libc::mprotect(back_guard.cast(), page, libc::PROT_NONE) } != 0
+        {
+            return Err(os_error(format_args!("mprotect({page})")));
+        }
+        if unsafe { libc::mlock(pages.data.cast(), data_len) } != 0 {
+            return Err(os_error(format_args!("mlock({data_len})")));
+        }
+        #[cfg(target_os = "linux")]
+        {
+            if unsafe { libc::madvise(pages.data.cast(), data_len, libc::MADV_DONTDUMP) } != 0 {
+                return Err(os_error(format_args!("madvise(MADV_DONTDUMP, {data_len})")));
+            }
+        }
+        Ok(pages)
     }
-    // SAFETY: same allocation/length that was passed to `mlock`.
-    unsafe {
-        let _ = libc::munlock(ptr as *const libc::c_void, len);
+
+    /// The secret's bytes.
+    pub(crate) fn as_slice(&self) -> &[u8] {
+        // SAFETY: `data` points to `len` readable bytes owned by `self` (or is
+        // dangling with `len` 0), valid for as long as `&self` lives.
+        unsafe { std::slice::from_raw_parts(self.data, self.len) }
+    }
+
+    /// The secret's bytes, writable.
+    pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
+        // SAFETY: as `as_slice`, and `&mut self` makes the borrow exclusive.
+        unsafe { std::slice::from_raw_parts_mut(self.data, self.len) }
     }
 }
 
-/// Miri: nothing was locked.
+#[cfg(not(miri))]
+impl Drop for LockedPages {
+    fn drop(&mut self) {
+        if self.map_len == 0 {
+            return;
+        }
+        // SAFETY: the mapping created in `new`; nothing borrows it any more.
+        // Unmapping also releases the lock. Best effort — errors are ignored
+        // (Drop cannot fail).
+        unsafe {
+            let _ = libc::munmap(self.map.cast(), self.map_len);
+        }
+    }
+}
+
+/// The system page size.
+#[cfg(not(miri))]
+fn page_size() -> Result<usize, Error> {
+    // SAFETY: sysconf takes only an integer.
+    let n = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+    usize::try_from(n)
+        .ok()
+        .filter(|p| p.is_power_of_two())
+        .ok_or_else(|| Error::Hardening("sysconf(_SC_PAGESIZE) failed".into()))
+}
+
+/// `Error::Hardening` for a failed call, with the OS error.
+#[cfg(not(miri))]
+fn os_error(call: std::fmt::Arguments<'_>) -> Error {
+    Error::Hardening(format!("{call} failed: {}", io::Error::last_os_error()))
+}
+
+/// Miri: an ordinary heap buffer — see the module note above.
 #[cfg(miri)]
-pub(crate) fn munlock(_ptr: *const u8, _len: usize) {}
-
-/// Mark the pages as excluded from core dumps (`MADV_DONTDUMP`). Best effort.
-#[cfg(all(target_os = "linux", not(miri)))]
-pub(crate) fn dontdump(ptr: *const u8, len: usize) {
-    if len == 0 {
-        return;
-    }
-    // SAFETY: valid allocation; madvise tolerates a non-page-aligned address
-    // (the kernel rounds to whole pages).
-    unsafe {
-        let _ = libc::madvise(ptr as *mut libc::c_void, len, libc::MADV_DONTDUMP);
-    }
+pub(crate) struct LockedPages {
+    buf: Box<[u8]>,
 }
 
-/// No-op outside Linux (and under Miri — no pages, no dumps).
-#[cfg(any(not(target_os = "linux"), miri))]
-pub(crate) fn dontdump(_ptr: *const u8, _len: usize) {}
+#[cfg(miri)]
+impl LockedPages {
+    /// Miri: `len` zeroed bytes on the heap.
+    pub(crate) fn new(len: usize) -> Result<Self, Error> {
+        Ok(LockedPages {
+            buf: vec![0u8; len].into_boxed_slice(),
+        })
+    }
+
+    /// The secret's bytes.
+    pub(crate) fn as_slice(&self) -> &[u8] {
+        &self.buf
+    }
+
+    /// The secret's bytes, writable.
+    pub(crate) fn as_mut_slice(&mut self) -> &mut [u8] {
+        &mut self.buf
+    }
+}
 
 /// Disable core dumps for the process (`RLIMIT_CORE = 0`).
 #[cfg(not(miri))]
