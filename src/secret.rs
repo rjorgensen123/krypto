@@ -39,6 +39,20 @@ impl SecretBuf {
         out
     }
 
+    /// A buffer of `len` bytes in locked memory, filled in place by `fill`
+    /// (0.7.2). The bytes never exist outside locked memory, and if `fill`
+    /// fails or panics, `Drop` wipes what it wrote.
+    pub(crate) fn fill_with(
+        len: usize,
+        fill: impl FnOnce(&mut [u8]) -> Result<(), Error>,
+    ) -> Result<Self, Error> {
+        let mut s = SecretBuf {
+            pages: ffi::LockedPages::new(len)?,
+        };
+        fill(s.pages.as_mut_slice())?;
+        Ok(s)
+    }
+
     /// New buffer of `len` bytes filled from the OS CSPRNG.
     pub fn random(len: usize) -> Result<Self, Error> {
         // Construct the `SecretBuf` BEFORE filling it, so a getrandom failure

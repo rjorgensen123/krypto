@@ -102,6 +102,17 @@ of the derived key remained once the key itself was dropped. `hash`, `verify`
 and `derive_key` now overwrite that memory with zeros when argon2 returns. The
 password itself was not left behind.
 
+### Fixed — key material is wiped on every path when keys are read or derived
+
+`MasterKey::from_secret_file` read the key into a buffer that grew as it read,
+leaving the earlier, smaller buffers behind unwiped: with a 4096-byte key, 928
+bytes of it remained. A failed read also dropped what had been read without a
+wipe. The read now has room for the largest key from the start and wipes on
+every way out. `derive_key` and `MasterKey::derive` built the derived key in
+ordinary memory and copied it into locked memory; they now write it straight
+into locked memory, so no unlocked copy exists and a failure leaves nothing
+behind.
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because

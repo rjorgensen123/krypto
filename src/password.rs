@@ -136,23 +136,16 @@ pub fn derive_key(
             salt.len()
         )));
     }
-    let mut out = vec![0u8; 32];
-    let res = password.expose_str(|pw| {
-        hasher(preset)
-            .hash_password_into(pw.as_bytes(), salt, &mut out)
-            .map_err(|e| Error::Format(format!("argon2 derivation failed: {e}")))
+    // The key is written straight into locked memory (0.7.2).
+    let res = crate::secret::SecretBuf::fill_with(32, |out| {
+        password.expose_str(|pw| {
+            hasher(preset)
+                .hash_password_into(pw.as_bytes(), salt, out)
+                .map_err(|e| Error::Format(format!("argon2 derivation failed: {e}")))
+        })
     });
     scrub_stack();
-    match res {
-        Ok(()) => crate::secret::SecretBuf::from_vec(out),
-        Err(e) => {
-            // Zeroize the half-finished key before releasing it.
-            for b in out.iter_mut() {
-                *b = 0;
-            }
-            Err(e)
-        }
-    }
+    res
 }
 
 #[cfg(test)]

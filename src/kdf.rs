@@ -6,7 +6,7 @@
 
 use hkdf::Hkdf;
 use sha2::Sha256;
-use zeroize::Zeroize;
+use zeroize::Zeroizing;
 
 use crate::error::Error;
 use crate::secret::SecretBuf;
@@ -61,23 +61,24 @@ impl MasterKey {
         use std::io::Read;
         let f = std::fs::File::open(path)?;
         // Read up to MAX+1 to detect "too big" without reading an enormous file.
-        let mut bytes = Vec::new();
+        // The room is there from the start, so the read never moves the bytes
+        // to a bigger buffer and leaves the old one behind, and `Zeroizing`
+        // wipes them on every way out, a failed read included (0.7.2).
+        let mut bytes = Zeroizing::new(Vec::with_capacity(MAX_MASTER_KEY_BYTES + 1));
         f.take(MAX_MASTER_KEY_BYTES as u64 + 1)
             .read_to_end(&mut bytes)?;
         if bytes.len() < 32 {
-            let n = bytes.len();
-            bytes.zeroize();
             return Err(Error::Format(format!(
-                "master key must be at least 32 bytes, got {n}"
+                "master key must be at least 32 bytes, got {}",
+                bytes.len()
             )));
         }
         if bytes.len() > MAX_MASTER_KEY_BYTES {
-            bytes.zeroize();
             return Err(Error::Format(format!(
                 "master key file is too big (> {MAX_MASTER_KEY_BYTES} bytes)"
             )));
         }
-        let key = SecretBuf::from_vec(bytes)?;
+        let key = SecretBuf::from_vec(std::mem::take(&mut *bytes))?;
         Ok(MasterKey { key })
     }
 
@@ -113,17 +114,12 @@ impl MasterKey {
         }
         self.key.expose(|ikm| {
             let hk = Hkdf::<Sha256>::new(Some(salt), ikm);
-            let mut okm = vec![0u8; 32];
-            let res = hk
-                .expand(info, &mut okm)
-                .map_err(|_| Error::Hardening("HKDF expand failed".into()));
-            match res {
-                Ok(()) => SecretBuf::from_vec(okm).map(|dk| DerivedKey { key: dk }),
-                Err(e) => {
-                    okm.zeroize();
-                    Err(e)
-                }
-            }
+            // The key is written straight into locked memory (0.7.2).
+            SecretBuf::fill_with(32, |okm| {
+                hk.expand(info, okm)
+                    .map_err(|_| Error::Hardening("HKDF expand failed".into()))
+            })
+            .map(|key| DerivedKey { key })
         })
     }
 }
