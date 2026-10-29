@@ -17,10 +17,12 @@ use std::io;
 /// The memory of one secret, on pages of its own (0.7.2).
 ///
 /// The mapping is one guard page, the data pages and one guard page. The guard
-/// pages are `PROT_NONE`, so an access past either end faults instead of
-/// reaching other memory. The data pages are locked in RAM (`mlock`) and, on
-/// Linux, excluded from core dumps (`MADV_DONTDUMP`). Every step is
-/// fail-closed: a failure → `Err`, and the secret is refused.
+/// pages are `PROT_NONE`: an access that reaches one faults instead of reaching
+/// other memory. The secret sits at the END of the data pages, so the first
+/// byte past it is on the back guard page; before it lie the unused bytes of
+/// its first page, then the front guard page. The data pages are locked in
+/// RAM (`mlock`) and, on Linux, excluded from core dumps (`MADV_DONTDUMP`).
+/// Every step is fail-closed: a failure → `Err`, and the secret is refused.
 ///
 /// No page is shared with any other allocation, so dropping one secret can
 /// never unlock another one's memory. Drop unmaps the whole mapping, which
@@ -32,7 +34,7 @@ pub(crate) struct LockedPages {
     map: *mut u8,
     /// Length of the whole mapping, guard pages included; 0 when `len` is 0.
     map_len: usize,
-    /// Start of the data pages.
+    /// Start of the secret, at the end of the data pages.
     data: *mut u8,
     /// Bytes in use, from `data`.
     len: usize,
@@ -81,15 +83,18 @@ impl LockedPages {
         if map == libc::MAP_FAILED {
             return Err(os_error(format_args!("mmap({map_len})")));
         }
+        // The data pages start after the front guard. The secret sits at the
+        // END of them, so the first byte past it is on the back guard page.
+        let data_pages = map.cast::<u8>().wrapping_add(page);
         // From here on `pages` owns the mapping: an error below drops it, and
         // Drop unmaps it. Nothing has been written to it yet.
         let pages = LockedPages {
             map: map.cast(),
             map_len,
-            data: map.cast::<u8>().wrapping_add(page),
+            data: data_pages.wrapping_add(data_len - len),
             len,
         };
-        let back_guard = pages.data.wrapping_add(data_len);
+        let back_guard = data_pages.wrapping_add(data_len);
 
         // SAFETY (all calls below): each range is whole pages inside the
         // mapping created above, which nothing else refers to.
@@ -98,12 +103,12 @@ impl LockedPages {
         {
             return Err(os_error(format_args!("mprotect({page})")));
         }
-        if unsafe { libc::mlock(pages.data.cast(), data_len) } != 0 {
+        if unsafe { libc::mlock(data_pages.cast(), data_len) } != 0 {
             return Err(os_error(format_args!("mlock({data_len})")));
         }
         #[cfg(target_os = "linux")]
         {
-            if unsafe { libc::madvise(pages.data.cast(), data_len, libc::MADV_DONTDUMP) } != 0 {
+            if unsafe { libc::madvise(data_pages.cast(), data_len, libc::MADV_DONTDUMP) } != 0 {
                 return Err(os_error(format_args!("madvise(MADV_DONTDUMP, {data_len})")));
             }
         }

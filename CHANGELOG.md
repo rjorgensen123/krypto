@@ -86,6 +86,14 @@ every secret alive at the same time now uses at least one page (usually 4 KiB)
 of the process's locked-memory limit, plaintexts from `open` and derived keys
 included.
 
+### Changed — a secret ends where its guard page begins
+
+The guard page after a secret was only reached once an access had run past the
+rest of the secret's last page: a 32-byte key had about 4 KiB of unused space
+before it. The secret now sits at the end of its pages, so the first byte past
+it is on the guard page and stops the process. Before the secret lie the unused
+bytes of its first page, then the other guard page.
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because
