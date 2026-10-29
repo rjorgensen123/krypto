@@ -381,6 +381,11 @@ None of them carry key material or plaintext. You can log them as they are.
 
 | Version | What arrived |
 |---|---|
+| **0.7.2** | **Secret memory and the current RustCrypto line.** The dependencies moved to the current RustCrypto line (RUSTSEC-2026-0387), and Rust 1.89 is the minimum · each secret has memory pages of its own: kept out of core dumps, still locked when another secret is dropped, with a guard page on each side (note: each live secret uses at least one page of the locked-memory limit) · the password functions and `derive` wipe what argon2 and HKDF leave on the stack, and derived keys are written straight into locked memory · the per-key limit of AES-256-GCM is documented |
+| **0.7.1** | No functional change: the install snippets point at crates.io, and the published crate no longer carries the CI configuration |
+| **0.7.0** | **First release on crates.io.** `SecretBuf::from_vec` wipes its source even when locking fails · `info` and `salt` for `derive` are capped (`MAX_DERIVE_INPUT_BYTES`), and `MasterKey::from_bytes` caps the key like the file route · the store checks names when it reads a file too (see below) |
+| **0.6.2** | **Hardening step 2:** `no_new_privs`, `close_inherited_fds` and `drop_filesystem` — separate, optional, fail-closed calls |
+| **0.6.1** | Documentation and tooling: the doc guard covers the cli commands too |
 | **0.6.0** | **Key rotation:** `reseal` (blob → blob under a new key generation; the algorithm is preserved) and `SecretStore::rotate` (the whole store, atomically — never half-rotated), + `krypto-cli reseal`. Both keys come from you — krypto is stateless and never owns keys · The `VERSION` constant + `krypto-cli version` (About pages at the consumers) · `krypto-cli rand` (CSPRNG for non-secrets — the Python side must not roll its own source) · `Balanced` adjusted to p=3 (note: `derive_key` with Balanced yields a different key than 0.5.x) · dependency auditing and memory verification in CI (cargo-deny, Miri, ASan) |
 | **0.5.1** | Canonical base64 (the `base64` module + four `b64-*` cli commands) — for formats that ARE base64 by nature (ssh fingerprints, PEM); the canon is still hex |
 | **0.5.0** | **First major revision.** The whole API in English (`utled_noekkel` → `derive_key`, `Moderate` → `High`; all error messages English) · new middle preset `Balanced` · the `WrongKey` error and exit code 4, so an old key generation no longer triggers a tampering alarm · official test vectors for all three algorithms — which **revealed and fixed** that AEGIS-256 had key and nonce swapped: AEGIS blobs from ≤ 0.4.4 must be re-encrypted · version guard test · **new modules:** `sign` (Ed25519 + ECDSA P-256, ring-compatible), `exchange` (X25519), `hex` (canonical), plus `sha256`/`ct_eq`/`random_bytes` — so no consumer rolls its own layer |
@@ -395,5 +400,6 @@ None of them carry key material or plaintext. You can log them as they are.
 
 One older exception is worth knowing: **0.4.3 tightened which names the store accepts** (see the
 rules above). If your code writes names with e.g. `æøå`, or names longer than 512 bytes, `put`
-will start failing. Existing data is unaffected — validation happens only on writes, so old names
-can still be read, listed and deleted.
+will start failing. Since 0.7.0 the same rules are checked when a store file is read, so a file
+that still holds such a name no longer opens: `SecretStore::open` returns `Format`. Move those
+entries to valid names (`get`, `put`, `delete`) with a release before 0.7.0 before you upgrade.

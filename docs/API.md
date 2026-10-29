@@ -1,4 +1,10 @@
-# API — reference
+# API — reference (v0.7.0)
+
+**The version is a floor: v0.7.0 is the LOWEST krypto this contract describes.** Every krypto from
+0.7.0 onwards has what is written here. 0.7.0 is the first release on crates.io, so the contract
+starts there. The number is raised only when the public surface itself changes — to the crate
+version at that moment. Each part also carries the version it applies from, as *(x.y.z)*, so a part
+can be added, changed or phased out on its own timeline.
 
 Every public type and function in `krypto`.
 
@@ -125,7 +131,8 @@ impl MasterKey {
 
 `derive` is HKDF-SHA256. `info` is your own context string — the crate does not know your purpose
 names. Different `info` gives different keys, and that is how you keep purposes apart. **An
-empty `info` is rejected** — it IS the purpose separation. Both `info` and `salt` are capped
+empty `info` is rejected** — it IS the purpose separation. An empty `salt` is allowed, as RFC 5869
+permits. Both `info` and `salt` are capped
 *(0.7.0)* at
 `MAX_DERIVE_INPUT_BYTES` (1024); they reach the API from command lines and config files, and the
 longest real one is the store's prefix plus a key name — 16 + 512 bytes.
@@ -344,7 +351,7 @@ pub fn decode_nopad(s: &str) -> Result<Vec<u8>, Error>;    // fail-closed, rejec
 
 Same philosophy as `hex`: one spelling — whitespace, wrong padding and non-canonical trailing
 bits are rejected. Keys and signatures on the wire are still HEX; base64 exists only for formats
-ARE base64 by nature (`SHA256:<base64-no-pad>` fingerprints, PEM).
+that ARE base64 by nature (`SHA256:<base64-no-pad>` fingerprints, PEM).
 
 ---
 
@@ -462,9 +469,10 @@ passwords on stdin get one trailing newline stripped.
 `3` authentication failed (tampering/wrong key — alert) · `4` another key generation (routing, not
 tampering — *new in 0.5.0*). Errors go to stderr — never key material.
 
-The key id in the blob header is derived deterministically from the master key (HKDF with the
-context `krypto/key-id/v1`, first 16 bytes) — it identifies the generation without revealing
-the key. Stdin is bounded (64 MiB). Error texts are English.
+The key id in the blob header is derived deterministically from the master key: HMAC-SHA256 over
+the string `key-id`, keyed with the key `derive` gives for the context `krypto/key-id/v1` and an
+empty salt; the first 16 bytes. It identifies the generation without revealing the key. Stdin is
+bounded (64 MiB). Error texts are English.
 
 ---
 

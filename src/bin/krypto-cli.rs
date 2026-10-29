@@ -3,9 +3,10 @@
 //!
 //! A caller that is not Rust — Python, say — runs this binary as a subprocess
 //! instead of implementing its own crypto, or reaching for bindings. ONE
-//! crypto implementation. Since 0.5.0 the bridge mirrors the whole
-//! Rust surface — AEAD, MAC, signatures, X25519, password derivation/hashing,
-//! SHA-256 — with one rule throughout: **private key material never crosses
+//! crypto implementation. Since 0.5.0 the bridge mirrors the Rust surface —
+//! AEAD, MAC, signatures, X25519, password derivation/hashing, SHA-256 —
+//! apart from what the API contract lists as left out (the store, process
+//! hardening), with one rule throughout: **private key material never crosses
 //! into the calling process.** It lives in files (created 0600, never
 //! overwritten) and is referenced by path; only public keys, signatures,
 //! hashes, blobs and requested plaintext go to stdout.
@@ -622,8 +623,9 @@ fn write_key_file(path: &str, key: &SecretBuf) -> Result<(), CliError> {
         .map_err(|e| CliError::io(format!("writing {path} failed: {e}")))
 }
 
-/// Deterministic, publishable id for the master-key generation: HKDF with its
-/// own context (one-way, purpose-separated from all working keys), first 16 B.
+/// Deterministic, publishable id for the master-key generation: HMAC-SHA256
+/// over `key-id`, keyed with a key derived for its own context (one-way,
+/// purpose-separated from all working keys); the first 16 B.
 fn key_id(master: &MasterKey) -> Result<[u8; 16], CliError> {
     let dk = master
         .derive(KEY_ID_CONTEXT, b"")

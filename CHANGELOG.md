@@ -129,6 +129,18 @@ on `Alg::Aes256Gcm`, in the API reference and in the guide. krypto keeps no
 count; the caller knows its volume. A new test checks that every `seal` draws
 its own nonce, for all three algorithms.
 
+### Changed — the documentation says what the code does
+
+`docs/Usage.md` said key names were checked only on writes, so old names stayed
+readable; since 0.7.0 they are checked on reads too, and a store file with a
+name outside the rules does not open. It now says so, and how to move such
+names before upgrading. The key id was described as HKDF output; it is an
+HMAC-SHA256 under an HKDF-derived key, and the API reference and the cli comment
+now say that. The API reference states the version it applies from, 0.7.0,
+beside the version each part carries; the guide's version table gains 0.6.1 to
+0.7.2; an empty `salt` for `derive` is documented as allowed; and the cli no
+longer claims to mirror the whole Rust surface.
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because

@@ -14,7 +14,7 @@
 //!   deterministic; verifiers accept both deterministic and randomized
 //!   signatures (the wire form is identical).
 //!
-//! Private keys cross the API only as [`SecretBuf`] (the secret-types rule (secrets cross APIs only as krypto types)).
+//! Private keys cross the API only as [`SecretBuf`]: secrets cross APIs only as krypto types.
 //! Verification failure is [`Error::Auth`]; malformed keys/signatures are
 //! [`Error::Format`].
 
