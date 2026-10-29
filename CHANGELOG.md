@@ -62,6 +62,12 @@ asks for 0.9.20, the current release, and stays within 0.9. `libc` was listed
 under both `[dependencies]` and `[dev-dependencies]`; the second entry is gone,
 since tests already see the first.
 
+### Changed — `hex::encode` reads from a table
+
+`hex::encode` built a temporary string for every byte through a format string. It
+now takes both characters from a fixed sixteen-character table, the way `base64`
+already does. The output is the same.
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because

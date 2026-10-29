@@ -9,11 +9,14 @@
 
 use crate::error::Error;
 
+const ALPHABET: &[u8; 16] = b"0123456789abcdef";
+
 /// Encode bytes as lowercase hex.
 pub fn encode(bytes: &[u8]) -> String {
     let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        s.push_str(&format!("{b:02x}"));
+    for &b in bytes {
+        s.push(ALPHABET[(b >> 4) as usize] as char);
+        s.push(ALPHABET[(b & 0x0f) as usize] as char);
     }
     s
 }
