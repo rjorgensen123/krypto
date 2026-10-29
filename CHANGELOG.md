@@ -94,6 +94,14 @@ before it. The secret now sits at the end of its pages, so the first byte past
 it is on the guard page and stops the process. Before the secret lie the unused
 bytes of its first page, then the other guard page.
 
+### Fixed — the password functions wipe what argon2 leaves on the stack
+
+argon2, and the hash it uses inside, left copies of the values they derive from
+the password in the stack memory they had used: after `derive_key`, two copies
+of the derived key remained once the key itself was dropped. `hash`, `verify`
+and `derive_key` now overwrite that memory with zeros when argon2 returns. The
+password itself was not left behind.
+
 ## [0.7.1] — 2026-10-07
 
 *No functional change. Not one public signature moved. The release exists because

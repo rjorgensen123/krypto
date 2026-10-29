@@ -9,6 +9,7 @@
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::{Algorithm, Argon2, Params, Version};
+use zeroize::Zeroize;
 
 use crate::error::Error;
 use crate::secret::SecretString;
@@ -44,16 +45,37 @@ fn hasher(preset: Preset) -> Argon2<'static> {
     Argon2::new(Algorithm::Argon2id, Version::V0x13, preset.params())
 }
 
+/// How much of the stack below the caller is overwritten after an argon2
+/// call (0.7.2). argon2, and the hash it uses inside, leave copies of the
+/// values they derive from the password, the derived key included, in the
+/// stack frames they used, down to the deepest of them. The size covers all
+/// the stack argon2 itself uses, with a little to spare: about 10-13 KiB in an
+/// optimised build and 87-93 KiB in a debug build, whatever the preset.
+#[cfg(not(debug_assertions))]
+const SCRUB_BYTES: usize = 16 * 1024;
+#[cfg(debug_assertions)]
+const SCRUB_BYTES: usize = 128 * 1024;
+
+/// Overwrite `SCRUB_BYTES` of the stack below the caller with zeros (0.7.2).
+/// Called once argon2 has returned, on every path.
+#[inline(never)]
+fn scrub_stack() {
+    let mut area = [0u8; SCRUB_BYTES];
+    area.zeroize();
+}
+
 /// Hash a password → PHC string (includes salt + params). Use when creating
 /// or changing a password.
 pub fn hash(password: &SecretString, preset: Preset) -> Result<String, Error> {
-    password.expose_str(|pw| {
+    let res = password.expose_str(|pw| {
         // `hash_password` draws a fresh 16-byte salt from the OS CSPRNG.
         hasher(preset)
             .hash_password(pw.as_bytes())
             .map(|h| h.to_string())
             .map_err(|e| Error::Hardening(format!("argon2 hashing failed: {e}")))
-    })
+    });
+    scrub_stack();
+    res
 }
 
 /// Verify a password against a PHC string (constant-time). `Ok(())` on match,
@@ -65,14 +87,16 @@ pub fn verify(password: &SecretString, phc: &str) -> Result<(), Error> {
 
     let parsed =
         PasswordHash::new(phc).map_err(|e| Error::Format(format!("invalid PHC string: {e}")))?;
-    password.expose_str(|pw| {
+    let res = password.expose_str(|pw| {
         // verify_password uses the params from the hash itself (parsed).
         match Argon2::default().verify_password(pw.as_bytes(), &parsed) {
             Ok(()) => Ok(()),
             Err(PhError::PasswordInvalid) => Err(Error::Auth),
             Err(e) => Err(Error::Format(format!("cannot verify hash: {e}"))),
         }
-    })
+    });
+    scrub_stack();
+    res
 }
 
 // --------------------------------------------------------------------------- //
@@ -118,6 +142,7 @@ pub fn derive_key(
             .hash_password_into(pw.as_bytes(), salt, &mut out)
             .map_err(|e| Error::Format(format!("argon2 derivation failed: {e}")))
     });
+    scrub_stack();
     match res {
         Ok(()) => crate::secret::SecretBuf::from_vec(out),
         Err(e) => {
