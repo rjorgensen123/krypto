@@ -386,8 +386,8 @@ Six kinds, and they mean different things:
 | Error | When | What it means for you |
 |---|---|---|
 | `Auth` | tampering, wrong key, wrong password | **the only one to alert on** |
-| `WrongKey` | from `krypto-cli open`: the blob belongs to another key generation | find the right key — routing, not tampering *(new in 0.5.0)* |
-| `Format` | unrecognizable or corrupt input | the data is wrong, not the key |
+| `WrongKey` | from `krypto-cli open` and `reseal`: the blob belongs to another key generation | find the right key — routing, not tampering *(new in 0.5.0)* |
+| `Format` | input that is not what krypto takes: not a krypto blob, a malformed key, signature or PHC string, a wrong parameter | the data is wrong, not the key — a changed blob is `Auth` |
 | `KeyNotFound` | the name does not exist in the store | normal, not an error condition |
 | `Io` | file/disk trouble | the environment, not the crypto |
 | `Hardening` | a protection step failed: locked memory, randomness, process hardening | the environment, never your data |

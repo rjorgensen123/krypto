@@ -36,7 +36,7 @@ pub enum Error {
     /// blob no longer masquerades as tampering (finding N5; contract: API-krypto-v0.6 §errors).
     /// Since 0.7.3 no library function returns it — a `SecretStore` holds one
     /// generation — it is the answer for a caller that holds several and routes
-    /// between them, as `krypto-cli open` does.
+    /// between them, as `krypto-cli open` and `reseal` do.
     WrongKey,
 }
 

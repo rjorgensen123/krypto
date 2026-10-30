@@ -127,7 +127,7 @@ The root key. Comes from outside — the crate does not create it.
 impl MasterKey {
     pub fn from_secret_file(path: impl AsRef<Path>) -> Result<Self, Error>;
     pub fn from_bytes(key: SecretBuf) -> Result<Self, Error>;   // consumes the buffer
-    pub fn derive(&self, info: &[u8], salt: &[u8]) -> Result<DerivedKey, Error>;
+    pub fn derive(&self, info: &[u8], salt: &[u8]) -> Result<DerivedKey, Error>; // empty info: Format (0.7.3)
 }
 ```
 
@@ -165,10 +165,10 @@ pub enum Alg { Aegis256, XChaCha20Poly1305, Aes256Gcm }   // #[non_exhaustive]
 
 pub fn seal(key: &DerivedKey, key_id: &[u8; 16], plaintext: &SecretBuf, alg: Alg)
     -> Result<Vec<u8>, Error>;
-pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error>;
-pub fn blob_key_id(blob: &[u8]) -> Result<[u8; 16], Error>;
+pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error>;   // any change past FAFN: Auth (0.7.3)
+pub fn blob_key_id(blob: &[u8]) -> Result<[u8; 16], Error>;   // unknown version or alg: Auth (0.7.3)
 pub fn reseal(old: &DerivedKey, new: &DerivedKey, new_key_id: &[u8; 16], blob: &[u8])
-    -> Result<Vec<u8>, Error>;   // 0.6.0 — key rotation
+    -> Result<Vec<u8>, Error>;   // 0.6.0 — key rotation; reads the header as open (0.7.3)
 ```
 
 `Alg::Aegis256` is the default. The other two exist for compatibility with systems that require
@@ -176,7 +176,9 @@ them.
 
 `blob_key_id` reads which key a blob was made with — **without opening it**. Useful when you hold
 several keys and must find the right one first. Note that the value is a *hint about where to
-look*, not proof: tampering is discovered when `open` is called, as `Error::Auth`.
+look*, not proof: tampering is discovered when `open` is called, as `Error::Auth`. *(0.7.3)*
+`blob_key_id` reads the header as `open` does: a version or algorithm krypto does not know is
+`Auth` already there, and data that is not a krypto blob is `Format`.
 
 `reseal` *(0.6.0)* is the rotation **action**: open with the old key, seal with the new one
 under a new generation id — the blob's algorithm is preserved. Both keys come from you (krypto
@@ -382,7 +384,7 @@ that ARE base64 by nature (`SHA256:<base64-no-pad>` fingerprints, PEM).
 ```rust
 pub fn sha256(data: &[u8]) -> [u8; 32];                     // FIPS 180-4 — fingerprints
 pub fn ct_eq(a: &[u8], b: &[u8]) -> bool;                   // constant-time; length mismatch → false
-pub fn random_bytes(len: usize) -> Result<Vec<u8>, Error>;  // OS CSPRNG for NON-secrets
+pub fn random_bytes(len: usize) -> Result<Vec<u8>, Error>;  // OS CSPRNG for NON-secrets, at most MAX_RANDOM_BYTES (0.7.3)
 pub fn random_bytes_with_limit(len: usize, limit: usize) -> Result<Vec<u8>, Error>; // 0.7.3
 pub const MAX_RANDOM_BYTES: usize = 1 << 20;                // 0.7.3
 ```
@@ -405,7 +407,7 @@ promises but cannot back still fills the memory.
 pub fn harden_process() -> Result<(), Error>;       // core dumps off + non-dumpable
 pub fn no_new_privs() -> Result<(), Error>;         // never gain privileges (PR_SET_NO_NEW_PRIVS)
 pub fn close_inherited_fds() -> Result<(), Error>;  // closes EVERYTHING above stderr (close_range, Linux 5.9+)
-pub fn drop_filesystem(dir: impl AsRef<Path>) -> Result<(), Error>; // chroot into an EMPTY dir, the process inside it
+pub fn drop_filesystem(dir: impl AsRef<Path>) -> Result<(), Error>; // chroot into an EMPTY dir, the process inside it (0.7.3)
 ```
 
 All of them are **fail-closed**: if the call cannot deliver, you get `Err` — never silent
@@ -413,8 +415,8 @@ degradation. Each step is its own deliberate choice. Recommended order: `harden_
 `no_new_privs()` first in `main` · `close_inherited_fds()` early, before opening your own files
 (NB: it also kills deliberately inherited sockets, e.g. socket activation — hence a separate
 call) · `drop_filesystem(dir)` **after** key material is read — irreversible, needs privileges
-(root or `CAP_SYS_CHROOT`), and the directory must be empty (verified before the chroot). Use a
-directory only root can write to, such as `/var/empty`. *(0.7.3)* The chroot applies to the
+(root or `CAP_SYS_CHROOT`), and the directory must be empty (verified before the chroot).
+*(0.7.3)* Use a directory only root can write to, such as `/var/empty`. The chroot applies to the
 directory that was checked, and the root changes as the last step, with the process already
 inside; on `Err` the root has not changed and the process stands where it stood. After
 the chroot krypto needs no filesystem: randomness comes from the `getrandom` syscall, and
@@ -436,11 +438,11 @@ pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotF
 | Variant | Means |
 |---|---|
 | `Io` | file or directory |
-| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening — never a verdict on the data; treated fail-closed |
-| `Format` | the blob, the PHC string or the parameters had the wrong shape |
-| `Auth` | **wrong key, wrong password, or someone tampered** |
+| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening — never a verdict on the data; treated fail-closed *(0.7.3: described as what it covers)* |
+| `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob (too short for a header, or not starting with `FAFN`), or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info` |
+| `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, and a key id in a `SecretStore` that does not match |
 | `KeyNotFound` | the name does not exist in the store |
-| `WrongKey` | the blob belongs to another key generation — routing, not tampering *(new in 0.5.0)*. *(0.7.3)* No library function returns it: a `SecretStore` holds one generation, so a different key id there is `Auth`. It is the answer for a caller that routes between generations, as `krypto-cli open` does |
+| `WrongKey` | the blob belongs to another key generation — routing, not tampering *(new in 0.5.0)*. *(0.7.3)* No library function returns it: a `SecretStore` holds one generation, so a different key id there is `Auth`. It is the answer for a caller that routes between generations, as `krypto-cli open` and `reseal` do |
 
 No variant carries key material or plaintext.
 
