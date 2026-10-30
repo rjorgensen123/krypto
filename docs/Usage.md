@@ -313,6 +313,9 @@ let salt  = krypto::random_bytes(16)?;                // for NON-secrets (salts,
 
 `sha256` is not authentication (use `hmac_sha256`) and not passwords (use `password`).
 `random_bytes` is for values stored in the open — secrets go in `SecretBuf::random`.
+Both give at most 1 MiB in one call (`MAX_RANDOM_BYTES`); asking for more is `Format`. If your
+program really needs more in one call, say so with your own cap: `random_bytes_with_limit(len,
+limit)` or `SecretBuf::random_with_limit(len, limit)`. The cap is per call, not a setting.
 
 ---
 
@@ -397,7 +400,7 @@ None of them carry key material or plaintext. You can log them as they are.
 
 | Version | What arrived |
 |---|---|
-| **0.7.3** | `drop_filesystem` changes the root only as its last step, on the directory it checked; when it fails, the process is as it was · every change to a blob past its `FAFN` magic gives `Auth` (`krypto-cli` exit 3), and `SecretStore::get` gives `Auth` for a key id that does not match · an empty `info` for `derive` is `Format` |
+| **0.7.3** | `drop_filesystem` changes the root only as its last step, on the directory it checked; when it fails, the process is as it was · every change to a blob past its `FAFN` magic gives `Auth` (`krypto-cli` exit 3), and `SecretStore::get` gives `Auth` for a key id that does not match · an empty `info` for `derive` is `Format` · random bytes are capped at 1 MiB per call, with your own cap as an option |
 | **0.7.2** | **Secret memory and the current RustCrypto line.** The dependencies moved to the current RustCrypto line (RUSTSEC-2026-0387), and Rust 1.89 is the minimum · each secret has memory pages of its own: kept out of core dumps, still locked when another secret is dropped, with a guard page on each side (note: each live secret uses at least one page of the locked-memory limit) · the password functions and `derive` wipe what argon2 and HKDF leave on the stack, and derived keys are written straight into locked memory · the per-key limit of AES-256-GCM is documented |
 | **0.7.1** | No functional change: the install snippets point at crates.io, and the published crate no longer carries the CI configuration |
 | **0.7.0** | **First release on crates.io.** `SecretBuf::from_vec` wipes its source even when locking fails · `info` and `salt` for `derive` are capped (`MAX_DERIVE_INPUT_BYTES`), and `MasterKey::from_bytes` caps the key like the file route · the store checks names when it reads a file too (see below) |

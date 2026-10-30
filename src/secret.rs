@@ -54,7 +54,20 @@ impl SecretBuf {
     }
 
     /// New buffer of `len` bytes filled from the OS CSPRNG.
+    ///
+    /// At most [`crate::MAX_RANDOM_BYTES`] per call; more is `Error::Format`
+    /// (0.7.3). For more in one call, state your own cap with
+    /// [`SecretBuf::random_with_limit`].
     pub fn random(len: usize) -> Result<Self, Error> {
+        Self::random_with_limit(len, crate::util::MAX_RANDOM_BYTES)
+    }
+
+    /// [`SecretBuf::random`] with the caller's own cap for this call (0.7.3).
+    ///
+    /// `len` above `limit` is `Error::Format`. Memory that cannot be had or
+    /// locked is `Error::Hardening`, never a crash.
+    pub fn random_with_limit(len: usize, limit: usize) -> Result<Self, Error> {
+        crate::util::check_random_len(len, limit)?;
         // Construct the `SecretBuf` BEFORE filling it, so a getrandom failure
         // drops a type with `Drop` (zeroize + unmap) — not bare pages that
         // would be unmapped unwiped.

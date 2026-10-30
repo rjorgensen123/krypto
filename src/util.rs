@@ -28,6 +28,12 @@ pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.ct_eq(b).into()
 }
 
+/// The most bytes [`random_bytes`] and [`crate::SecretBuf::random`] give in
+/// one call: 1 MiB (0.7.3). A program that needs more in one call states its
+/// own cap with [`random_bytes_with_limit`] or
+/// [`crate::SecretBuf::random_with_limit`].
+pub const MAX_RANDOM_BYTES: usize = 1 << 20;
+
 /// `len` bytes from the OS CSPRNG, for values that are **not secrets**:
 /// salts, ids, jitter, nonce material a consumer manages itself.
 ///
@@ -35,10 +41,35 @@ pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 /// [`crate::SecretBuf::random`]: a salt is *meant* to be stored in plaintext,
 /// so wrapping it in a locked, redacted type would only obscure that. If the
 /// value must stay secret, use `SecretBuf::random` instead.
+///
+/// At most [`MAX_RANDOM_BYTES`] per call; more is `Error::Format` (0.7.3).
 pub fn random_bytes(len: usize) -> Result<Vec<u8>, Error> {
-    let mut out = vec![0u8; len];
+    random_bytes_with_limit(len, MAX_RANDOM_BYTES)
+}
+
+/// [`random_bytes`] with the caller's own cap for this call (0.7.3).
+///
+/// `len` above `limit` is `Error::Format`. Memory that cannot be had is
+/// `Error::Hardening`, never a crash. A high `limit` is the caller's choice: a
+/// length the system promises but cannot back still fills the memory.
+pub fn random_bytes_with_limit(len: usize, limit: usize) -> Result<Vec<u8>, Error> {
+    check_random_len(len, limit)?;
+    let mut out = Vec::new();
+    out.try_reserve_exact(len)
+        .map_err(|_| Error::Hardening(format!("cannot allocate {len} random bytes")))?;
+    out.resize(len, 0);
     getrandom::fill(&mut out).map_err(|e| Error::Hardening(format!("getrandom failed: {e}")))?;
     Ok(out)
+}
+
+/// `Error::Format` if `len` is above the cap for this call.
+pub(crate) fn check_random_len(len: usize, limit: usize) -> Result<(), Error> {
+    if len > limit {
+        return Err(Error::Format(format!(
+            "{len} random bytes asked for; the cap for this call is {limit}"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

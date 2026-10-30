@@ -44,6 +44,16 @@ process hardening, and internal steps no input can cause. An empty `info`
 passed to `derive` was `Hardening` and is now `Format`, like every other input
 with the wrong shape.
 
+### Fixed — random bytes have a cap per call, and fail instead of crashing
+
+`random_bytes` and `SecretBuf::random` took any length, and a huge one made
+`random_bytes` abort the process, where every other input to krypto has a cap and
+an error. Both now give at most `MAX_RANDOM_BYTES` (1 MiB, the number
+`krypto-cli rand` already used) per call; more is `Format`. A program that needs
+more in one call states its own cap with `random_bytes_with_limit` or
+`SecretBuf::random_with_limit`. Memory that cannot be had is `Hardening`, never
+a crash.
+
 ## [0.7.2] — 2026-10-28
 
 *Moves every RustCrypto and dalek dependency to its current release line, which

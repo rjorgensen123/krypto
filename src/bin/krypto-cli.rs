@@ -244,8 +244,11 @@ fn run() -> Result<(), CliError> {
                 .ok_or_else(|| CliError::usage("rand requires --n <bytes>"))?
                 .parse()
                 .map_err(|_| CliError::usage("--n must be a positive integer"))?;
-            if n == 0 || n > 1_048_576 {
-                return Err(CliError::usage("--n must be between 1 and 1048576"));
+            if n == 0 || n > krypto::MAX_RANDOM_BYTES {
+                return Err(CliError::usage(format!(
+                    "--n must be between 1 and {}",
+                    krypto::MAX_RANDOM_BYTES
+                )));
             }
             let buf = krypto::random_bytes(n).map_err(CliError::from_krypto)?;
             println!("{}", hex::encode(&buf));

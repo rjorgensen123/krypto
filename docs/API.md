@@ -39,7 +39,7 @@ pub use aead::{seal, open, reseal, blob_key_id, Alg};  // reseal: 0.6.0
 pub use store::{SecretStore, MAX_STORE_BYTES};
 pub use error::Error;
 pub use harden::{close_inherited_fds, drop_filesystem, harden_process, no_new_privs};
-pub use util::{ct_eq, random_bytes, sha256};
+pub use util::{ct_eq, random_bytes, random_bytes_with_limit, sha256, MAX_RANDOM_BYTES};  // the last two: 0.7.3
 
 pub mod error;
 pub mod exchange;
@@ -55,7 +55,8 @@ wrong.
 
 *(The size caps `MAX_MASTER_KEY_BYTES` (4 KiB) and `MAX_STORE_BYTES` (16 MiB) became reachable in
 0.5.0 — they were named in the contract but lived in private modules. `MAX_DERIVE_INPUT_BYTES`
-(1 KiB) joined them in 0.7.0: `derive` took unbounded `info` and `salt`.)*
+(1 KiB) joined them in 0.7.0: `derive` took unbounded `info` and `salt`. `MAX_RANDOM_BYTES` (1 MiB)
+joined them in 0.7.3: `random_bytes` and `SecretBuf::random` took any length.)*
 
 ---
 
@@ -78,7 +79,8 @@ it is. If the pages cannot be mapped, locked or excluded from dumps, constructio
 ```rust
 impl SecretBuf {
     pub fn from_vec(v: Vec<u8>) -> Result<Self, Error>;   // copies in, zeroizes the source
-    pub fn random(len: usize) -> Result<Self, Error>;     // from the OS CSPRNG
+    pub fn random(len: usize) -> Result<Self, Error>;     // from the OS CSPRNG, at most MAX_RANDOM_BYTES (0.7.3)
+    pub fn random_with_limit(len: usize, limit: usize) -> Result<Self, Error>; // your own cap (0.7.3)
     pub fn len(&self) -> usize;
     pub fn is_empty(&self) -> bool;
     pub fn expose<R>(&self, f: impl FnOnce(&[u8]) -> R) -> R;
@@ -381,10 +383,19 @@ that ARE base64 by nature (`SHA256:<base64-no-pad>` fingerprints, PEM).
 pub fn sha256(data: &[u8]) -> [u8; 32];                     // FIPS 180-4 — fingerprints
 pub fn ct_eq(a: &[u8], b: &[u8]) -> bool;                   // constant-time; length mismatch → false
 pub fn random_bytes(len: usize) -> Result<Vec<u8>, Error>;  // OS CSPRNG for NON-secrets
+pub fn random_bytes_with_limit(len: usize, limit: usize) -> Result<Vec<u8>, Error>; // 0.7.3
+pub const MAX_RANDOM_BYTES: usize = 1 << 20;                // 0.7.3
 ```
 
 `sha256` is not authentication (use `hmac_sha256`) and not passwords (use `password`).
 `random_bytes` is for salts/ids/jitter — secrets go in `SecretBuf::random`.
+
+*(0.7.3)* **The size of one call is capped.** `random_bytes` and `SecretBuf::random` give at most
+`MAX_RANDOM_BYTES` (1 MiB) per call; more is `Format`. A program that needs more in one call states
+its own cap with `random_bytes_with_limit(len, limit)` or `SecretBuf::random_with_limit(len, limit)`:
+`len` above `limit` is `Format`. The cap is per call, never a setting for the process. Memory that
+cannot be had is `Hardening`, never a crash; a high `limit` is your choice, and a length the system
+promises but cannot back still fills the memory.
 
 ---
 
