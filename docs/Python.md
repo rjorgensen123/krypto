@@ -18,6 +18,8 @@ guarantee.
 pip install krypto-py
 ```
 
+It needs Python 3.11 or newer.
+
 ```python
 import krypto_py as krypto
 

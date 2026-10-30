@@ -479,11 +479,11 @@ enforcement. The modules `sign`/`exchange`/`hex`/`base64` are free functions + c
 
 ## Python — `krypto-py` *(0.8.0)*
 
-The same API from Python: `pip install krypto-py`, then `import krypto_py`. Every function, type,
-constant and module in this document exists there, with the same name, and does the same thing;
-there is no function that only one of them has, and a test fails the build if a name is on one side
-only. What differs is what can be guaranteed (below). What one seals, stores, signs or hashes, the
-other opens, reads and verifies. How to use it, with examples: **[Python](Python.md)**.
+The same API from Python 3.11 or newer: `pip install krypto-py`, then `import krypto_py`. Every
+function, type, constant and module in this document exists there, with the same name, and does the
+same thing; there is no function that only one of them has, and a test fails the build if a name is
+on one side only. What differs is what can be guaranteed (below). What one seals, stores, signs or
+hashes, the other opens, reads and verifies. How to use it, with examples: **[Python](Python.md)**.
 
 How the Rust forms read in Python:
 

@@ -136,6 +136,9 @@ jobs:
           python3 -m venv /tmp/venv
           /tmp/venv/bin/pip install -q -r krypto-py/requirements-ci.txt
 
+      - name: Add clippy
+        run: rustup component add clippy
+
       - name: Clippy for krypto-py (warnings are errors)
         run: PYO3_PYTHON=/tmp/venv/bin/python cargo clippy --locked -p krypto-py --all-targets -- -D warnings
 

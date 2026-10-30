@@ -5,13 +5,15 @@ build-backend = "maturin"
 [project]
 name = "krypto-py"
 description = "Python binding for krypto: secrets in locked memory, AEAD at rest, signatures and passwords."
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 license = "MIT OR Apache-2.0"
 authors = [{ name = "Roger Jorgensen", email = "rogerj@gmail.com" }]
 readme = "README.md"
 keywords = ["secrets", "encryption", "aegis256", "argon2", "ed25519"]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Rust",
     "Operating System :: POSIX :: Linux",
     "Topic :: Security :: Cryptography",

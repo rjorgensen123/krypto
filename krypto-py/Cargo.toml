@@ -16,5 +16,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 krypto = { path = ".." }
-pyo3 = { version = "0.30", features = ["abi3-py39"] }
+pyo3 = { version = "0.30", features = ["abi3-py311"] }
 zeroize = "1"

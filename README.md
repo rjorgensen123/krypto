@@ -50,7 +50,7 @@ The curiosity behind it comes from work on data-plane confidentiality — see
 krypto = "0.8"
 ```
 
-From Python: `pip install krypto-py`, then `import krypto_py` — the same API; see
+From Python 3.11 or newer: `pip install krypto-py`, then `import krypto_py` — the same API; see
 [`docs/Python.md`](docs/Python.md).
 
 ```rust
