@@ -79,24 +79,46 @@ mod forked {
         assert!(krypto::drop_filesystem("/etc").is_err());
 
         // Empty directory: attempt the real thing IN A CHILD. As root the
-        // chroot succeeds (and only the child is jailed); unprivileged it
-        // must fail closed with Error::Hardening (EPERM).
+        // chroot succeeds (and only the child is jailed) with the child inside
+        // its new, empty root; unprivileged it must fail closed with
+        // Error::Hardening (EPERM) and leave the child where it stood.
         let dir = std::env::temp_dir().join(format!("krypto-chroot-test-{}", std::process::id()));
         std::fs::create_dir(&dir).expect("mkdir for chroot target");
         let euid_is_root = unsafe { libc::geteuid() } == 0;
         let target = dir.clone();
-        let code = in_child(move || match krypto::drop_filesystem(&target) {
-            Ok(()) => 0,
-            Err(krypto::Error::Hardening(_)) => 2,
-            Err(_) => 3,
+        let code = in_child(move || {
+            let before = std::env::current_dir().ok();
+            match krypto::drop_filesystem(&target) {
+                Ok(()) => {
+                    let inside = std::env::current_dir().is_ok_and(|d| d.as_os_str() == "/");
+                    if inside && !std::path::Path::new("/etc").exists() {
+                        0
+                    } else {
+                        5
+                    }
+                }
+                Err(krypto::Error::Hardening(_)) => {
+                    if std::env::current_dir().ok() == before {
+                        2
+                    } else {
+                        6
+                    }
+                }
+                Err(_) => 3,
+            }
         });
         std::fs::remove_dir(&dir).expect("rmdir chroot target");
         if euid_is_root {
-            assert_eq!(code, 0, "as root the chroot should succeed (in the child)");
+            assert_eq!(
+                code, 0,
+                "as root the chroot should succeed (in the child): \
+                 5 = not inside an empty root"
+            );
         } else {
             assert_eq!(
                 code, 2,
-                "unprivileged the chroot must fail closed (Hardening)"
+                "unprivileged the chroot must fail closed (Hardening): \
+                 3 = wrong error, 6 = the working directory moved"
             );
         }
     }

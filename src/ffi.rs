@@ -7,6 +7,7 @@
 use crate::error::Error;
 #[cfg(not(miri))]
 use std::io;
+use std::path::Path;
 
 // Under Miri the libc syscalls below are unsupported: `LockedPages` falls back
 // to an ordinary heap buffer and the process calls become no-ops. Miri runs no
@@ -297,42 +298,79 @@ pub(crate) fn close_inherited_fds() -> Result<(), Error> {
     ))
 }
 
-/// `chroot` into `dir`, then `chdir("/")`. The caller (harden.rs) has
-/// already verified that `dir` exists, is a directory and is empty.
+/// `chroot` into `dir`, on the directory as opened (0.7.3). The caller
+/// (harden.rs) has already checked the path.
+///
+/// The process steps into the directory, checks that the directory it stands
+/// in is empty, and makes it the root as the last step. So the process never
+/// stands outside its own root, and the check and the chroot apply to the
+/// same directory even if the path is swapped meanwhile. If a step fails, the
+/// root is unchanged and the process steps back to where it stood; should
+/// even that fail, the error says so.
 #[cfg(all(target_os = "linux", not(miri)))]
-pub(crate) fn chroot_and_chdir(dir: &std::ffi::CStr) -> Result<(), Error> {
-    // SAFETY: `dir` is a valid NUL-terminated path; chroot only reads it.
-    let rc = unsafe { libc::chroot(dir.as_ptr()) };
-    if rc != 0 {
-        return Err(Error::Hardening(format!(
-            "chroot failed: {}",
-            io::Error::last_os_error()
-        )));
+pub(crate) fn chroot_into(dir: &Path) -> Result<(), Error> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    // O_PATH opens a directory only to step into it; it needs no read access.
+    let open = |path: &Path| {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_PATH | libc::O_DIRECTORY)
+            .open(path)
+    };
+    // Where the process stands now, to step back to. Once the root changes it
+    // points outside the new root, so it must not outlive this call: it is
+    // closed when this returns, and never inherited (O_CLOEXEC).
+    let here = open(Path::new("."))?;
+    let target = open(dir)?;
+    fchdir(&target)
+        .map_err(|e| Error::Hardening(format!("stepping into {} failed: {e}", dir.display())))?;
+    if let Err(why) = chroot_here(dir) {
+        return Err(Error::Hardening(match fchdir(&here) {
+            Ok(()) => why,
+            Err(e) => format!("{why}; stepping back failed too: {e}"),
+        }));
     }
-    // Without chdir("/") the working directory still points OUTSIDE the new
-    // root — the classic chroot escape. A failure here leaves the process in
-    // a state we refuse to paper over: hard error.
-    let root = std::ffi::CString::new("/").expect("static string has no NUL");
-    // SAFETY: valid NUL-terminated path.
-    let rc = unsafe { libc::chdir(root.as_ptr()) };
-    if rc != 0 {
-        return Err(Error::Hardening(format!(
-            "chdir(\"/\") after chroot failed: {}",
-            io::Error::last_os_error()
-        )));
+    Ok(())
+}
+
+/// Check that the directory the process stands in is empty, then make it the
+/// root.
+#[cfg(all(target_os = "linux", not(miri)))]
+fn chroot_here(dir: &Path) -> Result<(), String> {
+    let mut entries = std::fs::read_dir(".")
+        .map_err(|e| format!("reading chroot target {} failed: {e}", dir.display()))?;
+    if entries.next().is_some() {
+        return Err(format!("chroot target {} is not empty", dir.display()));
+    }
+    // SAFETY: a static NUL-terminated path; chroot only reads it.
+    if unsafe { libc::chroot(c".".as_ptr()) } != 0 {
+        return Err(format!("chroot failed: {}", io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
+/// Make the directory open on `dir` the working directory.
+#[cfg(all(target_os = "linux", not(miri)))]
+fn fchdir(dir: &std::fs::File) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+
+    // SAFETY: fchdir takes only a descriptor, which `dir` keeps open.
+    if unsafe { libc::fchdir(dir.as_raw_fd()) } != 0 {
+        return Err(io::Error::last_os_error());
     }
     Ok(())
 }
 
 /// Miri: no filesystem to drop.
 #[cfg(miri)]
-pub(crate) fn chroot_and_chdir(_dir: &std::ffi::CStr) -> Result<(), Error> {
+pub(crate) fn chroot_into(_dir: &Path) -> Result<(), Error> {
     Ok(())
 }
 
 /// Non-Linux: fail closed — see `no_new_privs` above.
 #[cfg(all(not(target_os = "linux"), not(miri)))]
-pub(crate) fn chroot_and_chdir(_dir: &std::ffi::CStr) -> Result<(), Error> {
+pub(crate) fn chroot_into(_dir: &Path) -> Result<(), Error> {
     Err(Error::Hardening(
         "drop_filesystem is only supported on Linux".into(),
     ))

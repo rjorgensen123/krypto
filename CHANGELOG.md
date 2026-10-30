@@ -4,6 +4,18 @@ Every notable change to this crate is recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.7.3] — 2026-10-30
+
+### Fixed — `drop_filesystem` changes the root only as its last step
+
+`drop_filesystem` checked the path, then looked it up again for the `chroot`, and
+moved the process into the new root only afterwards. A path swapped in between
+could be made the root without being checked, and if the last step failed, the
+process had the new root but stood outside it. It now opens the directory once,
+steps into it, checks there that it is empty, and makes it the root as the last
+step. On `Err` the root has not changed and the process stands where it stood.
+The signature and the result on success are the same.
+
 ## [0.7.2] — 2026-10-28
 
 *Moves every RustCrypto and dalek dependency to its current release line, which

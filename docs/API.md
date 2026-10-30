@@ -389,7 +389,7 @@ pub fn random_bytes(len: usize) -> Result<Vec<u8>, Error>;  // OS CSPRNG for NON
 pub fn harden_process() -> Result<(), Error>;       // core dumps off + non-dumpable
 pub fn no_new_privs() -> Result<(), Error>;         // never gain privileges (PR_SET_NO_NEW_PRIVS)
 pub fn close_inherited_fds() -> Result<(), Error>;  // closes EVERYTHING above stderr (close_range, Linux 5.9+)
-pub fn drop_filesystem(dir: impl AsRef<Path>) -> Result<(), Error>; // chroot into an EMPTY dir + chdir("/")
+pub fn drop_filesystem(dir: impl AsRef<Path>) -> Result<(), Error>; // chroot into an EMPTY dir, the process inside it
 ```
 
 All of them are **fail-closed**: if the call cannot deliver, you get `Err` — never silent
@@ -397,7 +397,10 @@ degradation. Each step is its own deliberate choice. Recommended order: `harden_
 `no_new_privs()` first in `main` · `close_inherited_fds()` early, before opening your own files
 (NB: it also kills deliberately inherited sockets, e.g. socket activation — hence a separate
 call) · `drop_filesystem(dir)` **after** key material is read — irreversible, needs privileges
-(root or `CAP_SYS_CHROOT`), and the directory must be empty (verified before the chroot). After
+(root or `CAP_SYS_CHROOT`), and the directory must be empty (verified before the chroot). Use a
+directory only root can write to, such as `/var/empty`. *(0.7.3)* The chroot applies to the
+directory that was checked, and the root changes as the last step, with the process already
+inside; on `Err` the root has not changed and the process stands where it stood. After
 the chroot krypto needs no filesystem: randomness comes from the `getrandom` syscall, and
 AEAD/KDF/signing/passwords touch no files.
 

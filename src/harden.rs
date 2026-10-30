@@ -57,7 +57,7 @@ pub fn close_inherited_fds() -> Result<(), Error> {
 }
 
 /// Make the filesystem disappear for this process: `chroot` into `dir` —
-/// which MUST be an empty directory — followed by `chdir("/")`.
+/// which MUST be an empty directory — with the process inside it.
 ///
 /// After this call the process cannot open key files, configuration or
 /// anything else on disk, because kernel-wise they no longer exist: an
@@ -69,7 +69,11 @@ pub fn close_inherited_fds() -> Result<(), Error> {
 /// The rules, enforced or fail-closed:
 ///
 /// - `dir` must exist, be a directory and be EMPTY — verified before the
-///   chroot. Anything else is a hard error.
+///   chroot, and again on the directory itself right before it (0.7.3).
+///   Anything else is a hard error.
+/// - On `Err`, the root has not changed, and the process stands where it
+///   stood; should stepping back fail, the error says so (0.7.3).
+/// - Use a directory only root can write to, such as `/var/empty`.
 /// - The call is irreversible. Do it AFTER reading key material.
 /// - It requires privileges (root or `CAP_SYS_CHROOT`). Ideally services
 ///   run without them — but when they are available, use them to protect
@@ -90,7 +94,5 @@ pub fn drop_filesystem(dir: impl AsRef<Path>) -> Result<(), Error> {
             dir.display()
         )));
     }
-    let c = std::ffi::CString::new(dir.as_os_str().as_encoded_bytes())
-        .map_err(|_| Error::Hardening("chroot target path contains NUL".into()))?;
-    ffi::chroot_and_chdir(&c)
+    ffi::chroot_into(dir)
 }

@@ -32,8 +32,9 @@ krypto::close_inherited_fds()?;   // close everything inherited above stderr —
 krypto::drop_filesystem("/var/empty")?; // chroot: the disk "disappears" — AFTER key reading
 ```
 
-`drop_filesystem` is irreversible, needs privileges, and the directory must be empty. After it
-krypto needs no filesystem — randomness comes straight from the operating system, not from
+`drop_filesystem` is irreversible, needs privileges, and the directory must be empty; use one only
+root can write to. If it fails, the process is as it was: same root, same working directory.
+After it krypto needs no filesystem — randomness comes straight from the operating system, not from
 `/dev`. And `close_inherited_fds` also closes sockets you inherited *on purpose* (e.g. socket
 activation) — which is why it is its own choice and not part of `harden_process`.
 
@@ -391,6 +392,7 @@ None of them carry key material or plaintext. You can log them as they are.
 
 | Version | What arrived |
 |---|---|
+| **0.7.3** | `drop_filesystem` changes the root only as its last step, on the directory it checked; when it fails, the process is as it was |
 | **0.7.2** | **Secret memory and the current RustCrypto line.** The dependencies moved to the current RustCrypto line (RUSTSEC-2026-0387), and Rust 1.89 is the minimum · each secret has memory pages of its own: kept out of core dumps, still locked when another secret is dropped, with a guard page on each side (note: each live secret uses at least one page of the locked-memory limit) · the password functions and `derive` wipe what argon2 and HKDF leave on the stack, and derived keys are written straight into locked memory · the per-key limit of AES-256-GCM is documented |
 | **0.7.1** | No functional change: the install snippets point at crates.io, and the published crate no longer carries the CI configuration |
 | **0.7.0** | **First release on crates.io.** `SecretBuf::from_vec` wipes its source even when locking fails · `info` and `salt` for `derive` are capped (`MAX_DERIVE_INPUT_BYTES`), and `MasterKey::from_bytes` caps the key like the file route · the store checks names when it reads a file too (see below) |
