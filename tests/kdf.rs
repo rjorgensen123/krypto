@@ -139,3 +139,15 @@ fn different_purposes_give_different_keys() {
     let mac_b = krypto::hmac_sha256(&b, b"same data").unwrap();
     assert_ne!(mac_a, mac_b, "two purposes produced the same key");
 }
+
+/// The key id is frozen: blobs carry it, and `krypto-cli` has always written
+/// this value for this key (0.8.0, when it moved into the library).
+#[test]
+fn key_id_is_frozen() {
+    let key = krypto::SecretBuf::from_vec((0u8..32).collect()).unwrap();
+    let mk = MasterKey::from_bytes(key).unwrap();
+    assert_eq!(
+        krypto::hex::encode(&mk.key_id().unwrap()),
+        "e5b56819c0e7cf09e3fc10357542f41c"
+    );
+}

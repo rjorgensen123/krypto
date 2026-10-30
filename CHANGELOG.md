@@ -4,6 +4,29 @@ Every notable change to this crate is recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] — 2026-10-30
+
+### Added — `krypto-py`: the same API from Python
+
+`krypto-py` (on PyPI, imported as `krypto_py`) is the crate's API in Python:
+every function, type, constant and module, with the same names, built from the
+same code with PyO3; a test fails the build if a name is in one and not the
+other. What one seals, stores, signs or hashes, the other opens, reads and
+verifies, and the tests check it both ways: each side opens and checks what the
+other made, and gives the same answer where the input fixes it. Errors are
+exceptions, one per `Error` variant. The secrets stay in krypto's locked memory;
+what differs is only what can be guaranteed for the copies Python itself holds,
+which `docs/API.md` sets out. The repository is a workspace of `krypto` and
+`krypto-py`, CI builds and tests the binding, and the published `krypto` crate
+does not carry it.
+
+### Added — `MasterKey::key_id`
+
+The key id of a master key, which says what key generation a blob was sealed
+under, is now in the library: HMAC-SHA256 over `key-id` under the key derived
+for `krypto/key-id/v1` with an empty salt, the first 16 bytes. It is the value
+`krypto-cli` has always written, and `krypto-cli` now uses it; a test pins it.
+
 ## [0.7.3] — 2026-10-30
 
 ### Fixed — `drop_filesystem` changes the root only as its last step

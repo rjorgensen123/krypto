@@ -45,8 +45,8 @@ the solution.
 
 ## If you are filing an issue
 
-Say which version. `krypto-cli version` prints it, and it is in `Cargo.toml` and
-`VERSION`.
+Say which version. `krypto-cli version` prints it, `krypto_py.VERSION` holds it in
+Python, and it is in `Cargo.toml` and `VERSION`.
 
 Include what someone else needs to see the same thing: the calls you made, the input
 shape, and the actual output or error. A failing test is the clearest form there is.

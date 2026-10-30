@@ -18,15 +18,16 @@ argon2id password hashing/derivation, signatures
 utilities and process hardening. A thin, opinionated wrapper around established primitives — **no cryptography of our
 own is implemented**.
 
-- **Type:** Rust crate (library)
+- **Type:** Rust crate (library), and the same API as a Python module, `krypto-py` (from 0.8.0)
 - **Lifetime:** long-lived — the version moves when the surface does, and the API document
   carries the version it applies from
 - **License:** MIT/Apache-2.0 dual
 - **In use:** already in service in more than one application — among them the `nettls`
   crate, which builds its TLS layer on top of it.
 - **Docs (ship with the crate):** overview [`docs/Home.md`](docs/Home.md) · usage guide
-  [`docs/Usage.md`](docs/Usage.md) · **API contract** [`docs/API.md`](docs/API.md) — every
-  public name, guarded by `tests/docs.rs`
+  [`docs/Usage.md`](docs/Usage.md) (Rust) and [`docs/Python.md`](docs/Python.md) (Python) ·
+  **API contract** [`docs/API.md`](docs/API.md), one for both — every public name, guarded by
+  `tests/docs.rs`
 - **Changes:** [`CHANGELOG.md`](CHANGELOG.md) · **Version:** see [`VERSION`](VERSION)
   (kept in lockstep with `Cargo.toml` by `tests/version.rs`)
 
@@ -46,8 +47,11 @@ The curiosity behind it comes from work on data-plane confidentiality — see
 
 ```toml
 [dependencies]
-krypto = "0.7"
+krypto = "0.8"
 ```
+
+From Python: `pip install krypto-py`, then `import krypto_py` — the same API; see
+[`docs/Python.md`](docs/Python.md).
 
 ```rust
 fn main() -> Result<(), krypto::Error> {
@@ -66,17 +70,13 @@ fn main() -> Result<(), krypto::Error> {
 
 Secrets live in `SecretBuf`/`SecretString` (mlock'ed, zeroized, redacted `Debug`) and never cross
 an API boundary as `String` or `Vec<u8>` — a rule enforced by
-the type system. Non-Rust consumers use the bundled **`krypto-cli`** binary (seal/open/mac/keyid
-and more over stdin/stdout; key material never enters the calling process) — the CLI mirrors the
-crate surface, and every deliberate gap is documented in the API contract.
+the type system.
 
-**Open question — the Python side: bindings instead of a subprocess.** Python
-reaches this crate through `krypto-cli`, and the parity suite under `python/`
-checks that route in both directions. PyO3 bindings are the other way to do it.
-The subprocess keeps key material out of the calling process by construction;
-bindings would have to earn that on purpose, and they would tie the Python side
-to a build toolchain the CLI does not need. Which is the better trade is not
-settled, and nothing here depends on the answer.
+From Python, the same API is **`krypto-py`** (`pip install krypto-py`, `import krypto_py`): every
+function, type, constant and module of the crate, with the same names, built from the same code — so
+what one seals, the other opens. They differ only in what can be guaranteed for the copies Python
+itself holds; the API contract says exactly where. The bundled **`krypto-cli`** binary runs the
+same functions from a shell.
 
 ## Test
 
@@ -89,6 +89,13 @@ cargo audit                    # RustSec advisory scan
 # implementations (cryptography / argon2-cffi) — both directions; also a CI job
 python3 -m venv python/.venv && python/.venv/bin/pip install -r python/requirements-ci.txt
 cargo build --bin krypto-cli && python/.venv/bin/pytest python/ -q
+
+# krypto-py: built with maturin and tested from Python; cargo test checks that it
+# has the crate's API, and that Rust and Python open what the other made; also a CI job
+python3 -m venv .venv && .venv/bin/pip install -r krypto-py/requirements-ci.txt
+VIRTUAL_ENV=.venv .venv/bin/maturin develop --locked -m krypto-py/Cargo.toml
+.venv/bin/pytest krypto-py/tests -q
+PYO3_PYTHON=$PWD/.venv/bin/python cargo test -p krypto-py
 ```
 
 ## Author

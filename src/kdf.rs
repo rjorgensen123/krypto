@@ -134,7 +134,23 @@ impl MasterKey {
         crate::secret::scrub_stack::<HKDF_SCRUB_BYTES>();
         res
     }
+
+    /// The key id of this master key: which key generation a blob was sealed
+    /// under, safe to publish (0.8.0). HMAC-SHA256 over `key-id`, keyed with
+    /// the key derived for the context `krypto/key-id/v1` and an empty salt;
+    /// the first 16 bytes. One-way, and kept apart from every working key by
+    /// its own context. The value is frozen: blobs carry it.
+    pub fn key_id(&self) -> Result<[u8; 16], Error> {
+        let dk = self.derive(KEY_ID_CONTEXT, b"")?;
+        let mac = hmac_sha256(&dk, b"key-id")?;
+        let mut id = [0u8; 16];
+        id.copy_from_slice(&mac[..16]);
+        Ok(id)
+    }
 }
+
+/// The HKDF context of [`MasterKey::key_id`] (0.8.0; frozen).
+const KEY_ID_CONTEXT: &[u8] = b"krypto/key-id/v1";
 
 /// HMAC-SHA256 over `data` with a derived key — an audit chain's MAC, say.
 /// Keyed MAC, not a plain hash, so someone who can edit the data

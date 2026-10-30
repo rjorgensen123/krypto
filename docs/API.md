@@ -22,7 +22,8 @@ with the module. Two normative rules bind whoever *changes* the surface:
   unexpected structure. An uncovered case → update this document.
 - **The feedback contract.** What the crate answers — success, errors and status — lives HERE:
   the library through `Result` and [`Error`](#error--error) (the crate never logs — logging
-  belongs to the consumer), the cli through exit codes, per-command stdout formats and stderr.
+  belongs to the consumer), *(0.8.0)* Python through the same values and one exception per `Error`
+  variant, the cli through exit codes, per-command stdout formats and stderr.
   No error path carries key material or plaintext. An answer not written here is a gap in the
   contract and should be reported — not interpreted.
 
@@ -128,6 +129,7 @@ impl MasterKey {
     pub fn from_secret_file(path: impl AsRef<Path>) -> Result<Self, Error>;
     pub fn from_bytes(key: SecretBuf) -> Result<Self, Error>;   // consumes the buffer
     pub fn derive(&self, info: &[u8], salt: &[u8]) -> Result<DerivedKey, Error>; // empty info: Format (0.7.3)
+    pub fn key_id(&self) -> Result<[u8; 16], Error>;   // 0.8.0
 }
 ```
 
@@ -145,6 +147,11 @@ was only on `from_secret_file` before)*; file reads are
 bounded (never OOM).
 `from_bytes` **consumes** the buffer (the key cannot be read back out) and is the path for a
 key that must never touch disk.
+
+*(0.8.0)* `key_id` is the master key's key id: which key generation a blob was sealed under, safe to
+publish. HMAC-SHA256 over `key-id`, keyed with the key `derive` gives for the context
+`krypto/key-id/v1` and an empty salt; the first 16 bytes. It is frozen, because blobs carry it, and it
+is the value `krypto-cli` has always written.
 
 ### `DerivedKey`
 
@@ -423,8 +430,8 @@ the chroot krypto needs no filesystem: randomness comes from the `getrandom` sys
 AEAD/KDF/signing/passwords touch no files.
 
 **Deliberately not in `krypto-cli`** (a documented exclusion under the parity rule): hardening is
-process-local — hardening a subprocess does not protect the caller. Non-Rust consumers harden
-their own process with their own language's tools.
+process-local — hardening a subprocess does not protect the caller. *(0.8.0)* From Python,
+`krypto-py` hardens the Python process with these same functions.
 
 ---
 
@@ -470,10 +477,49 @@ enforcement. The modules `sign`/`exchange`/`hex`/`base64` are free functions + c
 
 ---
 
-## `krypto-cli` — for languages that are not Rust
+## Python — `krypto-py` *(0.8.0)*
 
-The crate also builds a small binary, so a program in another language can use it without
-reimplementing anything. The key material stays on the Rust side.
+The same API from Python: `pip install krypto-py`, then `import krypto_py`. Every function, type,
+constant and module in this document exists there, with the same name, and does the same thing;
+there is no function that only one of them has, and a test fails the build if a name is on one side
+only. What differs is what can be guaranteed (below). What one seals, stores, signs or hashes, the
+other opens, reads and verifies. How to use it, with examples: **[Python](Python.md)**.
+
+How the Rust forms read in Python:
+
+| Rust | Python |
+|---|---|
+| `krypto::seal`, `krypto::sign::ed25519_sign`, … | `krypto_py.seal`, `krypto_py.sign.ed25519_sign`, … — the modules `sign`, `exchange`, `password`, `hex`, `base64`, `harden` and `error` too |
+| `&[u8]`, `Vec<u8>`, `[u8; N]` | `bytes`; a wrong length for `[u8; N]` is `FormatError` |
+| `&str`, `String` | `str` |
+| `impl AsRef<Path>` | `str` or a path object |
+| `Result<T, Error>` | `T`, or an exception |
+| `Error::Io`, `Hardening`, `Format`, `Auth`, `KeyNotFound`, `WrongKey` | `IoError`, `HardeningError`, `FormatError`, `AuthError`, `KeyNotFoundError`, `WrongKeyError`, all subclasses of `Error` |
+| `Alg::Aegis256`, `Preset::High`, … | `Alg.Aegis256`, `password.Preset.High`, … |
+| A value taken by value: `MasterKey::from_bytes(SecretBuf)`, `SecretStore::rotate(self, …)` | The object is consumed; using it afterwards is a `ValueError` |
+| `expose(\|b\| …)`, `expose_str(\|s\| …)` | `expose(f)`, `expose_str(f)`: `f` is called with a copy, and what it returns is returned |
+| `SecretStore<'a>` borrows the `MasterKey` | `SecretStore` keeps the `MasterKey` object alive |
+
+### What is guaranteed, and where Python differs
+
+| | Rust | Python |
+|---|---|---|
+| `SecretBuf`, `SecretString`, `MasterKey`, `DerivedKey`, `SecretStore` | In locked memory, kept out of core dumps, guard pages, wiped on drop | The same: the objects hold Rust memory |
+| What goes in | Moved in, or zeroized by `from_vec` | Copied in. The `bytes` or `str` passed stays as Python keeps it, neither locked nor wiped; a `bytearray` given to `SecretBuf.from_vec` is zeroed |
+| What comes out | Seen inside the closure, in locked memory | `expose` and `expose_str` hand `f` a Python copy, neither locked nor wiped. `open` and `get` return a `SecretBuf`, so plaintext stays locked until exposed |
+| Locked memory | Counted against `RLIMIT_MEMLOCK` of the process | The same, in the Python process |
+| `fork` | The child's copies of locked pages are not locked | The same |
+| `harden` | Applies to the process | Applies to the Python process; `close_inherited_fds` closes the interpreter's own descriptors too |
+| Long calls | — | `password::hash`, `verify` and `derive_key` release the GIL |
+| A panic inside krypto | Unwinds to the caller | Becomes `pyo3_runtime.PanicException` |
+
+---
+
+## `krypto-cli` — the command-line tool
+
+The crate also builds a small binary that runs the same functions from a shell: for tests, scripts
+and checks by hand. *(0.8.0)* From Python, use `krypto-py` (above), which is the same API in the
+same process. The key material stays on the Rust side.
 
 | Command | In → out |
 |---|---|
@@ -510,7 +556,8 @@ material.
 
 The key id in the blob header is derived deterministically from the master key: HMAC-SHA256 over
 the string `key-id`, keyed with the key `derive` gives for the context `krypto/key-id/v1` and an
-empty salt; the first 16 bytes. It identifies the generation without revealing the key. Stdin is
+empty salt; the first 16 bytes. It identifies the generation without revealing the key. *(0.8.0)* It
+is `MasterKey::key_id`. Stdin is
 bounded (64 MiB). Error texts are English.
 
 ---
@@ -518,4 +565,5 @@ bounded (64 MiB). Error texts are English.
 ## Further
 
 - **[Home](Home.md)** — what krypto is, and what it does not do
-- **[Usage](Usage.md)** — how to do it, with examples
+- **[Usage](Usage.md)** — how to do it, with examples in Rust
+- **[Python](Python.md)** — the same, with examples in Python

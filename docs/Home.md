@@ -3,7 +3,8 @@
 **In short:** a small, reusable building block that makes sure secrets — passwords, keys and other
 sensitive material — are handled safely, both while in use and at rest. It does not invent its own
 cryptography; it wraps proven, recognized methods so everything is done one correct way, in one
-place.
+place. It comes for Rust (the crate `krypto`) and for Python (the module `krypto-py`): the same API
+in both, running the same code.
 
 ## Why does it exist?
 
@@ -42,11 +43,13 @@ The curiosity behind it comes from work on data-plane confidentiality — see
 | **The small utilities everyone needs** | canonical hex, plain SHA-256, constant-time comparison, randomness for non-secrets |
 | **Tighten the process itself** | memory, privileges, inherited file descriptors — and finally the whole filesystem. Each step is one call |
 
-If you are not using Rust, a command-line tool ships with the crate and provides the most
-important of these — so your program does not have to invent its own crypto.
+All of it is there from Rust and from Python. `krypto-py` is the same API in Python, with the
+same names, running the same Rust code inside, so what one seals, the other opens. A command-line
+tool, `krypto-cli`, runs the same functions from a shell, for tests and scripts.
 
-**[How to use krypto](Usage.md)** shows how each of them is done, with examples.
-**[API](API.md)** is the reference over every type and function.
+**[How to use krypto](Usage.md)** shows how each of them is done, with examples in Rust, and
+**[from Python](Python.md)** the same with Python code. **[API](API.md)** is the reference over
+every type and function, for both.
 
 ## What it does not do
 

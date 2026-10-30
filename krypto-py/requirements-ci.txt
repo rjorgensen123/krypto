@@ -1,0 +1,11 @@
+# Locked Python tools for building and testing krypto-py.
+#
+# Usage:  python3 -m venv .venv && .venv/bin/pip install -r krypto-py/requirements-ci.txt
+#         VIRTUAL_ENV=.venv maturin develop --locked -m krypto-py/Cargo.toml
+#         KRYPTO_CLI=target/debug/krypto-cli .venv/bin/pytest krypto-py/tests -q
+iniconfig==2.3.0
+maturin==1.16.0
+packaging==26.3
+pluggy==1.6.0
+Pygments==2.20.0
+pytest==9.1.1

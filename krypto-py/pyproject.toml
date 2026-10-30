@@ -1,0 +1,27 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "krypto-py"
+description = "Python binding for krypto: secrets in locked memory, AEAD at rest, signatures and passwords."
+requires-python = ">=3.9"
+license = "MIT OR Apache-2.0"
+authors = [{ name = "Roger Jorgensen", email = "rogerj@gmail.com" }]
+readme = "README.md"
+keywords = ["secrets", "encryption", "aegis256", "argon2", "ed25519"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Security :: Cryptography",
+]
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/rjorgensen123/krypto"
+Documentation = "https://github.com/rjorgensen123/krypto/blob/main/docs/Python.md"
+Changelog = "https://github.com/rjorgensen123/krypto/blob/main/CHANGELOG.md"
+
+[tool.maturin]
+module-name = "krypto_py"

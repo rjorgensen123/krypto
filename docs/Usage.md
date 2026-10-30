@@ -1,8 +1,11 @@
 # How to use krypto
 
-**In short:** this is the how-to. **[Home](Home.md)** tells you what krypto is and what you can
-use it for; this page shows **how** you actually do it, with examples. If you need to look up a
-specific type or function, **[API](API.md)** is the reference.
+**In short:** this is the how-to, with the examples in Rust. **[Home](Home.md)** tells you what
+krypto is and what you can use it for; this page shows **how** you actually do it. If you need to
+look up a specific type or function, **[API](API.md)** is the reference.
+
+From Python, the same API is **`krypto-py`**: **[How to use krypto from Python](Python.md)** has the
+same sections with the Python code, and each section here links to it.
 
 ---
 
@@ -10,7 +13,7 @@ specific type or function, **[API](API.md)** is the reference.
 
 ```toml
 [dependencies]
-krypto = "0.7"
+krypto = "0.8"
 ```
 
 And first of all in `main`, before anything else:
@@ -37,6 +40,8 @@ root can write to. If it fails, the process is as it was: same root, same workin
 After it krypto needs no filesystem — randomness comes straight from the operating system, not from
 `/dev`. And `close_inherited_fds` also closes sockets you inherited *on purpose* (e.g. socket
 activation) — which is why it is its own choice and not part of `harden_process`.
+
+*In Python: [Getting started](Python.md#getting-started).*
 
 ---
 
@@ -71,6 +76,8 @@ locked-memory limit (`RLIMIT_MEMLOCK`, `ulimit -l`), decrypted plaintexts and de
 included. At a limit of 8 MiB that is about 2000 at once. When the limit is reached, creating a
 secret fails with `Hardening`: raise the limit (in Docker, `--ulimit memlock=…`) or keep fewer
 secrets alive at once.
+
+*In Python: [Secrets in memory](Python.md#secrets-in-memory).*
 
 ---
 
@@ -110,6 +117,8 @@ them can be computed back to the master key.
 
 Put a version number in the string (`/v1`). Then you can change it later without colliding with
 old data.
+
+*In Python: [The master key](Python.md#the-master-key).*
 
 ---
 
@@ -156,6 +165,8 @@ get wrong plaintext back instead.
 That includes someone swapping the key id to trick you into the wrong key. That case has its own
 test in the crate.
 
+*In Python: [Encrypt and decrypt](Python.md#encrypt-and-decrypt).*
+
 ---
 
 ## A small encrypted store on disk
@@ -198,6 +209,8 @@ again. Break the rules and you get `Format`.
 **When not to use the store:** if your secrets live in a database rather than in a file, build
 directly on `derive` + `seal`/`open` instead. The store solves the file problem; it is not a
 general layer.
+
+*In Python: [A small encrypted store on disk](Python.md#a-small-encrypted-store-on-disk).*
 
 ---
 
@@ -248,6 +261,8 @@ code or your documentation — that makes two places to keep in sync, and sooner
 tuned later without old data becoming unreadable. For password hashing you do not need to think
 about it — the parameters live in the stored string, and `verify` reads them from there.
 
+*In Python: [Passwords](Python.md#passwords).*
+
 ---
 
 ## Putting a seal on something
@@ -261,6 +276,8 @@ let seal = krypto::hmac_sha256(&log_key, line.as_bytes())?;
 Without the key nobody can produce a valid seal, and therefore nobody can change the line
 unnoticed. The usual pattern is to include the previous line's seal in the next computation — then
 the whole log hangs together as a chain.
+
+*In Python: [Putting a seal on something](Python.md#putting-a-seal-on-something).*
 
 ---
 
@@ -286,6 +303,8 @@ sign::ecdsa_p256_verify(&sec1_public, message, &der)?;
 Private keys live in `SecretBuf` like everything else secret. A malformed key/signature gives
 `Format`; a signature that does not hold gives `Auth` — the same split as everywhere else.
 
+*In Python: [Signing and verifying](Python.md#signing-and-verifying).*
+
 ## Agreeing on a key with a peer (X25519)
 
 ```rust
@@ -300,6 +319,8 @@ let key = master.derive(b"my-app/envelope/v1", salt)?;   // HKDF before use — 
 
 The result is keying *material*, not a key — always run it through `derive`. A malicious peer
 point that would force a predictable secret is rejected with `Auth`.
+
+*In Python: [Agreeing on a key with a peer](Python.md#agreeing-on-a-key-with-a-peer-x25519).*
 
 ## The small utilities
 
@@ -317,12 +338,16 @@ Both give at most 1 MiB in one call (`MAX_RANDOM_BYTES`); asking for more is `Fo
 program really needs more in one call, say so with your own cap: `random_bytes_with_limit(len,
 limit)` or `SecretBuf::random_with_limit(len, limit)`. The cap is per call, not a setting.
 
+*In Python: [The small utilities](Python.md#the-small-utilities).*
+
 ---
 
-## From languages other than Rust
+## `krypto-cli` — the command-line tool
 
-The crate ships a command-line tool. The point is that you do **not roll your own crypto** in the
-other language — two implementations that must agree eventually disagree.
+The crate also builds `krypto-cli`, which runs the same functions from a shell: for tests, scripts
+and checking things by hand. From Python, use [`krypto-py`](Python.md) instead — the same API, in
+your own process. Either way, you do **not roll your own crypto** — two implementations that must
+agree eventually disagree.
 
 ```bash
 krypto-cli version                                                               # the crate version (new in 0.6.0)
@@ -394,12 +419,15 @@ Six kinds, and they mean different things:
 
 None of them carry key material or plaintext. You can log them as they are.
 
+*In Python: [Errors you can get](Python.md#errors-you-can-get).*
+
 ---
 
 ## Changelog
 
 | Version | What arrived |
 |---|---|
+| **0.8.0** | **Python: `krypto-py`.** The same API from Python, built from the same code: what one seals, the other opens; one API reference, with the guarantees that differ set apart · `MasterKey::key_id` in the library, the value `krypto-cli` has always used · the repository is a workspace of `krypto` and `krypto-py` |
 | **0.7.3** | `drop_filesystem` changes the root only as its last step, on the directory it checked; when it fails, the process is as it was · every change to a blob past its `FAFN` magic gives `Auth` (`krypto-cli` exit 3), and `SecretStore::get` gives `Auth` for a key id that does not match · an empty `info` for `derive` is `Format` · random bytes are capped at 1 MiB per call, with your own cap as an option |
 | **0.7.2** | **Secret memory and the current RustCrypto line.** The dependencies moved to the current RustCrypto line (RUSTSEC-2026-0387), and Rust 1.89 is the minimum · each secret has memory pages of its own: kept out of core dumps, still locked when another secret is dropped, with a guard page on each side (note: each live secret uses at least one page of the locked-memory limit) · the password functions and `derive` wipe what argon2 and HKDF leave on the stack, and derived keys are written straight into locked memory · the per-key limit of AES-256-GCM is documented |
 | **0.7.1** | No functional change: the install snippets point at crates.io, and the published crate no longer carries the CI configuration |

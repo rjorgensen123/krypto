@@ -75,11 +75,10 @@ jobs:
       - name: Test on the declared rust-version
         run: cargo +"$MSRV" test --locked --all-targets
 
-  # Rust <-> Python parity (0.5.0): pytest drives the REAL binary as a
-  # subprocess, the way a non-Rust caller does, and checks every answer against
-  # an INDEPENDENT implementation (cryptography/argon2-cffi/hashlib), both
-  # directions. Two implementations that must agree are tested against each
-  # other — not each against itself.
+  # Rust <-> Python parity (0.5.0): pytest drives the REAL krypto-cli as a
+  # subprocess and checks every answer against an INDEPENDENT implementation
+  # (cryptography/argon2-cffi/hashlib), both directions. Two implementations
+  # that must agree are tested against each other — not each against itself.
   python-parity:
     runs-on: ubuntu-latest
     container:
@@ -110,6 +109,47 @@ jobs:
 
       - name: Parity tests (pytest)
         run: /tmp/venv/bin/pytest python/ -q
+
+  # The Python binding (0.8.0): built with maturin and tested from Python, with
+  # what crosses between Rust and Python tested both ways.
+  python-binding:
+    runs-on: ubuntu-latest
+    container:
+      image: rust:1-bookworm
+      options: --ulimit memlock=-1:-1
+    steps:
+      - name: Checkout (no third-party action)
+        run: |
+          git config --global --add safe.directory '*'
+          git init -q .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
+          git -c http.extraheader="Authorization: basic ${AUTH}" \
+              fetch -q --depth 1 origin "${GITHUB_SHA}"
+          git checkout -q --detach FETCH_HEAD
+
+      # Pinned, like the Rust side: krypto-py/requirements-ci.txt fixes maturin
+      # and pytest.
+      - name: Python + build tools (pinned versions)
+        run: |
+          apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv
+          python3 -m venv /tmp/venv
+          /tmp/venv/bin/pip install -q -r krypto-py/requirements-ci.txt
+
+      - name: Clippy for krypto-py (warnings are errors)
+        run: PYO3_PYTHON=/tmp/venv/bin/python cargo clippy --locked -p krypto-py --all-targets -- -D warnings
+
+      - name: Build and install krypto-py
+        run: VIRTUAL_ENV=/tmp/venv /tmp/venv/bin/maturin develop --locked -m krypto-py/Cargo.toml
+
+      # The same names on both sides; and Rust seals, stores, signs and hashes,
+      # and krypto_py opens and checks it in a Python subprocess, then the other
+      # way round.
+      - name: The same API, and Rust and Python open what the other made
+        run: PYO3_PYTHON=/tmp/venv/bin/python cargo test --locked -p krypto-py
+
+      - name: krypto-py from Python (pytest)
+        run: /tmp/venv/bin/pytest krypto-py/tests -q
 
   # Dependency audit: RustSec advisories, license allowlist, bans and source
   # control. The configuration lives in deny.toml.

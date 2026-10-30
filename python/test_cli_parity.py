@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 """Rust ↔ Python parity for krypto-cli.
 
-Every test drives the REAL binary (subprocess, exactly like a non-Rust
-caller does) and
+Every test drives the REAL binary as a subprocess and
 checks the answer against an INDEPENDENT Python implementation (`cryptography`
 / `argon2-cffi` / `hashlib`) — in both directions where a direction exists.
 That is the guarantee worth having: two implementations that must agree,

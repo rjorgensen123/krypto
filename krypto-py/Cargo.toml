@@ -1,0 +1,20 @@
+[package]
+name = "krypto-py"
+version = "0.8.0"
+edition = "2021"
+rust-version = "1.89"
+description = "Python binding for krypto: secrets in locked memory, AEAD at rest, signatures and passwords."
+repository = "https://github.com/rjorgensen123/krypto"
+license = "MIT OR Apache-2.0"
+authors = ["Roger Jorgensen <rogerj@gmail.com>"]
+# The Rust crate is never published; the Python package is, on PyPI.
+publish = false
+
+[lib]
+name = "krypto_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+krypto = { path = ".." }
+pyo3 = { version = "0.30", features = ["abi3-py39"] }
+zeroize = "1"

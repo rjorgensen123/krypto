@@ -91,7 +91,7 @@ unless you ask not to be.
 ## Scope
 
 This crate is a thin wrapper around established primitives — RustCrypto, *ring*,
-argon2, aegis.
+argon2, aegis — and `krypto-py` is built on PyO3.
 
 **A flaw in one of those is not this crate's to fix.** Report it to that project —
 that is where a fix can be made, and where every other user of it is waiting.
@@ -109,6 +109,8 @@ What is in scope here is how the crate uses them:
 - how secrets are held in memory, and whether they are wiped when they should be
 - the process hardening calls and their failure behaviour
 - `krypto-cli`: how key material enters and leaves the process
+- `krypto-py`: how keys and data cross between Python and Rust, and whether that
+  matches what [the API contract](docs/API.md#what-is-guaranteed-and-where-python-differs) says
 
 **Not in scope:** that a chosen algorithm is not the one you would have chosen, that
 a dependency has a newer version, or that a documented and deliberate limitation

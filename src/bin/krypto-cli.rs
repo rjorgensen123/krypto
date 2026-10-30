@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! krypto-cli — the bridge for non-Rust consumers.
+//! krypto-cli — krypto's functions from a shell.
 //!
-//! A caller that is not Rust — Python, say — runs this binary as a subprocess
-//! instead of implementing its own crypto, or reaching for bindings. ONE
-//! crypto implementation. Since 0.5.0 the bridge mirrors the Rust surface —
-//! AEAD, MAC, signatures, X25519, password derivation/hashing, SHA-256 —
-//! apart from what the API contract lists as left out (the store, process
-//! hardening), with one rule throughout: **private key material never crosses
-//! into the calling process.** It lives in files (created 0600, never
+//! For tests, scripts and checks by hand. From Python, the same API is
+//! `krypto-py`, in the calling process (0.8.0); this binary is no longer the
+//! way in for Python. It covers the Rust surface — AEAD, MAC, signatures,
+//! X25519, password derivation/hashing, SHA-256 — apart from what the API
+//! contract lists as left out (the store, process hardening), with one rule
+//! throughout: **private key material never crosses into the calling
+//! process.** It lives in files (created 0600, never
 //! overwritten) and is referenced by path; only public keys, signatures,
 //! hashes, blobs and requested plaintext go to stdout.
 //!
@@ -48,8 +48,6 @@ use krypto::{
     blob_key_id, exchange, hex, hmac_sha256, open, seal, sign, Alg, DerivedKey, MasterKey,
     SecretBuf, SecretString,
 };
-
-const KEY_ID_CONTEXT: &[u8] = b"krypto/key-id/v1";
 
 fn main() -> ExitCode {
     // Best-effort process hardening; a CLI should not refuse to run in
@@ -318,7 +316,7 @@ fn run_aead(args: &Args) -> Result<(), CliError> {
     let master = MasterKey::from_secret_file(key_file).map_err(CliError::from_krypto)?;
 
     if args.command == "keyid" {
-        let id = key_id(&master)?;
+        let id = master.key_id().map_err(CliError::from_krypto)?;
         println!("{}", hex::encode(&id));
         return Ok(());
     }
@@ -347,7 +345,7 @@ fn run_aead(args: &Args) -> Result<(), CliError> {
     let input = read_stdin()?;
     match args.command.as_str() {
         "seal" => {
-            let kid = key_id(&master)?;
+            let kid = master.key_id().map_err(CliError::from_krypto)?;
             let pt = SecretBuf::from_vec(input).map_err(CliError::from_krypto)?;
             let blob = seal(&dk, &kid, &pt, aead_alg).map_err(CliError::from_krypto)?;
             write_stdout(&blob)
@@ -359,7 +357,7 @@ fn run_aead(args: &Args) -> Result<(), CliError> {
             // also gives exit 4 here, and fails with Auth (exit 3) only once
             // opened with a key, so an id that matches none of the caller's keys
             // is itself a warning sign.
-            let expected = key_id(&master)?;
+            let expected = master.key_id().map_err(CliError::from_krypto)?;
             let in_blob = blob_key_id(&input).map_err(CliError::from_krypto)?;
             if in_blob != expected {
                 return Err(CliError::from_krypto(krypto::Error::WrongKey));
@@ -398,12 +396,12 @@ fn run_reseal(args: &Args) -> Result<(), CliError> {
         .map_err(CliError::from_krypto)?;
 
     let input = read_stdin()?;
-    let expected = key_id(&old_master)?;
+    let expected = old_master.key_id().map_err(CliError::from_krypto)?;
     let in_blob = blob_key_id(&input).map_err(CliError::from_krypto)?;
     if in_blob != expected {
         return Err(CliError::from_krypto(krypto::Error::WrongKey));
     }
-    let new_kid = key_id(&new_master)?;
+    let new_kid = new_master.key_id().map_err(CliError::from_krypto)?;
     let blob = krypto::reseal(&old_dk, &new_dk, &new_kid, &input).map_err(CliError::from_krypto)?;
     write_stdout(&blob)
 }
@@ -626,19 +624,6 @@ fn write_key_file(path: &str, key: &SecretBuf) -> Result<(), CliError> {
     })?;
     key.expose(|b| f.write_all(b).and_then(|()| f.sync_all()))
         .map_err(|e| CliError::io(format!("writing {path} failed: {e}")))
-}
-
-/// Deterministic, publishable id for the master-key generation: HMAC-SHA256
-/// over `key-id`, keyed with a key derived for its own context (one-way,
-/// purpose-separated from all working keys); the first 16 B.
-fn key_id(master: &MasterKey) -> Result<[u8; 16], CliError> {
-    let dk = master
-        .derive(KEY_ID_CONTEXT, b"")
-        .map_err(CliError::from_krypto)?;
-    let mac = hmac_sha256(&dk, b"key-id").map_err(CliError::from_krypto)?;
-    let mut id = [0u8; 16];
-    id.copy_from_slice(&mac[..16]);
-    Ok(id)
 }
 
 fn write_stdout(bytes: &[u8]) -> Result<(), CliError> {
