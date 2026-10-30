@@ -148,9 +148,10 @@ The blob says for itself which one was used, so the reader does not need to know
 
 ### The important part about tampering
 
-The whole blob header — magic, version, algorithm, key id and nonce — is **authenticated**. If
-anyone changes a single byte, you get `Error::Auth`. You **never** get wrong plaintext back
-instead.
+The whole blob header — version, algorithm, key id and nonce — is **authenticated**. If anyone
+changes a single byte of it, or of what follows, you get `Error::Auth`. Only data that is not a
+krypto blob at all — too short, or not starting with `FAFN` — gives `Error::Format`. You **never**
+get wrong plaintext back instead.
 
 That includes someone swapping the key id to trick you into the wrong key. That case has its own
 test in the crate.
@@ -367,6 +368,10 @@ Check the exit code; it is split on purpose:
 | **`3`** | **authentication failure** | **someone tampered with the data, or the key is wrong — this should be alerted on** |
 | `4` | the blob belongs to another key generation | find the right key (see `keyid`) — routing, not tampering *(new in 0.5.0)* |
 
+`open`, `reseal` and `blob-key-id` give `3` for a blob changed anywhere past its first four bytes
+(`FAFN`) — before 0.7.3 a changed version or algorithm gave `1`. Input that is not a krypto blob at
+all gives `1`.
+
 Error messages go to stderr and never contain key material.
 
 ---
@@ -378,11 +383,11 @@ Six kinds, and they mean different things:
 | Error | When | What it means for you |
 |---|---|---|
 | `Auth` | tampering, wrong key, wrong password | **the only one to alert on** |
-| `WrongKey` | the blob belongs to another key generation | find the right key — routing, not tampering *(new in 0.5.0)* |
+| `WrongKey` | from `krypto-cli open`: the blob belongs to another key generation | find the right key — routing, not tampering *(new in 0.5.0)* |
 | `Format` | unrecognizable or corrupt input | the data is wrong, not the key |
 | `KeyNotFound` | the name does not exist in the store | normal, not an error condition |
 | `Io` | file/disk trouble | the environment, not the crypto |
-| `Hardening` | hardening failed | the environment lacks privileges |
+| `Hardening` | a protection step failed: locked memory, randomness, process hardening | the environment, never your data |
 
 None of them carry key material or plaintext. You can log them as they are.
 
@@ -392,7 +397,7 @@ None of them carry key material or plaintext. You can log them as they are.
 
 | Version | What arrived |
 |---|---|
-| **0.7.3** | `drop_filesystem` changes the root only as its last step, on the directory it checked; when it fails, the process is as it was |
+| **0.7.3** | `drop_filesystem` changes the root only as its last step, on the directory it checked; when it fails, the process is as it was · every change to a blob past its `FAFN` magic gives `Auth` (`krypto-cli` exit 3), and `SecretStore::get` gives `Auth` for a key id that does not match · an empty `info` for `derive` is `Format` |
 | **0.7.2** | **Secret memory and the current RustCrypto line.** The dependencies moved to the current RustCrypto line (RUSTSEC-2026-0387), and Rust 1.89 is the minimum · each secret has memory pages of its own: kept out of core dumps, still locked when another secret is dropped, with a guard page on each side (note: each live secret uses at least one page of the locked-memory limit) · the password functions and `derive` wipe what argon2 and HKDF leave on the stack, and derived keys are written straight into locked memory · the per-key limit of AES-256-GCM is documented |
 | **0.7.1** | No functional change: the install snippets point at crates.io, and the published crate no longer carries the CI configuration |
 | **0.7.0** | **First release on crates.io.** `SecretBuf::from_vec` wipes its source even when locking fails · `info` and `salt` for `derive` are capped (`MAX_DERIVE_INPUT_BYTES`), and `MasterKey::from_bytes` caps the key like the file route · the store checks names when it reads a file too (see below) |

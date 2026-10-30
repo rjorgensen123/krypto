@@ -352,8 +352,10 @@ fn run_aead(args: &Args) -> Result<(), CliError> {
         "open" => {
             // Compare the blob's key id against this master key's BEFORE opening:
             // an old-generation blob is exit 4 (find the right key), not exit 3
-            // (tampering alarm). The id is an unauthenticated hint — a forged one
-            // still fails `open` with Auth below.
+            // (tampering alarm). The id is an unauthenticated hint: a forged one
+            // also gives exit 4 here, and fails with Auth (exit 3) only once
+            // opened with a key, so an id that matches none of the caller's keys
+            // is itself a warning sign.
             let expected = key_id(&master)?;
             let in_blob = blob_key_id(&input).map_err(CliError::from_krypto)?;
             if in_blob != expected {

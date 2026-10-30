@@ -104,8 +104,9 @@ impl MasterKey {
         //
         // Realistic path in: a missing config value, and a caller passing `""`
         // along without noticing.
+        // It is the caller's input, so the error is `Format` (0.7.3).
         if info.is_empty() {
-            return Err(Error::Hardening(
+            return Err(Error::Format(
                 "empty `info` passed to derive() — the HKDF purpose separation vanishes, \
                  and two different purposes would get the same key"
                     .into(),

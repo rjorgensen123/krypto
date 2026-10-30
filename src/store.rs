@@ -145,17 +145,18 @@ impl<'a> SecretStore<'a> {
 
     /// Fetch a secret. `KeyNotFound` if the name does not exist.
     ///
-    /// If the stored blob was sealed under a different master-key generation
-    /// than this store's, the result is [`Error::WrongKey`] — a routing
-    /// outcome, not tampering (0.5.0; before that it surfaced as `Auth`, which
-    /// consumers alarm on).
+    /// A blob that does not hold is [`Error::Auth`]: tampered, sealed under
+    /// another key, or carrying another key id than the store's (0.7.3). A
+    /// store holds one key generation, and `rotate` replaces it whole, so a
+    /// different key id inside a store is never routing; before 0.7.3 it gave
+    /// [`Error::WrongKey`].
     pub fn get(&self, name: &str) -> Result<SecretBuf, Error> {
         let blob = self.entries.get(name).ok_or(Error::KeyNotFound)?;
-        // The key_id is an unauthenticated hint (it is AAD, verified by `open`):
-        // it can only steer towards the honest "wrong generation" answer, never
-        // away from `Auth` — a forged key_id fails `open` regardless.
+        // The key id in the blob and in the store header must agree; a change to
+        // either is tampering. Neither is authenticated on its own (the blob's is
+        // AAD, verified by `open`), so the check is what catches the header's.
         if aead::blob_key_id(blob)? != self.key_id {
-            return Err(Error::WrongKey);
+            return Err(Error::Auth);
         }
         let dek = self.dek_for(name)?;
         aead::open(&dek, blob)
@@ -206,8 +207,8 @@ impl<'a> SecretStore<'a> {
     ///
     /// A store file that was rotated away from an old master fails `get` with
     /// [`Error::Auth`] under that master (the per-name DEKs no longer match).
-    /// [`Error::WrongKey`] remains the signal for a *mixed-generation blob
-    /// inside* a store, not for opening a store with the wrong master.
+    /// A blob from another generation inside a store is [`Error::Auth`] too
+    /// (0.7.3): it can only get there by tampering.
     pub fn rotate<'b>(self, new_master: &'b MasterKey) -> Result<SecretStore<'b>, Error> {
         // 1. Decrypt everything with the old master before anything is written.
         let mut names: Vec<String> = self.entries.keys().cloned().collect();

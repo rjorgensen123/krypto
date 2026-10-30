@@ -16,6 +16,34 @@ steps into it, checks there that it is empty, and makes it the root as the last
 step. On `Err` the root has not changed and the process stands where it stood.
 The signature and the result on success are the same.
 
+### Fixed — tampering with a blob header raises `Auth`
+
+A blob whose version or algorithm byte had been changed to a value krypto does
+not know gave `Format`, which `krypto-cli` reports as exit 1, so the change
+raised no alarm. Every change past the `FAFN` magic now gives `Auth`, in `open`,
+`reseal` and `blob_key_id` alike, and a body cut short gives `Auth` for
+AEGIS-256 too, as it already did for the other two; `krypto-cli open`, `reseal`
+and `blob-key-id` exit 3 for it, not 1. Only data that is not a krypto blob at
+all, too short for a header or without the magic, gives `Format` (exit 1). A
+blob from a later krypto with a version or algorithm this one does not know also
+gives `Auth`: upgrade readers before writers.
+
+### Fixed — `SecretStore::get` reports a mismatched key id as `Auth`
+
+A store holds one key generation, and `rotate` replaces it whole, so a blob and
+its store disagree on the key id only if one of them was changed. `get`
+answered that with `WrongKey`, the routing answer, so the change raised no
+alarm; it now gives `Auth`. No library function returns `WrongKey` any more;
+`krypto-cli open` still does, for a blob from another generation.
+
+### Changed — `Hardening` and `Format` say what they cover
+
+`Hardening` was described as "mlock, rlimit or prctl". It covers every
+protection step and the environment: locked or protected memory, randomness,
+process hardening, and internal steps no input can cause. An empty `info`
+passed to `derive` was `Hardening` and is now `Format`, like every other input
+with the wrong shape.
+
 ## [0.7.2] — 2026-10-28
 
 *Moves every RustCrypto and dalek dependency to its current release line, which

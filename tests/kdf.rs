@@ -121,9 +121,10 @@ fn oversized_master_key_from_bytes_is_rejected() {
 #[test]
 fn empty_info_is_rejected() {
     let mk = test_master("empty-info");
+    // The caller's input, so `Format` (0.7.3; it was `Hardening`).
     assert!(
-        mk.derive(b"", b"saltsalt").is_err(),
-        "empty info was accepted"
+        matches!(mk.derive(b"", b"saltsalt"), Err(krypto::Error::Format(_))),
+        "empty info was accepted, or not as Format"
     );
     assert!(mk.derive(b"krypto/test/v1", b"saltsalt").is_ok());
 }

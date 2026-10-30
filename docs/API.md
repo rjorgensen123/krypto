@@ -131,7 +131,8 @@ impl MasterKey {
 
 `derive` is HKDF-SHA256. `info` is your own context string — the crate does not know your purpose
 names. Different `info` gives different keys, and that is how you keep purposes apart. **An
-empty `info` is rejected** — it IS the purpose separation. An empty `salt` is allowed, as RFC 5869
+empty `info` is rejected** — it IS the purpose separation — with `Format` *(0.7.3; it was
+`Hardening`)*. An empty `salt` is allowed, as RFC 5869
 permits. Both `info` and `salt` are capped
 *(0.7.0)* at
 `MAX_DERIVE_INPUT_BYTES` (1024); they reach the API from command lines and config files, and the
@@ -180,9 +181,11 @@ under a new generation id — the blob's algorithm is preserved. Both keys come 
 is stateless and never owns keys); a wrong old key or tampering gives `Auth`, and nothing is
 produced.
 
-> **Tampering always gives `Auth`, never wrong plaintext.** The whole blob header is part of the
-> authentication, so changing the algorithm id, key id or version makes the open fail. That is an
-> absolute guarantee, not a detail.
+> **Tampering gives `Auth`, never wrong plaintext.** The whole blob header is part of the
+> authentication, so changing the algorithm id, key id or version makes the open fail with `Auth`
+> — *(0.7.3)* a version or algorithm krypto does not know included. Only data that is not a krypto
+> blob at all, too short for a header or not starting with `FAFN`, gives `Format`. Never wrong
+> plaintext is an absolute guarantee, not a detail.
 
 ### The blob format (`FAFN`, format_ver 1 — unchanged since 0.2)
 
@@ -192,8 +195,10 @@ magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciph
 
 - `alg_id`: 1 = AEGIS-256 (256-bit tag) · 2 = XChaCha20-Poly1305 · 3 = AES-256-GCM.
 - **The AAD contract (absolute):** the whole header up to and including the nonce (**54 bytes**)
-  is associated data — the "key-id swap test": tampering with magic/version/alg_id/key_id/nonce
-  yields `Auth`, never a mis-decrypt.
+  is associated data — the "key-id swap test": a changed header never yields a mis-decrypt.
+  *(0.7.3)* A changed version, alg_id, key_id or nonce, or a body cut short, yields `Auth`, in
+  `open`, `reseal` and `blob_key_id` alike; data too short for a header or without the `FAFN`
+  magic yields `Format`.
 - The nonce is random per blob from the OS CSPRNG. The 32-byte field is used partially:
   AEGIS-256 all 32, XChaCha 24, AES-GCM 12 — the rest zero.
 - *(0.7.2)* **AES-256-GCM: at most 2³² blobs per key.** With a 12-byte random nonce, NIST SP 800-38D
@@ -216,7 +221,7 @@ pub struct SecretStore<'a>;   // borrows &MasterKey for its lifetime
 impl<'a> SecretStore<'a> {
     pub fn open(path: impl AsRef<Path>, master: &'a MasterKey) -> Result<Self, Error>;
     pub fn put(&mut self, name: &str, secret: &SecretBuf) -> Result<(), Error>;
-    pub fn get(&self, name: &str) -> Result<SecretBuf, Error>;   // WrongKey on another key generation (0.5.0)
+    pub fn get(&self, name: &str) -> Result<SecretBuf, Error>;   // Auth if the key id does not match the store's (0.7.3)
     pub fn delete(&mut self, name: &str) -> Result<(), Error>;
     pub fn contains(&self, name: &str) -> bool;
     pub fn list(&self, prefix: &str) -> Vec<String>;
@@ -420,11 +425,11 @@ pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotF
 | Variant | Means |
 |---|---|
 | `Io` | file or directory |
-| `Hardening` | memory locking or process hardening failed — treated fail-closed |
+| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening — never a verdict on the data; treated fail-closed |
 | `Format` | the blob, the PHC string or the parameters had the wrong shape |
 | `Auth` | **wrong key, wrong password, or someone tampered** |
 | `KeyNotFound` | the name does not exist in the store |
-| `WrongKey` | the blob belongs to another key generation — routing, not tampering *(new in 0.5.0)* |
+| `WrongKey` | the blob belongs to another key generation — routing, not tampering *(new in 0.5.0)*. *(0.7.3)* No library function returns it: a `SecretStore` holds one generation, so a different key id there is `Auth`. It is the answer for a caller that routes between generations, as `krypto-cli open` does |
 
 No variant carries key material or plaintext.
 
@@ -485,7 +490,10 @@ passwords on stdin get one trailing newline stripped.
 
 **Exit codes are part of the contract:** `0` ok · `1` I/O or internal · `2` usage error ·
 `3` authentication failed (tampering/wrong key — alert) · `4` another key generation (routing, not
-tampering — *new in 0.5.0*). Errors go to stderr — never key material.
+tampering — *new in 0.5.0*). *(0.7.3)* `open`, `reseal` and `blob-key-id` give `3` for a blob
+changed anywhere past its `FAFN` magic, a version or algorithm krypto does not know included (it
+was `1`); input that is not a krypto blob at all gives `1`. Errors go to stderr — never key
+material.
 
 The key id in the blob header is derived deterministically from the master key: HMAC-SHA256 over
 the string `key-id`, keyed with the key `derive` gives for the context `krypto/key-id/v1` and an

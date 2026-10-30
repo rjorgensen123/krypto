@@ -153,13 +153,14 @@ fn blob_is_bound_to_its_name() {
     let _ = std::fs::remove_file(&path);
 }
 
-/// A blob from a different key generation is `WrongKey` — routing, not tampering.
+/// A key id in a store that does not match is `Auth` — tampering (0.7.3).
 ///
-/// Before 0.5.0 this surfaced as `Auth`, which `krypto-cli` maps to "should be
-/// alarmed" — a false security alarm for a perfectly normal old-generation
-/// blob.
+/// A store holds one key generation, and `rotate` replaces it whole, so a blob
+/// and its store never disagree on the key id unless one was changed. Before
+/// 0.7.3 this gave `WrongKey`, the routing answer, so the change raised no
+/// alarm.
 #[test]
-fn different_key_generation_gives_wrongkey_not_auth() {
+fn key_id_mismatch_in_a_store_gives_auth() {
     let mk = master("gen");
     let path = store_path("gen");
     {
@@ -167,14 +168,17 @@ fn different_key_generation_gives_wrongkey_not_auth() {
         s.put("a", &SecretBuf::from_vec(b"value".to_vec()).unwrap())
             .unwrap();
     }
-    // Flip a byte in the STORE header's key_id (offset 5+16=21): the store now
-    // claims a different generation than the blob was sealed under.
-    let mut bytes = std::fs::read(&path).unwrap();
-    bytes[21] ^= 0xff;
-    std::fs::write(&path, &bytes).unwrap();
-    let mk2 = master("gen");
-    let s = SecretStore::open(&path, &mk2).unwrap();
-    assert!(matches!(s.get("a"), Err(Error::WrongKey)));
+    let original = std::fs::read(&path).unwrap();
+    // The store header's key id is at 5+16=21; the entry "a" starts at 37 (nlen
+    // 2, name 1, blen 4), so its blob starts at 44 and the blob's key id at 50.
+    assert_eq!(&original[44..48], b"FAFN");
+    for offset in [21, 50] {
+        let mut bytes = original.clone();
+        bytes[offset] ^= 0xff;
+        std::fs::write(&path, &bytes).unwrap();
+        let s = SecretStore::open(&path, &mk).unwrap();
+        assert!(matches!(s.get("a"), Err(Error::Auth)), "offset {offset}");
+    }
     let _ = std::fs::remove_file(&path);
 }
 

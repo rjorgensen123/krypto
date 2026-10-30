@@ -6,11 +6,13 @@
 //! magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32)
 //!   | ciphertext | tag
 //! ```
-//! The header up to and including the nonce (54 bytes) is **associated data** —
-//! tampering with magic/version/alg_id/key_id/nonce yields `Error::Auth`, never
-//! a mis-decrypt (the key-id swap test). The nonce field is a fixed 32 B;
-//! AES-256-GCM uses the first 12, XChaCha the first 24, AEGIS-256 all 32, the
-//! rest zero.
+//! The header up to and including the nonce (54 bytes) is **associated data**,
+//! so a blob never decrypts to anything but what was sealed (the key-id swap
+//! test). Data too short for a header, or not starting with `FAFN`, is not a
+//! krypto blob: `Error::Format`. Any other change — version, alg_id, key_id,
+//! nonce, ciphertext, tag, or a body cut short — is `Error::Auth` (0.7.3).
+//! The nonce field is a fixed 32 B; AES-256-GCM uses the first 12, XChaCha the
+//! first 24, AEGIS-256 all 32, the rest zero.
 
 use crate::error::Error;
 use crate::kdf::DerivedKey;
@@ -48,12 +50,12 @@ impl Alg {
             Alg::Aes256Gcm => 3,
         }
     }
-    fn from_id(id: u8) -> Result<Alg, Error> {
+    fn from_id(id: u8) -> Option<Alg> {
         match id {
-            1 => Ok(Alg::Aegis256),
-            2 => Ok(Alg::XChaCha20Poly1305),
-            3 => Ok(Alg::Aes256Gcm),
-            other => Err(Error::Format(format!("unknown alg_id {other}"))),
+            1 => Some(Alg::Aegis256),
+            2 => Some(Alg::XChaCha20Poly1305),
+            3 => Some(Alg::Aes256Gcm),
+            _ => None,
         }
     }
     fn nonce_len(self) -> usize {
@@ -94,9 +96,11 @@ pub fn seal(
     Ok(blob)
 }
 
-/// Decrypt a blob. Verifies the header (as AAD) + the tag; `Error::Auth` on
-/// tampering or a wrong key. Never panics on invalid input.
-pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error> {
+/// Read a blob's header (0.7.3). Data too short for a header, or not starting
+/// with `FAFN`, is not a krypto blob: `Format`. Past the magic, a version or an
+/// algorithm this krypto does not know is `Auth`, like every other change to a
+/// blob: a sealed blob that says otherwise has been altered.
+fn read_header(blob: &[u8]) -> Result<(Alg, &[u8], &[u8]), Error> {
     if blob.len() < HEADER_LEN {
         return Err(Error::Format("blob shorter than header".into()));
     }
@@ -105,12 +109,17 @@ pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error> {
         return Err(Error::Format("wrong magic (not FAFN)".into()));
     }
     if header[4] != FORMAT_VER {
-        return Err(Error::Format(format!(
-            "unsupported format_ver {}",
-            header[4]
-        )));
+        return Err(Error::Auth);
     }
-    let alg = Alg::from_id(header[5])?;
+    let alg = Alg::from_id(header[5]).ok_or(Error::Auth)?;
+    Ok((alg, header, body))
+}
+
+/// Decrypt a blob. Verifies the header (as AAD) + the tag; `Error::Auth` on
+/// tampering or a wrong key, `Error::Format` if `blob` is not a krypto blob at
+/// all. Never panics on invalid input.
+pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error> {
+    let (alg, header, body) = read_header(blob)?;
     let nonce_start = 6 + KEY_ID_LEN;
     // `key_id` is covered by the AAD, so it cannot be tampered with silently —
     // but it was never READ out, and that made the rotation hook inert: a blob
@@ -144,25 +153,9 @@ pub fn reseal(
     new_key_id: &[u8; KEY_ID_LEN],
     blob: &[u8],
 ) -> Result<Vec<u8>, Error> {
-    let alg = blob_alg(blob)?;
+    let (alg, _, _) = read_header(blob)?;
     let pt = open(old, blob)?;
     seal(new, new_key_id, &pt, alg)
-}
-
-/// The algorithm from a blob header (magic/version checked). Internal — the
-/// public self-description contract is that `open` reads it; `reseal` needs
-/// it to preserve the choice.
-fn blob_alg(blob: &[u8]) -> Result<Alg, Error> {
-    if blob.len() < HEADER_LEN {
-        return Err(Error::Format("blob shorter than header".into()));
-    }
-    if &blob[0..4] != MAGIC {
-        return Err(Error::Format("wrong magic (not FAFN)".into()));
-    }
-    if blob[4] != FORMAT_VER {
-        return Err(Error::Format(format!("unsupported format_ver {}", blob[4])));
-    }
-    Alg::from_id(blob[5])
 }
 
 /// The `key_id` from a blob header, without attempting to decrypt.
@@ -176,18 +169,13 @@ fn blob_alg(blob: &[u8]) -> Result<Alg, Error> {
 /// is verified only when [`open`] succeeds. It should therefore be used to
 /// *choose a key*, never to make a trust decision. If it has been tampered
 /// with, `open` fails regardless.
+///
+/// It reads the header as `open` does (0.7.3): `Format` if `blob` is not a
+/// krypto blob, `Auth` for a version or an algorithm this krypto does not know.
 pub fn blob_key_id(blob: &[u8]) -> Result<[u8; KEY_ID_LEN], Error> {
-    if blob.len() < HEADER_LEN {
-        return Err(Error::Format("blob shorter than header".into()));
-    }
-    if &blob[0..4] != MAGIC {
-        return Err(Error::Format("wrong magic (not FAFN)".into()));
-    }
-    if blob[4] != FORMAT_VER {
-        return Err(Error::Format(format!("unsupported format_ver {}", blob[4])));
-    }
+    let (_, header, _) = read_header(blob)?;
     let mut out = [0u8; KEY_ID_LEN];
-    out.copy_from_slice(&blob[6..6 + KEY_ID_LEN]);
+    out.copy_from_slice(&header[6..6 + KEY_ID_LEN]);
     Ok(out)
 }
 
@@ -265,8 +253,10 @@ fn primitive_open(
         Alg::Aegis256 => {
             use aegis::aegis256::Aegis256;
             const TAG: usize = 32;
+            // A body cut short is a changed blob: `Auth`, as for the other
+            // two algorithms (0.7.3).
             if body.len() < TAG {
-                return Err(Error::Format("AEGIS-256 body shorter than tag".into()));
+                return Err(Error::Auth);
             }
             let (ct, tag) = body.split_at(body.len() - TAG);
             let tag_arr: &[u8; TAG] = tag

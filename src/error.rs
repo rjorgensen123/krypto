@@ -13,12 +13,18 @@ use std::fmt;
 pub enum Error {
     /// I/O error.
     Io(std::io::Error),
-    /// Hardening/locking failed (mlock, rlimit or prctl). Treated fail-closed.
+    /// A protection step could not be carried out, or the environment failed:
+    /// locked or protected memory, randomness, process hardening, or an internal
+    /// step no input can cause. Never a verdict on the data. Treated fail-closed.
     Hardening(String),
-    /// Invalid blob format (magic, version, unknown/unsupported alg_id, truncation).
+    /// The input has the wrong shape: not a krypto blob (too short for a
+    /// header, or not starting with `FAFN`), or a malformed key, signature, PHC
+    /// string, encoding or parameter, such as an empty `info` (0.7.3).
     Format(String),
-    /// Authentication failed — header or ciphertext tampering, or the wrong key.
-    /// (Covers the key-id swap test: a manipulated header yields Auth, never a mis-decrypt.)
+    /// Authentication failed: a blob, signature or password that does not hold —
+    /// tampering, or the wrong key or password. Any change to a blob past its
+    /// `FAFN` magic is `Auth`, a version or algorithm krypto does not know
+    /// included (0.7.3), and never a mis-decrypt (the key-id swap test).
     Auth,
     /// Lookup in a SecretStore found no value under the key name.
     KeyNotFound,
@@ -28,6 +34,9 @@ pub enum Error {
     /// the right key (see `blob_key_id`), whereas [`Error::Auth`] is tampering or
     /// a wrong key and SHOULD be alarmed on. Added in 0.5.0 so an old-generation
     /// blob no longer masquerades as tampering (finding N5; contract: API-krypto-v0.6 §errors).
+    /// Since 0.7.3 no library function returns it — a `SecretStore` holds one
+    /// generation — it is the answer for a caller that holds several and routes
+    /// between them, as `krypto-cli open` does.
     WrongKey,
 }
 

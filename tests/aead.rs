@@ -163,14 +163,65 @@ fn truncated_blob_fails() {
     assert!(open(&dk, &blob[..10]).is_err());
 }
 
+/// Past the magic, every change to a blob is `Auth` (0.7.3) — a version or an
+/// algorithm krypto does not know included — in `open`, `reseal` and
+/// `blob_key_id` alike, so the change raises the alarm wherever it is read.
 #[test]
-fn unknown_alg_id_gives_format_error() {
+fn unknown_version_or_alg_id_gives_auth() {
     let mk = test_master("alg");
     let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
     let secret = SecretBuf::from_vec(b"data".to_vec()).unwrap();
+    let blob = seal(&dk, &[1u8; 16], &secret, Alg::Aegis256).unwrap();
+    for (byte, value) in [(4, 2), (4, 0), (5, 9), (5, 0)] {
+        let mut changed = blob.clone();
+        changed[byte] = value; // format_ver or alg_id → unknown
+        assert!(
+            matches!(open(&dk, &changed), Err(Error::Auth)),
+            "open, byte {byte}"
+        );
+        assert!(
+            matches!(
+                krypto::reseal(&dk, &dk, &[2u8; 16], &changed),
+                Err(Error::Auth)
+            ),
+            "reseal, byte {byte}"
+        );
+        assert!(
+            matches!(krypto::blob_key_id(&changed), Err(Error::Auth)),
+            "blob_key_id, byte {byte}"
+        );
+    }
+}
+
+/// Data too short for a header, or not starting with `FAFN`, is not a krypto
+/// blob at all: `Format`, not an alarm.
+#[test]
+fn not_a_blob_gives_format() {
+    let mk = test_master("not-a-blob");
+    let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
+    let secret = SecretBuf::from_vec(b"data".to_vec()).unwrap();
     let mut blob = seal(&dk, &[1u8; 16], &secret, Alg::Aegis256).unwrap();
-    blob[5] = 9; // alg_id → unknown
+    assert!(matches!(open(&dk, &blob[..53]), Err(Error::Format(_))));
+    blob[0] = b'X';
     assert!(matches!(open(&dk, &blob), Err(Error::Format(_))));
+}
+
+/// A body cut short is a changed blob: `Auth` for every algorithm (0.7.3; it
+/// was `Format` for AEGIS-256 alone).
+#[test]
+fn cut_short_body_gives_auth_for_every_alg() {
+    let mk = test_master("cut-short");
+    let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
+    let secret = SecretBuf::from_vec(b"data".to_vec()).unwrap();
+    for alg in [Alg::Aegis256, Alg::XChaCha20Poly1305, Alg::Aes256Gcm] {
+        let blob = seal(&dk, &[1u8; 16], &secret, alg).unwrap();
+        for keep in [54, 55, 60] {
+            assert!(
+                matches!(open(&dk, &blob[..keep]), Err(Error::Auth)),
+                "{alg:?}, {keep} bytes"
+            );
+        }
+    }
 }
 
 /// `blob_key_id` makes key rotation manageable without guessing.
