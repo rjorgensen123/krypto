@@ -75,43 +75,9 @@ jobs:
       - name: Test on the declared rust-version
         run: cargo +"$MSRV" test --locked --all-targets
 
-  # Rust <-> Python parity (0.5.0): pytest drives the REAL krypto-cli as a
-  # subprocess and checks every answer against an INDEPENDENT implementation
-  # (cryptography/argon2-cffi/hashlib), both directions. Two implementations
-  # that must agree are tested against each other — not each against itself.
-  python-parity:
-    runs-on: ubuntu-latest
-    container:
-      image: rust:1-bookworm
-      options: --ulimit memlock=-1:-1
-    steps:
-      - name: Checkout (no third-party action)
-        run: |
-          git config --global --add safe.directory '*'
-          git init -q .
-          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
-          git -c http.extraheader="Authorization: basic ${AUTH}" \
-              fetch -q --depth 1 origin "${GITHUB_SHA}"
-          git checkout -q --detach FETCH_HEAD
-
-      - name: Build krypto-cli
-        run: cargo build --locked --bin krypto-cli
-
-      # Pinned, like the Rust side: python/requirements-ci.txt fixes exact versions of
-      # cryptography and argon2-cffi. These are not test dependencies — they
-      # ARE the counterpart the parity tests check against.
-      - name: Python + dependencies (pinned versions)
-        run: |
-          apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv
-          python3 -m venv /tmp/venv
-          /tmp/venv/bin/pip install -q -r python/requirements-ci.txt
-
-      - name: Parity tests (pytest)
-        run: /tmp/venv/bin/pytest python/ -q
-
   # The Python binding (0.8.0): built with maturin and tested from Python, with
-  # what crosses between Rust and Python tested both ways.
+  # what crosses between Rust and Python tested both ways, and krypto checked
+  # against implementations it did not write (cryptography, argon2-cffi).
   python-binding:
     runs-on: ubuntu-latest
     container:
@@ -128,8 +94,9 @@ jobs:
               fetch -q --depth 1 origin "${GITHUB_SHA}"
           git checkout -q --detach FETCH_HEAD
 
-      # Pinned, like the Rust side: krypto-py/requirements-ci.txt fixes maturin
-      # and pytest.
+      # Pinned, like the Rust side: krypto-py/requirements-ci.txt fixes maturin,
+      # pytest, and cryptography and argon2-cffi, which ARE the independent
+      # implementations test_independent.py checks krypto against.
       - name: Python + build tools (pinned versions)
         run: |
           apt-get update -qq && apt-get install -y -qq python3 python3-pip python3-venv

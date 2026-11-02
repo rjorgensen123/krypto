@@ -97,13 +97,9 @@ cargo test                     # incl. official AEAD/signature/DH vectors, a doc
 cargo clippy --all-targets -- -D warnings
 cargo audit                    # RustSec advisory scan
 
-# Rust ↔ Python parity: pytest drives the real binary against independent
-# implementations (cryptography / argon2-cffi) — both directions; also a CI job
-python3 -m venv python/.venv && python/.venv/bin/pip install -r python/requirements-ci.txt
-cargo build --bin krypto-cli && python/.venv/bin/pytest python/ -q
-
-# krypto-py: built with maturin and tested from Python; cargo test checks that it
-# has the crate's API, and that Rust and Python open what the other made; also a CI job
+# krypto-py: built with maturin and tested from Python, also against independent
+# implementations (cryptography / argon2-cffi); cargo test checks that it has the
+# crate's API, and that Rust and Python open what the other made; also a CI job
 python3 -m venv .venv && .venv/bin/pip install -r krypto-py/requirements-ci.txt
 VIRTUAL_ENV=.venv .venv/bin/maturin develop --locked -m krypto-py/Cargo.toml
 .venv/bin/pytest krypto-py/tests -q

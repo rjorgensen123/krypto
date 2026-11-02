@@ -15,7 +15,5 @@ debug/
 Thumbs.db
 
 # ── Python (the parity tests, and krypto-py) ──
-python/.venv/
-python/__pycache__/
 krypto-py/.venv/
 krypto-py/tests/__pycache__/

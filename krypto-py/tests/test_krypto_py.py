@@ -3,8 +3,9 @@
 
 These tests check the binding itself: the exceptions, and the rules Python adds
 on top of Rust's, such as consumed objects, zeroed bytearrays and the store's
-lock. That the names are the crate's is checked in `surface.rs`, and what
-crosses between Rust and Python in `interop.rs`, both against the crate.
+lock. That the names are the crate's is checked in `surface.rs`, what crosses
+between Rust and Python in `interop.rs`, both against the crate, and krypto
+against code it did not write in `test_independent.py`.
 """
 
 from importlib.metadata import version

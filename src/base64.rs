@@ -2,9 +2,9 @@
 //! Canonical base64 (STANDARD alphabet): one spelling out, strictly that
 //! spelling in.
 //!
-//! Same philosophy as [`crate::hex`]: one canonical implementation, with the
-//! Python parity guarantee via krypto-cli. NOTE: keys and signatures on the
-//! wire are HEX (the canon) — base64
+//! Same philosophy as [`crate::hex`]: one canonical implementation, checked
+//! against Python's standard library in `krypto-py/tests/test_independent.py`.
+//! NOTE: keys and signatures on the wire are HEX (the canon) — base64
 //! exists only for formats that ARE base64 by nature (the ssh fingerprint
 //! form `SHA256:<base64-no-pad>`, PEM bodies).
 //!

@@ -1,11 +1,20 @@
-# Locked Python tools for building and testing krypto-py.
+# Locked Python tools and test dependencies for krypto-py: the Python side's Cargo.lock.
+#
+# WHY PINNED: `cryptography` and `argon2-cffi` are not ordinary test dependencies.
+# They ARE the independent implementations tests/test_independent.py checks krypto
+# against, and an unannounced version drift there is as serious as one in Cargo.lock.
 #
 # Usage:  python3 -m venv .venv && .venv/bin/pip install -r krypto-py/requirements-ci.txt
-#         VIRTUAL_ENV=.venv maturin develop --locked -m krypto-py/Cargo.toml
-#         KRYPTO_CLI=target/debug/krypto-cli .venv/bin/pytest krypto-py/tests -q
+#         VIRTUAL_ENV=.venv .venv/bin/maturin develop --locked -m krypto-py/Cargo.toml
+#         .venv/bin/pytest krypto-py/tests -q
+argon2-cffi==25.1.0
+argon2-cffi-bindings==25.1.0
+cffi==2.1.1
+cryptography==50.0.0
 iniconfig==2.3.0
 maturin==1.16.0
 packaging==26.3
 pluggy==1.6.0
+pycparser==3.0
 Pygments==2.20.0
 pytest==9.1.1

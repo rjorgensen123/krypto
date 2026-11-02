@@ -44,6 +44,17 @@ Linux on x86_64: what CI builds and tests, and what the `krypto-py` wheels are
 built for, tested with Python 3.11 and 3.12. Anything else builds from source and
 is not vouched for; the code is open for anyone to make a variant of their own.
 
+### Changed — the independent checks run against `krypto-py` *(2026-11-02)*
+
+The tests that check what krypto composed itself against code it did not write
+(`cryptography`, `argon2-cffi` and Python's standard library), the blob format,
+HKDF, the key id, the presets and the key forms, now call `krypto_py` instead of
+running `krypto-cli`: the same 19 checks, in
+`krypto-py/tests/test_independent.py`, with the same locked versions.
+`python/test_cli_parity.py` and its CI job are gone; its two tests of
+`krypto-cli` itself are covered by `tests/cli.rs` and the unit tests of
+`base64`.
+
 ## [0.7.3] — 2026-10-30
 
 ### Fixed — `drop_filesystem` changes the root only as its last step
