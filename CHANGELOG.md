@@ -4,28 +4,39 @@ Every notable change to this crate is recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
-## [0.8.0] — 2026-10-30
+## [0.8.0] — not released
 
-### Added — `krypto-py`: the same API from Python
+### Added — `krypto-py`: the same API from Python *(2026-10-30)*
 
-`krypto-py` (on PyPI, imported as `krypto_py`, for Python 3.11 or newer) is the
-crate's API in Python: every function, type, constant and module, with the same
-names, built from the same code with PyO3; a test fails the build if a name is
-in one and not the other. What one seals, stores, signs or hashes, the other
-opens, reads and verifies, and the tests check it both ways: each side opens and
-checks what the other made, and gives the same answer where the input fixes it.
-Errors are exceptions, one per `Error` variant. The secrets stay in krypto's
-locked memory; what differs is only what can be guaranteed for the copies Python
-itself holds, which `docs/API.md` sets out. The repository is a workspace of
-`krypto` and `krypto-py`, CI builds and tests the binding, and the published
-`krypto` crate does not carry it.
+`krypto-py` (on PyPI, imported as `krypto_py`) is the crate's API in Python:
+every function, type, constant and module, with the same names, built from the
+same code with PyO3; a test fails the build if a name is in one and not the
+other. What one seals, stores, signs or hashes, the other opens, reads and
+verifies, and the tests check it both ways: each side opens and checks what the
+other made, and gives the same answer where the input fixes it. Errors are
+exceptions, one per `Error` variant. The secrets stay in krypto's locked memory;
+what differs is only what can be guaranteed for the copies Python itself holds,
+which `docs/API.md` sets out. The repository is a workspace of `krypto` and
+`krypto-py`, CI builds and tests the binding, and the published `krypto` crate
+does not carry it.
 
-### Added — `MasterKey::key_id`
+### Added — `MasterKey::key_id` *(2026-10-30)*
 
 The key id of a master key, which says what key generation a blob was sealed
 under, is now in the library: HMAC-SHA256 over `key-id` under the key derived
 for `krypto/key-id/v1` with an empty salt, the first 16 bytes. It is the value
 `krypto-cli` has always written, and `krypto-cli` now uses it; a test pins it.
+
+### Changed — `krypto-py` needs Python 3.11 or newer *(2026-10-30)*
+
+`krypto-py` is tested with Python 3.11 and 3.12, and asks for no less:
+`requires-python` is `>=3.11` and the abi3 floor is 3.11, so the wheel is
+tagged `cp311` and pip will not install it on an older Python.
+
+### Fixed — the CI job for `krypto-py` installs clippy *(2026-10-30)*
+
+The `python-binding` job ran `cargo clippy` in an image without the clippy
+component; it now adds it first, as `build-test` does.
 
 ## [0.7.3] — 2026-10-30
 
