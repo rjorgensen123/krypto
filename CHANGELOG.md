@@ -4,7 +4,10 @@ Every notable change to this crate is recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
-## [0.8.0] — not released
+## [0.8.0] — 2026-11-02
+
+*krypto-py, the crate's API from Python with PyO3, and krypto-cli rewritten as a
+tool for testing.*
 
 ### Added — `krypto-py`: the same API from Python *(2026-10-30)*
 
