@@ -9,7 +9,9 @@ inside it — so what one seals, the other opens.
 pip install krypto-py
 ```
 
-It needs Python 3.11 or newer.
+It needs Python 3.11 or newer, and is tested with 3.11 and 3.12. Wheels are built
+for Linux on x86_64 with glibc 2.34 or newer; elsewhere pip builds from source,
+which needs Rust.
 
 ```python
 import krypto_py as krypto

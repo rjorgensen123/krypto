@@ -19,6 +19,8 @@ utilities and process hardening. A thin, opinionated wrapper around established 
 own is implemented**.
 
 - **Type:** Rust crate (library), and the same API as a Python module, `krypto-py` (from 0.8.0)
+- **Platform:** Linux on x86_64, the one we build, test and stand behind; see
+  [Platforms](#platforms)
 - **Lifetime:** long-lived — the version moves when the surface does, and the API document
   carries the version it applies from
 - **License:** MIT/Apache-2.0 dual
@@ -42,6 +44,16 @@ that one time.
 
 The curiosity behind it comes from work on data-plane confidentiality — see
 [RFC 8061](https://www.rfc-editor.org/rfc/rfc8061.html).
+
+## Platforms
+
+We support what we build and test ourselves, and nothing more: Linux on x86_64. CI
+runs there, and the `krypto-py` wheels on PyPI are built for it: glibc 2.34 or newer,
+and Python 3.11 and 3.12, the versions we test. A newer Python installs the same
+wheel, but we do not vouch for it until we have tested it. Anywhere else, `pip`
+builds `krypto-py` from source, which needs a Rust toolchain. It may well work, but
+we do not vouch for it. The code is open, so anyone who needs another platform, or a
+variant of their own, is free to build it.
 
 ## Getting started
 

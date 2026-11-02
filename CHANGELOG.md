@@ -38,6 +38,12 @@ tagged `cp311` and pip will not install it on an older Python.
 The `python-binding` job ran `cargo clippy` in an image without the clippy
 component; it now adds it first, as `build-test` does.
 
+### Added — the README says which platform krypto stands behind *(2026-11-02)*
+
+Linux on x86_64: what CI builds and tests, and what the `krypto-py` wheels are
+built for, tested with Python 3.11 and 3.12. Anything else builds from source and
+is not vouched for; the code is open for anyone to make a variant of their own.
+
 ## [0.7.3] — 2026-10-30
 
 ### Fixed — `drop_filesystem` changes the root only as its last step
