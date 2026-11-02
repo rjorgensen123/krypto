@@ -116,10 +116,10 @@ fn every_public_name_is_in_the_reference_docs() {
 /// IS the authoritative list: parse it instead of guessing from match arms. A
 /// new command that skips the reference docs fails the build.
 fn cli_commands() -> Vec<String> {
-    let src = read("src/bin/krypto-cli.rs");
+    let src = read("src/bin/krypto-cli/main.rs");
     let i = src
         .find("const COMMANDS")
-        .expect("COMMANDS constant not found in krypto-cli.rs");
+        .expect("COMMANDS constant not found in krypto-cli/main.rs");
     // NB: the first '[' after the name is the TYPE ([&str; N]) — the array
     // literal is the first '[' after '='.
     let eq = src[i..].find('=').expect("no = after COMMANDS") + i;

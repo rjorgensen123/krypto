@@ -167,39 +167,102 @@ fn another_key_generation_gives_exit_4() {
     );
 }
 
+/// `inspect` tells what krypto made, and how, without a key, and never shows a
+/// key or a hash value (FS-0056, part 1).
 #[test]
-fn inspect_reads_the_header_without_a_key() {
-    let key = key_file("inspect", 3);
-    let sealed = run(
-        &[
-            "seal",
-            "--key-file",
-            key.to_str().unwrap(),
-            "--context",
-            "c",
-            "--salt",
-            "s",
-            "--alg",
-            "xchacha20",
-        ],
-        b"x",
+fn inspect_tells_what_krypto_made() {
+    let report = |input: &[u8]| {
+        let out = run(&["inspect"], input);
+        (out.code, text(&out))
+    };
+    let m = master(3);
+    let key = m.derive(b"c", b"s").unwrap();
+    let id = hex::encode(&m.key_id().unwrap());
+    let secret = SecretBuf::from_vec(b"x".to_vec()).unwrap();
+    let blob = krypto::seal(&key, &m.key_id().unwrap(), &secret, krypto::Alg::Aes256Gcm).unwrap();
+
+    // E1, and E8: the same blob as it is, in hex and in base64.
+    for input in [
+        blob.clone(),
+        hex::encode(&blob).into_bytes(),
+        krypto::base64::encode(&blob).into_bytes(),
+    ] {
+        let (code, r) = report(&input);
+        assert_eq!(code, 0, "{r}");
+        assert!(
+            r.starts_with("krypto blob") && r.contains("AES-256-GCM") && r.contains(&id),
+            "{r}"
+        );
+    }
+    let mut changed = blob.clone();
+    changed[5] = 9;
+    let (code, r) = report(&changed);
+    assert_eq!(code, 3, "a changed header is exit 3, as for open: {r}");
+
+    // E2: a store file, its names and algorithm.
+    let dir = std::env::temp_dir().join(format!("krypto-cli-inspect-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.store");
+    {
+        let mut store = krypto::SecretStore::open(&path, &m).unwrap();
+        store.put("db/password", &secret).unwrap();
+        store.put("api/token", &secret).unwrap();
+    }
+    let file = std::fs::read(&path).unwrap();
+    std::fs::remove_dir_all(&dir).unwrap();
+    let (_, r) = report(&file);
+    assert!(
+        r.starts_with("krypto store file") && r.contains("entries     2"),
+        "{r}"
     );
-    assert_eq!(sealed.code, 0, "{}", sealed.stderr);
-    let id = hex::encode(&master(3).key_id().unwrap());
-    let inspected = run(&["inspect"], &sealed.stdout);
-    assert_eq!(inspected.code, 0, "{}", inspected.stderr);
-    assert_eq!(
-        text(&inspected),
-        format!(
-            "format 1\nalgorithm xchacha20\nkey-id {id}\nbytes {}",
-            sealed.stdout.len()
-        )
+    assert!(
+        r.contains("api/token, db/password") && r.contains("AEGIS-256"),
+        "{r}"
     );
-    assert_eq!(
-        run(&["inspect"], b"not a blob").code,
-        1,
-        "not a blob is exit 1"
+    // A name with a control character in a hand-made file is shown with `?`.
+    let mut crafted = file[..37].to_vec();
+    crafted.extend_from_slice(&3u16.to_le_bytes());
+    crafted.extend_from_slice(b"a\x1bb");
+    crafted.extend_from_slice(&0u32.to_le_bytes());
+    let (_, r) = report(&crafted);
+    assert!(r.contains("a?b") && !r.contains('\x1b'), "{r:?}");
+
+    // E3: a password hash and its preset; the hash value is not shown.
+    let phc = krypto::password::hash(
+        &krypto::SecretString::from_string("hunter2".into()).unwrap(),
+        krypto::password::Preset::Interactive,
+    )
+    .unwrap();
+    let (_, r) = report(phc.as_bytes());
+    assert!(r.contains("Argon2id") && r.contains("interactive"), "{r}");
+    assert!(
+        !r.contains(phc.rsplit('$').next().unwrap()),
+        "the hash value is shown: {r}"
     );
+
+    // E4, E5, E6: keys and signatures; the private key is not shown.
+    let (pkcs8, p256_public) = sign::ecdsa_p256_keypair().unwrap();
+    let (_, r) = pkcs8.expose(|b| report(b));
+    assert!(
+        r.contains("P-256 private key") && r.contains("not shown"),
+        "{r}"
+    );
+    let (_, r) = report(&p256_public);
+    assert!(r.contains("P-256 public key"), "{r}");
+    let (_, r) = report(&sign::ecdsa_p256_sign(&pkcs8, b"m").unwrap());
+    assert!(r.contains("ECDSA signature (DER)"), "{r}");
+    let (seed, ed_public) = sign::ed25519_keypair().unwrap();
+    let (_, r) = report(&ed_public);
+    assert!(r.starts_with("32 bytes") && r.contains("Ed25519"), "{r}");
+    let (_, r) = report(&sign::ed25519_sign(&seed, b"m").unwrap());
+    assert!(
+        r.starts_with("64 bytes") && r.contains("Ed25519 signature"),
+        "{r}"
+    );
+
+    // Anything else: not recognized, exit 0.
+    let (code, r) = report(b"hello world");
+    assert_eq!((code, r.starts_with("not recognized")), (0, true), "{r}");
 }
 
 #[test]

@@ -524,7 +524,7 @@ does. In code, use the crate, or `krypto-py` from Python.
 | Command | In → out |
 |---|---|
 | `version` | → the krypto version |
-| `inspect` | blob on stdin → the format version, the algorithm, the key id and the length; no key needed |
+| `inspect` | a file or dump on stdin → what it is and how it was made, without a key: [Inspect](Inspect.md) lists what it recognizes |
 | `keyid --key-file <f>` | → the key id of a master key (hex) |
 | `seal --key-file <f> --context <s> --salt <s> [--alg aegis256\|xchacha20\|aes256gcm]` | plaintext → blob |
 | `open --key-file <f> --context <s> --salt <s>` | blob → plaintext |

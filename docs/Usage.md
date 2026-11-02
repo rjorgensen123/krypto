@@ -350,7 +350,7 @@ value, or see how fast Argon2 is on this machine. It is not a product; in code, 
 
 ```bash
 krypto-cli version                                                         # the krypto version
-krypto-cli inspect < blob                                                  # format, algorithm, key id; no key
+krypto-cli inspect < file                                                  # what it is and how it was made; no key
 krypto-cli keyid  --key-file <file>                                        # which key generation
 krypto-cli seal   --key-file <file> --context <str> --salt <str> [--alg <name>] < plaintext > blob
 krypto-cli open   --key-file <file> --context <str> --salt <str> < blob     # → plaintext
@@ -374,7 +374,8 @@ The exit code tells the kinds of failure apart:
 | **`3`** | **authentication failure** | **someone tampered with the data, or the key is wrong** |
 | `4` | the blob belongs to another key generation | find the right key (see `keyid` and `inspect`) — routing, not tampering |
 
-Messages go to stderr and never contain key material or plaintext.
+Messages go to stderr and never contain key material or plaintext. What `inspect` recognizes is
+listed in **[Inspect](Inspect.md)**.
 
 ---
 

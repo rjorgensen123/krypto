@@ -8,7 +8,7 @@
 //!
 //! ```text
 //! krypto-cli version                                         → the krypto version
-//! krypto-cli inspect                                         blob → format, algorithm, key id
+//! krypto-cli inspect                                         file or dump → what krypto made it, and how
 //! krypto-cli keyid  --key-file <f>                           → the key id (hex)
 //! krypto-cli seal   --key-file <f> --context <s> --salt <s> [--alg aegis256|xchacha20|aes256gcm]
 //!                                                            plaintext → blob
@@ -33,6 +33,8 @@ use std::time::Instant;
 use krypto::password::{self, Preset};
 use krypto::{blob_key_id, hex, hmac_sha256, open, seal, sign, Alg, MasterKey, SecretBuf};
 use zeroize::Zeroizing;
+
+mod inspect;
 
 /// The commands. `tests/docs.rs` reads this list and checks that `docs/API.md`
 /// names each one.
@@ -205,7 +207,7 @@ fn overview() -> String {
          \n\
          commands:\n\
          \x20 version   the krypto version\n\
-         \x20 inspect   read the header of a blob on stdin, without a key\n\
+         \x20 inspect   tell what a file or dump on stdin is, and how it was made\n\
          \x20 keyid     the key id of a master key\n\
          \x20 seal      encrypt stdin\n\
          \x20 open      decrypt a blob on stdin\n\
@@ -231,12 +233,14 @@ fn help_of(command: &str) -> &'static str {
     match command {
         "version" => "usage: krypto-cli version\n\nPrints the krypto version.",
         "inspect" => {
-            "usage: krypto-cli inspect < blob\n\
+            "usage: krypto-cli inspect < file\n\
              \n\
-             Reads the header of a krypto blob without a key, and prints the format\n\
-             version, the algorithm, the key id and the length. The key id says which\n\
-             key generation sealed it; compare it with `krypto-cli keyid`. Input that is\n\
-             not a krypto blob is exit 1."
+             Tells what a file or a dump is, and how it was made, without a key: a\n\
+             krypto blob with its algorithm and key id, a store file with its entries, a\n\
+             password hash with its Argon2id parameters and preset, a P-256 private\n\
+             key, public keys and signatures, also inside hex or base64. It never shows\n\
+             a key, a plaintext or a hash value. A krypto blob whose header was changed\n\
+             is exit 3, as for open. docs/Inspect.md lists what it recognizes."
         }
         "keyid" => {
             "usage: krypto-cli keyid --key-file <file>\n\
@@ -308,7 +312,14 @@ fn run(argv: Vec<String>) -> Result<(), Fail> {
     }
     match args.command.as_str() {
         "version" => line(krypto::VERSION),
-        "inspect" => inspect(&read_stdin()?),
+        "inspect" => {
+            let found = inspect::inspect(&read_stdin()?);
+            line(&found.report())?;
+            if found.changed {
+                return Err(Fail::krypto(krypto::Error::Auth));
+            }
+            Ok(())
+        }
         "keyid" => line(&hex::encode(
             &master(&args)?.key_id().map_err(Fail::krypto)?,
         )),
@@ -322,26 +333,6 @@ fn run(argv: Vec<String>) -> Result<(), Fail> {
 
 fn master(args: &Args) -> Result<MasterKey, Fail> {
     MasterKey::from_secret_file(args.need("--key-file")?).map_err(Fail::krypto)
-}
-
-/// The header of a blob, read without a key: the format version, the
-/// algorithm, the key id and the length.
-fn inspect(blob: &[u8]) -> Result<(), Fail> {
-    // `blob_key_id` checks the header as `open` does: `Format` if this is not a
-    // krypto blob, `Auth` if a known field was changed.
-    let id = blob_key_id(blob).map_err(Fail::krypto)?;
-    let alg = match blob[5] {
-        1 => "aegis256",
-        2 => "xchacha20",
-        3 => "aes256gcm",
-        _ => "unknown",
-    };
-    line(&format!(
-        "format {}\nalgorithm {alg}\nkey-id {}\nbytes {}",
-        blob[4],
-        hex::encode(&id),
-        blob.len()
-    ))
 }
 
 fn aead(args: &Args) -> Result<(), Fail> {

@@ -29,7 +29,7 @@ own is implemented**.
 - **Docs (ship with the crate):** overview [`docs/Home.md`](docs/Home.md) · usage guide
   [`docs/Usage.md`](docs/Usage.md) (Rust) and [`docs/Python.md`](docs/Python.md) (Python) ·
   **API contract** [`docs/API.md`](docs/API.md), one for both — every public name, guarded by
-  `tests/docs.rs`
+  `tests/docs.rs` · what `krypto-cli inspect` recognizes [`docs/Inspect.md`](docs/Inspect.md)
 - **Changes:** [`CHANGELOG.md`](CHANGELOG.md) · **Version:** see [`VERSION`](VERSION)
   (kept in lockstep with `Cargo.toml` by `tests/version.rs`)
 

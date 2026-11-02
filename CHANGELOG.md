@@ -94,6 +94,12 @@ exit codes are otherwise as before.
 Under AddressSanitizer `mlock` does nothing, so the test now requires a secret
 to be locked only where `mlock` works.
 
+### Added — `krypto-cli inspect` tells what krypto made, and how *(2026-11-02)*
+
+Given a file or a dump, `inspect` tells which of krypto's formats it is and how
+it was made, without a key and without showing a key, a plaintext or a hash
+value. `docs/Inspect.md` lists what it recognizes.
+
 ## [0.7.3] — 2026-10-30
 
 ### Fixed — `drop_filesystem` changes the root only as its last step
