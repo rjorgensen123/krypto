@@ -109,10 +109,38 @@ fn containing(maps: &[Mapping], addr: usize) -> Option<&Mapping> {
     maps.iter().find(|m| m.start <= addr && addr < m.end)
 }
 
+/// Does `mlock` take effect in this process at all? Under AddressSanitizer it
+/// is a no-op that reports success, so no memory is locked there, a secret's
+/// included. Lock one page of our own and ask the kernel.
+#[cfg(all(target_os = "linux", not(miri)))]
+fn mlock_takes_effect() -> bool {
+    const PAGE: usize = 4096;
+    // SAFETY: an anonymous private mapping of one page, locked, read back and
+    // unmapped here; nothing else touches it.
+    unsafe {
+        let p = libc::mmap(
+            std::ptr::null_mut(),
+            PAGE,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            -1,
+            0,
+        );
+        assert_ne!(p, libc::MAP_FAILED);
+        let locked = libc::mlock(p, PAGE) == 0
+            && containing(&mappings(), p as usize)
+                .is_some_and(|m| m.flags.iter().any(|f| f == "lo"));
+        libc::munmap(p, PAGE);
+        locked
+    }
+}
+
 /// (0.8.0) The pages of a secret, as the kernel sees them: locked (`lo`) and
 /// kept out of core dumps (`dd`), an inaccessible guard page on each side,
 /// apart from any other secret, and gone once the secret is dropped. The size
 /// is unusual on purpose, so no other test's mapping is taken for this one.
+/// Locked is required only where `mlock` takes effect at all; under
+/// AddressSanitizer it does not, and the rest is still checked.
 #[cfg(all(target_os = "linux", not(miri)))]
 #[test]
 fn a_secret_has_locked_guarded_pages_of_its_own() {
@@ -121,8 +149,10 @@ fn a_secret_has_locked_guarded_pages_of_its_own() {
     let b = SecretBuf::from_vec(vec![9u8; LEN]).unwrap();
     let addr = |s: &SecretBuf| s.expose(|bytes| bytes.as_ptr() as usize);
     let (at_a, at_b) = (addr(&a), addr(&b));
-    let protected =
-        |m: &Mapping| m.flags.iter().any(|f| f == "lo") && m.flags.iter().any(|f| f == "dd");
+    let can_lock = mlock_takes_effect();
+    let protected = |m: &Mapping| {
+        (!can_lock || m.flags.iter().any(|f| f == "lo")) && m.flags.iter().any(|f| f == "dd")
+    };
 
     let maps = mappings();
     let pages_a = containing(&maps, at_a).expect("the secret is mapped");

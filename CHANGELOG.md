@@ -89,6 +89,11 @@ panic, and `seal` reads its plaintext without leaving copies of it behind. An
 unknown command or flag is told by its position and never repeated back. The
 exit codes are otherwise as before.
 
+### Fixed — the memory test under AddressSanitizer *(2026-11-02)*
+
+Under AddressSanitizer `mlock` does nothing, so the test now requires a secret
+to be locked only where `mlock` works.
+
 ## [0.7.3] — 2026-10-30
 
 ### Fixed — `drop_filesystem` changes the root only as its last step
