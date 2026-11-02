@@ -8,17 +8,17 @@ Every notable change to this crate is recorded here. The format follows
 
 ### Added — `krypto-py`: the same API from Python
 
-`krypto-py` (on PyPI, imported as `krypto_py`) is the crate's API in Python:
-every function, type, constant and module, with the same names, built from the
-same code with PyO3; a test fails the build if a name is in one and not the
-other. What one seals, stores, signs or hashes, the other opens, reads and
-verifies, and the tests check it both ways: each side opens and checks what the
-other made, and gives the same answer where the input fixes it. Errors are
-exceptions, one per `Error` variant. The secrets stay in krypto's locked memory;
-what differs is only what can be guaranteed for the copies Python itself holds,
-which `docs/API.md` sets out. The repository is a workspace of `krypto` and
-`krypto-py`, CI builds and tests the binding, and the published `krypto` crate
-does not carry it.
+`krypto-py` (on PyPI, imported as `krypto_py`, for Python 3.11 or newer) is the
+crate's API in Python: every function, type, constant and module, with the same
+names, built from the same code with PyO3; a test fails the build if a name is
+in one and not the other. What one seals, stores, signs or hashes, the other
+opens, reads and verifies, and the tests check it both ways: each side opens and
+checks what the other made, and gives the same answer where the input fixes it.
+Errors are exceptions, one per `Error` variant. The secrets stay in krypto's
+locked memory; what differs is only what can be guaranteed for the copies Python
+itself holds, which `docs/API.md` sets out. The repository is a workspace of
+`krypto` and `krypto-py`, CI builds and tests the binding, and the published
+`krypto` crate does not carry it.
 
 ### Added — `MasterKey::key_id`
 
