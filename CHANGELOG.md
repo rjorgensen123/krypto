@@ -115,6 +115,20 @@ tested against real files.
 `docs/API.md` is the library's alone; `krypto-cli`, a tool for testing, is
 described in `docs/Cli.md`, and `docs/Usage.md` only points to it.
 
+### Fixed — `inspect` no longer takes random bytes for OpenPGP *(2026-11-02)*
+
+A packet without a stated length was taken as the start of an OpenPGP message,
+so about two in a hundred random inputs, such as a key, were told as an
+encrypted message. Such a packet now counts only after a key packet, and the
+first packet must carry a version OpenPGP defines.
+
+### Changed — fewer tests of `krypto-cli` *(2026-11-02)*
+
+`tests/cli.rs` tests only what the tool must do: `seal` and `open` with their
+exit codes, that `inspect` recognizes what krypto and the common tools make,
+and that a wrong call is exit 2. The files in `tests/fixtures/inspect` are
+checked for their format, not for every detail.
+
 ## [0.7.3] — 2026-10-30
 
 ### Fixed — `drop_filesystem` changes the root only as its last step

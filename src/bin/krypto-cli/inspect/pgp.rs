@@ -72,6 +72,12 @@ fn packets(input: &[u8]) -> Option<Vec<Packet<'_>>> {
                 rest = &after[len..];
             }
             None => {
+                // A body without a stated length streams a message's data, so
+                // it comes only after a key packet; otherwise random bytes pass
+                // for one.
+                if !out.iter().any(|p: &Packet| p.tag == 1 || p.tag == 3) {
+                    return None;
+                }
                 out.push(Packet {
                     tag,
                     body: None,
@@ -180,12 +186,34 @@ fn key_description(body: &[u8]) -> Option<String> {
     })
 }
 
+/// Whether the first packet starts with a version OpenPGP defines, or for
+/// compressed data an algorithm it defines.
+fn known_version(p: &Packet) -> bool {
+    let Some(&v) = p.head.first() else {
+        return false;
+    };
+    match p.tag {
+        1 => matches!(v, 3 | 6),
+        2 => matches!(v, 3..=6),
+        3 => matches!(v, 4..=6),
+        4 => matches!(v, 3 | 6),
+        5 | 6 => matches!(v, 3..=6),
+        8 => v <= 3,
+        18 => matches!(v, 1 | 2),
+        20 => v == 1,
+        _ => false,
+    }
+}
+
 /// Any OpenPGP data, from its binary packets.
 pub fn from_binary(input: &[u8]) -> Option<Finding> {
     let packets = packets(input)?;
     let first = packets.first()?;
+    if !known_version(first) {
+        return None;
+    }
     match first.tag {
-        1 | 3 | 18 | 20 | 9 => message(&packets),
+        1 | 3 | 18 | 20 => message(&packets),
         2 | 4 => signature(&packets),
         5 | 6 => key(&packets),
         8 => Some(Finding::new("OpenPGP compressed data")),

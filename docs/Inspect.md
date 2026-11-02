@@ -17,7 +17,7 @@ the same.
 The exit code is `0` when it has said what something is, also `not recognized`; `3` for a krypto
 blob whose header was changed, as for `open`; and `1` when stdin cannot be read.
 
-**Tested** means checked against real files made by the tool that makes the format
+**Tested** means that `inspect` recognizes the format in a real file made by the tool that makes it
 (`tests/fixtures/inspect`, and the test `inspect_tells_what_others_made`). **Untested** means built
 from the format's description, and not yet checked against a real file. The files are test data:
 the private keys in them are made only for the tests, protect nothing and must never be used; see
