@@ -71,6 +71,24 @@ format holds. What CI cannot show is left out: that memory was wiped before it
 was returned, that no copy is left after Argon2, and what a real core dump
 holds.
 
+### Changed — `krypto-cli` is a small helper tool *(2026-11-02)*
+
+`krypto-cli` is now a helper for those who use krypto, not a product and not a
+contract: nine commands for checking what krypto and `krypto-py` made, checking
+values and timing Argon2. They are `version`, `inspect` (new: the format, the
+algorithm and the key id of a blob, without a key; it replaces `blob-key-id`),
+`keyid`, `seal`, `open`, `mac`, `sha256`, `verify` and `bench` (new: the time
+per Argon2id preset, and per seal and open). `rand`, `reseal`, `keygen`,
+`public`, `sign`, `shared`, `derive-key`, `password-hash`, `password-verify` and
+the four `b64-*` commands are gone; the crate and `krypto-py` do all of it.
+`krypto-cli --help` lists the commands and the exit codes, and `krypto-cli
+<command> --help` explains the flags of one. Each command takes only its own
+flags. A wrong call is exit 2 and is reported before stdin is read, an empty
+`--context` included (it was exit 1). A closed stdout is exit 1 instead of a
+panic, and `seal` reads its plaintext without leaving copies of it behind. An
+unknown command or flag is told by its position and never repeated back. The
+exit codes are otherwise as before.
+
 ## [0.7.3] — 2026-10-30
 
 ### Fixed — `drop_filesystem` changes the root only as its last step

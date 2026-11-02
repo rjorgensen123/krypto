@@ -111,11 +111,10 @@ fn every_public_name_is_in_the_reference_docs() {
     );
 }
 
-/// The CLI is half the shipped surface. Its dispatch validates every command
-/// against `COMMANDS`, so that constant IS the authoritative list — parse it
-/// instead of guessing from match arms. A new command that skips the
-/// reference docs must fail the build: the same guard covers both surfaces,
-/// and half a guard catches half the drift.
+/// The helper ships with the crate, so its commands are in the reference docs
+/// too. Its parser checks every command against `COMMANDS`, so that constant
+/// IS the authoritative list: parse it instead of guessing from match arms. A
+/// new command that skips the reference docs fails the build.
 fn cli_commands() -> Vec<String> {
     let src = read("src/bin/krypto-cli.rs");
     let i = src
@@ -137,7 +136,7 @@ fn cli_commands() -> Vec<String> {
 fn every_cli_command_is_in_the_reference_docs() {
     let cmds = cli_commands();
     assert!(
-        cmds.len() >= 15,
+        cmds.len() >= 9,
         "the extractor found suspiciously few CLI commands ({}) — is it broken?",
         cmds.len()
     );

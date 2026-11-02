@@ -342,65 +342,39 @@ limit)` or `SecretBuf::random_with_limit(len, limit)`. The cap is per call, not 
 
 ---
 
-## `krypto-cli` — the command-line tool
+## `krypto-cli` — the helper tool
 
-The crate also builds `krypto-cli`, which runs the same functions from a shell: for tests, scripts
-and checking things by hand. From Python, use [`krypto-py`](Python.md) instead — the same API, in
-your own process. Either way, you do **not roll your own crypto** — two implementations that must
-agree eventually disagree.
+The crate also builds `krypto-cli`, a small helper: check what krypto or `krypto-py` made, check a
+value, or see how fast Argon2 is on this machine. It is not a product; in code, use the crate, or
+[`krypto-py`](Python.md) from Python.
 
 ```bash
-krypto-cli version                                                               # the crate version (new in 0.6.0)
-krypto-cli rand --n 16                                                           # 16 CSPRNG bytes as hex — salts/ids, NOT secrets (new in 0.6.0)
-
-# Encryption and seals (as before)
-krypto-cli seal  --key-file <file> --context <str> --salt <str> [--alg <name>]  # plaintext in → blob out
-krypto-cli open  --key-file <file> --context <str> --salt <str>                 # blob in → plaintext out
-krypto-cli mac   --key-file <file> --context <str> --salt <str>                 # data in → seal out
-krypto-cli keyid --key-file <file>                                              # which key generation
-krypto-cli reseal --key-file <old> --new-key-file <new> --context <s> --salt <s>     # key rotation (0.6.0)
-
-# Signatures and key agreement (new in 0.5.0 — the same surface as the Rust API)
-krypto-cli keygen --alg ed25519 --out private.key                               # → public (hex); private key to file
-krypto-cli sign   --alg ed25519 --key-file private.key < message                # → signature (hex)
-krypto-cli verify --alg ed25519 --public <hex> --signature <hex> < message      # exit 0 = holds, 3 = does not
-krypto-cli shared --key-file mine.key --peer <peer-public-hex> --out shared.key # shared key → file
-
-# Passwords (new in 0.5.0; password on stdin — one trailing newline stripped)
-krypto-cli derive-key --salt <hex> --preset high --out lock.key                 # password → 32-byte key file
-krypto-cli password-hash --preset interactive                                   # password → PHC string
-krypto-cli password-verify --phc '<string>'                                     # exit 0 = right, 3 = wrong
-
-krypto-cli sha256 < file                                                         # → hex fingerprint
-krypto-cli b64-encode < file                                                     # bytes → base64 (0.5.1; -nopad for the ssh form)
-krypto-cli b64-decode                                                            # base64 on stdin → hex (0.5.1; -nopad variant exists)
-krypto-cli blob-key-id < blob                                                    # which key generation? (after exit 4)
+krypto-cli version                                                         # the krypto version
+krypto-cli inspect < blob                                                  # format, algorithm, key id; no key
+krypto-cli keyid  --key-file <file>                                        # which key generation
+krypto-cli seal   --key-file <file> --context <str> --salt <str> [--alg <name>] < plaintext > blob
+krypto-cli open   --key-file <file> --context <str> --salt <str> < blob     # → plaintext
+krypto-cli mac    --key-file <file> --context <str> --salt <str> < data     # → hex
+krypto-cli sha256 < file                                                   # → hex
+krypto-cli verify --alg ed25519 --public <hex> --signature <hex> < message  # exit 0 = holds, 3 = does not
+krypto-cli bench                                                           # Argon2 per preset, seal and open
 ```
 
-Data goes in on stdin and out on stdout. `--context` and `--salt` (seal/open/mac) are the same
-values you would give `derive`. `--alg` for seal is `aegis256` (default), `xchacha20` or
-`aes256gcm`; for keygen/public/sign/verify it is the key type.
+`krypto-cli --help` lists the commands, and `krypto-cli <command> --help` explains one command and
+its flags. Data goes in on stdin and out on stdout. `--context` and `--salt` are the values you
+would give `derive`, and `--alg` for `seal` is `aegis256` (default), `xchacha20` or `aes256gcm`.
+Each command takes only its own flags, and hex must be lowercase.
 
-**Private key material never leaves the tool** — it never enters the calling process.
-`keygen`/`shared`/`derive-key` write to files (mode 0600, and **never** over an existing file);
-the file from `shared`/`derive-key` is 32 bytes and usable directly as `--key-file` for
-seal/open/mac. Only public keys, signatures, hashes, blobs and requested plaintext go to stdout.
-Hex arguments must be canonical (lowercase).
-
-Check the exit code; it is split on purpose:
+The exit code tells the kinds of failure apart:
 
 | Code | Means | What to do |
 |---|---|---|
-| `1` | I/O or internal error | log and retry |
+| `1` | I/O or internal error | look at the message |
 | `2` | you called it wrong | fix the call |
-| **`3`** | **authentication failure** | **someone tampered with the data, or the key is wrong — this should be alerted on** |
-| `4` | the blob belongs to another key generation | find the right key (see `keyid`) — routing, not tampering *(new in 0.5.0)* |
+| **`3`** | **authentication failure** | **someone tampered with the data, or the key is wrong** |
+| `4` | the blob belongs to another key generation | find the right key (see `keyid` and `inspect`) — routing, not tampering |
 
-`open`, `reseal` and `blob-key-id` give `3` for a blob changed anywhere past its first four bytes
-(`FAFN`) — before 0.7.3 a changed version or algorithm gave `1`. Input that is not a krypto blob at
-all gives `1`.
-
-Error messages go to stderr and never contain key material.
+Messages go to stderr and never contain key material or plaintext.
 
 ---
 
@@ -411,7 +385,7 @@ Six kinds, and they mean different things:
 | Error | When | What it means for you |
 |---|---|---|
 | `Auth` | tampering, wrong key, wrong password | **the only one to alert on** |
-| `WrongKey` | from `krypto-cli open` and `reseal`: the blob belongs to another key generation | find the right key — routing, not tampering *(new in 0.5.0)* |
+| `WrongKey` | from `krypto-cli open`: the blob belongs to another key generation | find the right key — routing, not tampering *(new in 0.5.0)* |
 | `Format` | input that is not what krypto takes: not a krypto blob, a malformed key, signature or PHC string, a wrong parameter | the data is wrong, not the key — a changed blob is `Auth` |
 | `KeyNotFound` | the name does not exist in the store | normal, not an error condition |
 | `Io` | file/disk trouble | the environment, not the crypto |
@@ -427,7 +401,7 @@ None of them carry key material or plaintext. You can log them as they are.
 
 | Version | What arrived |
 |---|---|
-| **0.8.0** | **Python: `krypto-py`.** The same API from Python, built from the same code: what one seals, the other opens; one API reference, with the guarantees that differ set apart · `MasterKey::key_id` in the library, the value `krypto-cli` has always used · the repository is a workspace of `krypto` and `krypto-py` |
+| **0.8.0** | **Python: `krypto-py`.** The same API from Python, built from the same code: what one seals, the other opens; one API reference, with the guarantees that differ set apart · `MasterKey::key_id` in the library, the value `krypto-cli` has always used · the repository is a workspace of `krypto` and `krypto-py` · `krypto-cli` is a small helper with nine commands |
 | **0.7.3** | `drop_filesystem` changes the root only as its last step, on the directory it checked; when it fails, the process is as it was · every change to a blob past its `FAFN` magic gives `Auth` (`krypto-cli` exit 3), and `SecretStore::get` gives `Auth` for a key id that does not match · an empty `info` for `derive` is `Format` · random bytes are capped at 1 MiB per call, with your own cap as an option |
 | **0.7.2** | **Secret memory and the current RustCrypto line.** The dependencies moved to the current RustCrypto line (RUSTSEC-2026-0387), and Rust 1.89 is the minimum · each secret has memory pages of its own: kept out of core dumps, still locked when another secret is dropped, with a guard page on each side (note: each live secret uses at least one page of the locked-memory limit) · the password functions and `derive` wipe what argon2 and HKDF leave on the stack, and derived keys are written straight into locked memory · the per-key limit of AES-256-GCM is documented |
 | **0.7.1** | No functional change: the install snippets point at crates.io, and the published crate no longer carries the CI configuration |

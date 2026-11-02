@@ -44,8 +44,8 @@ The curiosity behind it comes from work on data-plane confidentiality — see
 | **Tighten the process itself** | memory, privileges, inherited file descriptors — and finally the whole filesystem. Each step is one call |
 
 All of it is there from Rust and from Python. `krypto-py` is the same API in Python, with the
-same names, running the same Rust code inside, so what one seals, the other opens. A command-line
-tool, `krypto-cli`, runs the same functions from a shell, for tests and scripts.
+same names, running the same Rust code inside, so what one seals, the other opens. A small helper,
+`krypto-cli`, checks from a shell what they made, and how fast Argon2 is on the machine.
 
 **[How to use krypto](Usage.md)** shows how each of them is done, with examples in Rust, and
 **[from Python](Python.md)** the same with Python code. **[API](API.md)** is the reference over

@@ -429,9 +429,8 @@ inside; on `Err` the root has not changed and the process stands where it stood.
 the chroot krypto needs no filesystem: randomness comes from the `getrandom` syscall, and
 AEAD/KDF/signing/passwords touch no files.
 
-**Deliberately not in `krypto-cli`** (a documented exclusion under the parity rule): hardening is
-process-local — hardening a subprocess does not protect the caller. *(0.8.0)* From Python,
-`krypto-py` hardens the Python process with these same functions.
+Hardening is process-local: it protects the process that calls it, and `krypto-cli` hardens only
+itself. *(0.8.0)* From Python, `krypto-py` hardens the Python process with these same functions.
 
 ---
 
@@ -449,7 +448,7 @@ pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotF
 | `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob (too short for a header, or not starting with `FAFN`), or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info` |
 | `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, and a key id in a `SecretStore` that does not match |
 | `KeyNotFound` | the name does not exist in the store |
-| `WrongKey` | the blob belongs to another key generation — routing, not tampering *(new in 0.5.0)*. *(0.7.3)* No library function returns it: a `SecretStore` holds one generation, so a different key id there is `Auth`. It is the answer for a caller that routes between generations, as `krypto-cli open` and `reseal` do |
+| `WrongKey` | the blob belongs to another key generation — routing, not tampering *(new in 0.5.0)*. *(0.7.3)* No library function returns it: a `SecretStore` holds one generation, so a different key id there is `Auth`. It is the answer for a caller that routes between generations, as `krypto-cli open` does |
 
 No variant carries key material or plaintext.
 
@@ -515,44 +514,32 @@ How the Rust forms read in Python:
 
 ---
 
-## `krypto-cli` — the command-line tool
+## `krypto-cli` — the helper tool
 
-The crate also builds a small binary that runs the same functions from a shell: for tests, scripts
-and checks by hand. *(0.8.0)* From Python, use `krypto-py` (above), which is the same API in the
-same process. The key material stays on the Rust side.
+*(0.8.0)* The crate also builds `krypto-cli`, a small helper for those who use krypto: it checks
+what krypto and `krypto-py` made, checks values and measures speed, from a shell. It is not a
+product and not a contract: no program should build on it, and its commands change as the need
+does. In code, use the crate, or `krypto-py` from Python.
 
 | Command | In → out |
 |---|---|
-| `version` *(0.6.0)* | → the crate version |
-| `rand --n <bytes>` *(0.6.0)* | → CSPRNG bytes as hex (1..=1048576; for NON-secrets) |
-| `seal --key-file <f> --context <s> --salt <s> [--alg <name>]` | plaintext → blob |
-| `reseal --key-file <old> --new-key-file <new> --context <s> --salt <s>` *(0.6.0)* | blob → blob under a new generation (algorithm preserved); old generation against the wrong key → exit **4** |
+| `version` | → the krypto version |
+| `inspect` | blob on stdin → the format version, the algorithm, the key id and the length; no key needed |
+| `keyid --key-file <f>` | → the key id of a master key (hex) |
+| `seal --key-file <f> --context <s> --salt <s> [--alg aegis256\|xchacha20\|aes256gcm]` | plaintext → blob |
 | `open --key-file <f> --context <s> --salt <s>` | blob → plaintext |
-| `mac --key-file <f> --context <s> --salt <s>` | data → hex MAC |
-| `keyid --key-file <f>` | → hex key id |
-| `b64-encode` / `b64-encode-nopad` | stdin bytes → base64 *(0.5.1)* |
-| `b64-decode` / `b64-decode-nopad` | stdin base64 → hex *(0.5.1)* |
-| `keygen --alg ed25519\|p256\|x25519 --out <f>` *(0.5.0)* | → public (hex); private key to file (0600, never overwrites) |
-| `public --alg … --key-file <f>` *(0.5.0)* | → public (hex) |
-| `sign --alg ed25519\|p256 --key-file <f>` *(0.5.0)* | message → signature (hex) |
-| `verify --alg … --public <hex> --signature <hex>` *(0.5.0)* | message → exit 0 / 3 |
-| `shared --key-file <f> --peer <hex> --out <f>` *(0.5.0)* | shared 32-byte key → file (0600), usable as `--key-file` |
-| `derive-key --salt <hex> --preset <p> --out <f>` *(0.5.0)* | password on stdin → 32-byte key to file |
-| `password-hash --preset <p>` / `password-verify --phc <s>` *(0.5.0)* | password on stdin → PHC / exit 0 / 3 |
-| `sha256` *(0.5.0)* | data → hex |
-| `blob-key-id` *(0.5.0)* | blob → key generation id (hex), no key needed |
+| `mac --key-file <f> --context <s> --salt <s>` | data → HMAC-SHA256 (hex) |
+| `sha256` | data → SHA-256 (hex) |
+| `verify --alg ed25519\|p256 --public <hex> --signature <hex>` | message → exit 0, or 3 if it does not hold |
+| `bench` | → the time per Argon2id preset, and per seal and open, on this machine |
 
-`--alg` for `seal`: `aegis256` (default) · `xchacha20` · `aes256gcm` — valid only there. For
-keygen/public/sign/verify, `--alg` is the key type. **Private key material always goes to files
-(0600, never overwritten), never to stdout.** Hex arguments must be canonical (lowercase);
-passwords on stdin get one trailing newline stripped.
-
-**Exit codes are part of the contract:** `0` ok · `1` I/O or internal · `2` usage error ·
-`3` authentication failed (tampering/wrong key — alert) · `4` another key generation (routing, not
-tampering — *new in 0.5.0*). *(0.7.3)* `open`, `reseal` and `blob-key-id` give `3` for a blob
-changed anywhere past its `FAFN` magic, a version or algorithm krypto does not know included (it
-was `1`); input that is not a krypto blob at all gives `1`. Errors go to stderr — never key
-material.
+`krypto-cli --help` lists the commands and the exit codes, and `krypto-cli <command> --help` the
+flags of one command. Each command takes only its own flags, and hex must be lowercase. Exit codes:
+`0` ok · `1` I/O or internal · `2` the call is wrong · `3` authentication failed (tampering or the
+wrong key) · `4` the blob belongs to another key generation (`open` compares the key ids before it
+opens). Messages go to stderr and never carry key material or plaintext. Until 0.7.3 the tool had 21
+commands and its exit codes were a contract; the commands that went are done with the crate or
+`krypto-py`.
 
 The key id in the blob header is derived deterministically from the master key: HMAC-SHA256 over
 the string `key-id`, keyed with the key `derive` gives for the context `krypto/key-id/v1` and an

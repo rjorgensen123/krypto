@@ -87,8 +87,8 @@ the type system.
 From Python, the same API is **`krypto-py`** (`pip install krypto-py`, `import krypto_py`): every
 function, type, constant and module of the crate, with the same names, built from the same code — so
 what one seals, the other opens. They differ only in what can be guaranteed for the copies Python
-itself holds; the API contract says exactly where. The bundled **`krypto-cli`** binary runs the
-same functions from a shell.
+itself holds; the API contract says exactly where. The bundled **`krypto-cli`** is a small helper
+for checking from a shell what they made; it is not a product.
 
 ## Test
 
