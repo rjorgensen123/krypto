@@ -20,12 +20,11 @@ with the module. Two normative rules bind whoever *changes* the surface:
 - **Verify input and output.** All input is validated (type, length, range, character set —
   fail-closed; unknown values are rejected, not ignored), and output never carries secrets or
   unexpected structure. An uncovered case → update this document.
-- **The feedback contract.** What the crate answers — success, errors and status — lives HERE:
-  the library through `Result` and [`Error`](#error--error) (the crate never logs — logging
-  belongs to the consumer), *(0.8.0)* Python through the same values and one exception per `Error`
-  variant, the cli through exit codes, per-command stdout formats and stderr.
-  No error path carries key material or plaintext. An answer not written here is a gap in the
-  contract and should be reported — not interpreted.
+- **The feedback contract.** What the crate answers — success, errors and status — lives HERE: the
+  library through `Result` and [`Error`](#error--error) (the crate never logs — logging belongs to
+  the consumer), *(0.8.0)* Python through the same values and one exception per `Error` variant. No
+  error path carries key material or plaintext. An answer not written here is a gap in the contract
+  and should be reported — not interpreted.
 
 ---
 
@@ -150,8 +149,7 @@ key that must never touch disk.
 
 *(0.8.0)* `key_id` is the master key's key id: which key generation a blob was sealed under, safe to
 publish. HMAC-SHA256 over `key-id`, keyed with the key `derive` gives for the context
-`krypto/key-id/v1` and an empty salt; the first 16 bytes. It is frozen, because blobs carry it, and it
-is the value `krypto-cli` has always written.
+`krypto/key-id/v1` and an empty salt; the first 16 bytes. It is frozen, because blobs carry it.
 
 ### `DerivedKey`
 
@@ -429,8 +427,8 @@ inside; on `Err` the root has not changed and the process stands where it stood.
 the chroot krypto needs no filesystem: randomness comes from the `getrandom` syscall, and
 AEAD/KDF/signing/passwords touch no files.
 
-Hardening is process-local: it protects the process that calls it, and `krypto-cli` hardens only
-itself. *(0.8.0)* From Python, `krypto-py` hardens the Python process with these same functions.
+Hardening is process-local: it protects the process that calls it. *(0.8.0)* From Python,
+`krypto-py` hardens the Python process with these same functions.
 
 ---
 
@@ -448,7 +446,7 @@ pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotF
 | `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob (too short for a header, or not starting with `FAFN`), or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info` |
 | `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, and a key id in a `SecretStore` that does not match |
 | `KeyNotFound` | the name does not exist in the store |
-| `WrongKey` | the blob belongs to another key generation — routing, not tampering *(new in 0.5.0)*. *(0.7.3)* No library function returns it: a `SecretStore` holds one generation, so a different key id there is `Auth`. It is the answer for a caller that routes between generations, as `krypto-cli open` does |
+| `WrongKey` | the blob belongs to another key generation — routing, not tampering *(new in 0.5.0)*. *(0.7.3)* No library function returns it: a `SecretStore` holds one generation, so a different key id there is `Auth`. It is the answer for a caller that routes between generations |
 
 No variant carries key material or plaintext.
 
@@ -511,41 +509,6 @@ How the Rust forms read in Python:
 | `harden` | Applies to the process | Applies to the Python process; `close_inherited_fds` closes the interpreter's own descriptors too |
 | Long calls | — | `password::hash`, `verify` and `derive_key` release the GIL |
 | A panic inside krypto | Unwinds to the caller | Becomes `pyo3_runtime.PanicException` |
-
----
-
-## `krypto-cli` — the helper tool
-
-*(0.8.0)* The crate also builds `krypto-cli`, a small helper for those who use krypto: it checks
-what krypto and `krypto-py` made, checks values and measures speed, from a shell. It is not a
-product and not a contract: no program should build on it, and its commands change as the need
-does. In code, use the crate, or `krypto-py` from Python.
-
-| Command | In → out |
-|---|---|
-| `version` | → the krypto version |
-| `inspect` | a file or dump on stdin → what it is and how it was made, without a key: [Inspect](Inspect.md) lists what it recognizes |
-| `keyid --key-file <f>` | → the key id of a master key (hex) |
-| `seal --key-file <f> --context <s> --salt <s> [--alg aegis256\|xchacha20\|aes256gcm]` | plaintext → blob |
-| `open --key-file <f> --context <s> --salt <s>` | blob → plaintext |
-| `mac --key-file <f> --context <s> --salt <s>` | data → HMAC-SHA256 (hex) |
-| `sha256` | data → SHA-256 (hex) |
-| `verify --alg ed25519\|p256 --public <hex> --signature <hex>` | message → exit 0, or 3 if it does not hold |
-| `bench` | → the time per Argon2id preset, and per seal and open, on this machine |
-
-`krypto-cli --help` lists the commands and the exit codes, and `krypto-cli <command> --help` the
-flags of one command. Each command takes only its own flags, and hex must be lowercase. Exit codes:
-`0` ok · `1` I/O or internal · `2` the call is wrong · `3` authentication failed (tampering or the
-wrong key) · `4` the blob belongs to another key generation (`open` compares the key ids before it
-opens). Messages go to stderr and never carry key material or plaintext. Until 0.7.3 the tool had 21
-commands and its exit codes were a contract; the commands that went are done with the crate or
-`krypto-py`.
-
-The key id in the blob header is derived deterministically from the master key: HMAC-SHA256 over
-the string `key-id`, keyed with the key `derive` gives for the context `krypto/key-id/v1` and an
-empty salt; the first 16 bytes. It identifies the generation without revealing the key. *(0.8.0)* It
-is `MasterKey::key_id`. Stdin is
-bounded (64 MiB). Error texts are English.
 
 ---
 

@@ -235,12 +235,13 @@ fn help_of(command: &str) -> &'static str {
         "inspect" => {
             "usage: krypto-cli inspect < file\n\
              \n\
-             Tells what a file or a dump is, and how it was made, without a key: a\n\
-             krypto blob with its algorithm and key id, a store file with its entries, a\n\
-             password hash with its Argon2id parameters and preset, a P-256 private\n\
-             key, public keys and signatures, also inside hex or base64. It never shows\n\
-             a key, a plaintext or a hash value. A krypto blob whose header was changed\n\
-             is exit 3, as for open. docs/Inspect.md lists what it recognizes."
+             Tells what a file or a dump is, and how it was made, without a key: the\n\
+             format and the algorithms used. It knows what krypto makes (blobs, store\n\
+             files, password hashes, keys and signatures) and the common formats from\n\
+             other tools: OpenPGP, X.509 and PKCS, SSH, encrypted files, tokens,\n\
+             password hashes and compressed data. PEM, hex and base64 are unwrapped. It\n\
+             never shows a key, a plaintext or a hash value. A krypto blob whose header\n\
+             was changed is exit 3, as for open. docs/Inspect.md lists what it knows."
         }
         "keyid" => {
             "usage: krypto-cli keyid --key-file <file>\n\

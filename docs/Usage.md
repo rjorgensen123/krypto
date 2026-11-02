@@ -342,40 +342,11 @@ limit)` or `SecretBuf::random_with_limit(len, limit)`. The cap is per call, not 
 
 ---
 
-## `krypto-cli` — the helper tool
+## `krypto-cli` — a tool for testing
 
-The crate also builds `krypto-cli`, a small helper: check what krypto or `krypto-py` made, check a
-value, or see how fast Argon2 is on this machine. It is not a product; in code, use the crate, or
-[`krypto-py`](Python.md) from Python.
-
-```bash
-krypto-cli version                                                         # the krypto version
-krypto-cli inspect < file                                                  # what it is and how it was made; no key
-krypto-cli keyid  --key-file <file>                                        # which key generation
-krypto-cli seal   --key-file <file> --context <str> --salt <str> [--alg <name>] < plaintext > blob
-krypto-cli open   --key-file <file> --context <str> --salt <str> < blob     # → plaintext
-krypto-cli mac    --key-file <file> --context <str> --salt <str> < data     # → hex
-krypto-cli sha256 < file                                                   # → hex
-krypto-cli verify --alg ed25519 --public <hex> --signature <hex> < message  # exit 0 = holds, 3 = does not
-krypto-cli bench                                                           # Argon2 per preset, seal and open
-```
-
-`krypto-cli --help` lists the commands, and `krypto-cli <command> --help` explains one command and
-its flags. Data goes in on stdin and out on stdout. `--context` and `--salt` are the values you
-would give `derive`, and `--alg` for `seal` is `aegis256` (default), `xchacha20` or `aes256gcm`.
-Each command takes only its own flags, and hex must be lowercase.
-
-The exit code tells the kinds of failure apart:
-
-| Code | Means | What to do |
-|---|---|---|
-| `1` | I/O or internal error | look at the message |
-| `2` | you called it wrong | fix the call |
-| **`3`** | **authentication failure** | **someone tampered with the data, or the key is wrong** |
-| `4` | the blob belongs to another key generation | find the right key (see `keyid` and `inspect`) — routing, not tampering |
-
-Messages go to stderr and never contain key material or plaintext. What `inspect` recognizes is
-listed in **[Inspect](Inspect.md)**.
+The crate also builds `krypto-cli`, a tool for testing, not for production. From a shell it shows
+what krypto or `krypto-py` made, and how (`inspect`), checks that a blob opens, and lets you try
+things out. **[krypto-cli](Cli.md)** describes it.
 
 ---
 
@@ -386,7 +357,7 @@ Six kinds, and they mean different things:
 | Error | When | What it means for you |
 |---|---|---|
 | `Auth` | tampering, wrong key, wrong password | **the only one to alert on** |
-| `WrongKey` | from `krypto-cli open`: the blob belongs to another key generation | find the right key — routing, not tampering *(new in 0.5.0)* |
+| `WrongKey` | the blob belongs to another key generation, for a caller that routes between them | find the right key — routing, not tampering *(new in 0.5.0)* |
 | `Format` | input that is not what krypto takes: not a krypto blob, a malformed key, signature or PHC string, a wrong parameter | the data is wrong, not the key — a changed blob is `Auth` |
 | `KeyNotFound` | the name does not exist in the store | normal, not an error condition |
 | `Io` | file/disk trouble | the environment, not the crypto |

@@ -100,6 +100,18 @@ Given a file or a dump, `inspect` tells which of krypto's formats it is and how
 it was made, without a key and without showing a key, a plaintext or a hash
 value. `docs/Inspect.md` lists what it recognizes.
 
+### Added — `krypto-cli inspect` tells what others made, and how *(2026-11-02)*
+
+Besides what krypto makes, `inspect` now recognizes the common formats from
+other tools, such as OpenPGP, X.509 and PKCS, SSH, encrypted files and tokens,
+and tells the algorithms used. `docs/Inspect.md` lists them, and which are
+tested against real files.
+
+### Changed — `krypto-cli` is documented on its own *(2026-11-02)*
+
+`docs/API.md` is the library's alone; `krypto-cli`, a tool for testing, is
+described in `docs/Cli.md`, and `docs/Usage.md` only points to it.
+
 ## [0.7.3] — 2026-10-30
 
 ### Fixed — `drop_filesystem` changes the root only as its last step

@@ -1,14 +1,22 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! `krypto-cli inspect`: what a file or a dump is, and how it was made,
-//! without a key (0.8.0). This is part 1: what krypto makes. `docs/Inspect.md`
-//! lists what is recognized.
+//! without a key (0.8.0). Part 1 is what krypto makes, in this file; part 2 is
+//! what others make, in the modules. `docs/Inspect.md` lists what is
+//! recognized, and which of it is tested against real files.
 //!
 //! It tells what something is and which algorithm made it, never what it
-//! holds: no key, no plaintext and no hash value is printed. The only text
-//! taken from the input is the names in a store file, which are not secret,
-//! with anything that is not printable ASCII replaced.
+//! holds: no key, no plaintext and no hash value is printed. Text taken from
+//! the input, such as names and labels, has anything that is not printable
+//! ASCII replaced.
 
 use krypto::{base64, blob_key_id, hex};
+
+mod der;
+mod files;
+mod pgp;
+mod pkix;
+mod ssh;
+mod text;
 
 /// What `inspect` found: a name and the facts about it. `changed` is set for a
 /// krypto blob whose header was changed, which is exit 3, as for `open`.
@@ -48,13 +56,27 @@ pub fn inspect(input: &[u8]) -> Finding {
 }
 
 fn inspect_at(input: &[u8], depth: u8) -> Finding {
-    let binary = [blob, store, pkcs8_p256, der_ecdsa_signature];
-    if let Some(found) = binary.iter().find_map(|f| f(input)) {
+    // Part 1: what krypto makes.
+    let ours = [blob, store, pkcs8_p256, der_ecdsa_signature];
+    if let Some(found) = ours.iter().find_map(|f| f(input)) {
+        return found;
+    }
+    // Part 2: what others make, told from bytes.
+    let theirs = [files::from_magic, pkix::from_der, pgp::from_binary];
+    if let Some(found) = theirs.iter().find_map(|f| f(input)) {
         return found;
     }
     if let Ok(text) = std::str::from_utf8(input) {
         let text = text.trim();
         if let Some(found) = phc_argon2id(text) {
+            return found;
+        }
+        let found = pem(text, depth)
+            .or_else(|| ssh::rfc4716(text))
+            .or_else(|| ssh::putty(text))
+            .or_else(|| ssh::public_line(text))
+            .or_else(|| text::from_text(text));
+        if let Some(found) = found {
             return found;
         }
         // Hex and base64 are unwrapped once or twice, never more.
@@ -65,6 +87,85 @@ fn inspect_at(input: &[u8], depth: u8) -> Finding {
         }
     }
     by_length(input).unwrap_or_else(|| unknown(input))
+}
+
+/// PEM: `-----BEGIN <label>-----`, base64, `-----END <label>-----`. The label
+/// says what to look for; the content is told as DER or by its own format.
+fn pem(text: &str, depth: u8) -> Option<Finding> {
+    let label = text.strip_prefix("-----BEGIN ")?.split("-----").next()?;
+    if label.starts_with("PGP ") {
+        return pgp::from_armor(text);
+    }
+    let shown = printable(label.as_bytes());
+    let body: String = text
+        .lines()
+        .skip(1)
+        .take_while(|l| !l.starts_with("-----END"))
+        .filter(|l| !l.contains(':'))
+        .map(str::trim)
+        .collect();
+    let bytes = base64::decode(&body).ok();
+    let inner = bytes.as_deref().and_then(|b| match label {
+        "OPENSSH PRIVATE KEY" => ssh::private_key(b),
+        "SSH SIGNATURE" => ssh::signature(b),
+        "RSA PUBLIC KEY" => pkix::pkcs1_public(b),
+        _ => Some(inspect_at(b, depth + 1)).filter(|f| f.what != NOT_RECOGNIZED),
+    });
+    let mut found = inner.unwrap_or_else(|| Finding::new(pem_label_name(label, &shown)));
+    found
+        .facts
+        .insert(0, ("wrapped in", format!("PEM ({shown})")));
+    // A legacy encrypted PEM key names its cipher in DEK-Info.
+    if let Some(dek) = text.lines().find_map(|l| l.strip_prefix("DEK-Info: ")) {
+        let cipher = dek.split(',').next().unwrap_or_default();
+        found = found.fact("encrypted", printable(cipher.as_bytes()));
+    }
+    Some(found)
+}
+
+/// What a PEM label says the block is, for when its content cannot be read,
+/// as with a key encrypted the legacy way.
+fn pem_label_name(label: &str, shown: &str) -> String {
+    match label {
+        "RSA PRIVATE KEY" => "RSA private key (PKCS#1)",
+        "EC PRIVATE KEY" => "EC private key (SEC1)",
+        "DSA PRIVATE KEY" => "DSA private key",
+        "PRIVATE KEY" => "private key (PKCS#8)",
+        "ENCRYPTED PRIVATE KEY" => "encrypted private key (PKCS#8)",
+        "PUBLIC KEY" => "public key (SubjectPublicKeyInfo)",
+        "CERTIFICATE" => "X.509 certificate",
+        "CERTIFICATE REQUEST" | "NEW CERTIFICATE REQUEST" => {
+            "certificate signing request (PKCS#10)"
+        }
+        "X509 CRL" => "certificate revocation list (X.509 CRL)",
+        "PKCS7" | "CMS" => "CMS / PKCS#7",
+        "DH PARAMETERS" => "Diffie-Hellman parameters",
+        "EC PARAMETERS" => "EC parameters",
+        _ => return format!("PEM block: {shown}"),
+    }
+    .to_string()
+}
+
+/// Seconds since 1970 as a UTC date and time.
+fn date_time(seconds: u64) -> String {
+    let days = (seconds / 86_400) as i64;
+    let rem = seconds % 86_400;
+    // Days to a civil date (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02} UTC",
+        rem / 3_600,
+        rem % 3_600 / 60,
+        rem % 60
+    )
 }
 
 fn alg_name(id: u8) -> &'static str {
@@ -239,8 +340,8 @@ fn phc_argon2id(text: &str) -> Option<Finding> {
 /// base64 only when what it holds is recognized, since many words are valid
 /// base64.
 fn unwrapped(text: &str, depth: u8) -> Option<Finding> {
-    if text.len() >= 2 {
-        if let Ok(bytes) = hex::decode(text) {
+    if text.len() >= 2 && text.bytes().all(|b| b.is_ascii_hexdigit()) {
+        if let Ok(bytes) = hex::decode(&text.to_ascii_lowercase()) {
             return Some(wrapped(inspect_at(&bytes, depth + 1), "hex"));
         }
     }
@@ -266,16 +367,18 @@ fn by_length(input: &[u8]) -> Option<Finding> {
         32 => Some(Finding::new("32 bytes").fact(
             "could be",
             "an Ed25519 or X25519 public key, an Ed25519 seed, an X25519 private key, \
-             or a krypto master key; the length alone cannot tell them apart",
+             a krypto master key or a SHA-256 hash; the length alone cannot tell them apart",
         )),
-        64 => {
-            Some(Finding::new("64 bytes").fact("could be", "an Ed25519 signature, or other data"))
-        }
+        64 => Some(Finding::new("64 bytes").fact(
+            "could be",
+            "an Ed25519 signature or a SHA-512 hash, or other data",
+        )),
         65 if input[0] == 0x04 => Some(
             Finding::new("ECDSA P-256 public key (SEC1, uncompressed)")
                 .fact("note", "by its length and first byte only"),
         ),
-        _ => None,
+        n => text::hash_by_length(n)
+            .map(|hash| Finding::new(format!("{n} bytes")).fact("could be", hash)),
     }
 }
 

@@ -265,6 +265,202 @@ fn inspect_tells_what_krypto_made() {
     assert_eq!((code, r.starts_with("not recognized")), (0, true), "{r}");
 }
 
+/// `inspect` on files the common tools made (`openssl`, `gpg`, `ssh-keygen`,
+/// Python's standard library and `cryptography`), in `tests/fixtures/inspect`:
+/// the format and the algorithms they say they used (FS-0056, part 2). The SSH
+/// fingerprints are the ones `ssh-keygen -l` gives. No line of a PEM body is
+/// ever repeated back.
+#[test]
+fn inspect_tells_what_others_made() {
+    const EXPECTED: &[(&str, &[&str])] = &[
+        (
+            "bundle.p12",
+            &[
+                "PKCS#12 bundle",
+                "AES-256-CBC, key from PBKDF2 with HMAC-SHA256",
+            ],
+        ),
+        (
+            "cert-p256.der",
+            &[
+                "X.509 certificate",
+                "ECDSA with SHA-256",
+                "EC P-256",
+                "valid",
+            ],
+        ),
+        (
+            "cert-p256.pem",
+            &["X.509 certificate", "PEM (CERTIFICATE)", "EC P-256"],
+        ),
+        (
+            "cert-rsa.pem",
+            &["X.509 certificate", "RSA with SHA-256", "RSA 2048 bits"],
+        ),
+        (
+            "cms-enveloped.der",
+            &[
+                "CMS enveloped data",
+                "AES-256-CBC",
+                "key transport with RSA",
+            ],
+        ),
+        (
+            "cms-signed.der",
+            &["CMS signed data", "SHA-256", "ECDSA with SHA-256"],
+        ),
+        ("csr-p256.pem", &["certificate signing request", "EC P-256"]),
+        ("data.bz2", &["bzip2", "encrypted   no"]),
+        ("data.gz", &["gzip", "encrypted   no"]),
+        ("data.tar", &["tar archive", "encrypted   no"]),
+        ("data.xz", &["xz", "encrypted   no"]),
+        ("data.zip", &["zip archive", "encrypted   no"]),
+        ("data.zst", &["zstd", "encrypted   no"]),
+        ("ec-p256.pkcs8.pem", &["P-256 private key", "not shown"]),
+        (
+            "ec-p384.sec1.pem",
+            &["EC private key (SEC1)", "EC P-384", "not shown"],
+        ),
+        (
+            "ed25519.pkcs8.pem",
+            &["private key (PKCS#8)", "Ed25519", "not shown"],
+        ),
+        (
+            "fernet.txt",
+            &["Fernet token", "AES-128-CBC with HMAC-SHA256", "made"],
+        ),
+        ("openssl-enc.bin", &["OpenSSL enc file", "not recorded"]),
+        (
+            "pgp-message.asc",
+            &[
+                "OpenPGP encrypted message",
+                "ECDH to key",
+                "AES-256 with OCB",
+            ],
+        ),
+        (
+            "pgp-message.bin",
+            &[
+                "OpenPGP encrypted message",
+                "ECDH to key",
+                "AES-256 with OCB",
+            ],
+        ),
+        (
+            "pgp-public.asc",
+            &["OpenPGP public key", "Ed25519", "ECDH Curve25519"],
+        ),
+        (
+            "pgp-public.bin",
+            &["OpenPGP public key", "Ed25519", "ECDH Curve25519"],
+        ),
+        (
+            "pgp-signature.asc",
+            &["OpenPGP signature", "EdDSA", "SHA-512"],
+        ),
+        (
+            "pgp-signature.sig",
+            &["OpenPGP signature", "EdDSA", "SHA-512"],
+        ),
+        (
+            "pgp-symmetric.bin",
+            &["AES-256, key from the passphrase with iterated and salted SHA-512"],
+        ),
+        (
+            "rsa-2048.enc-pkcs8.pem",
+            &[
+                "encrypted private key (PKCS#8)",
+                "PBKDF2 with HMAC-SHA256",
+                "AES-256-CBC",
+            ],
+        ),
+        (
+            "rsa-2048.pkcs1-encrypted.pem",
+            &["RSA private key (PKCS#1)", "encrypted   AES-256-CBC"],
+        ),
+        (
+            "rsa-2048.pkcs1-public.pem",
+            &["RSA public key (PKCS#1)", "RSA 2048 bits"],
+        ),
+        (
+            "rsa-2048.pkcs1.pem",
+            &["RSA private key (PKCS#1)", "RSA 2048 bits", "not shown"],
+        ),
+        (
+            "rsa-2048.pkcs8.pem",
+            &["private key (PKCS#8)", "RSA 2048 bits", "not shown"],
+        ),
+        (
+            "rsa-2048.spki.pem",
+            &["public key (SubjectPublicKeyInfo)", "RSA 2048 bits"],
+        ),
+        (
+            "ssh-ed25519",
+            &["OpenSSH private key", "ssh-ed25519", "encrypted   no"],
+        ),
+        (
+            "ssh-ed25519-encrypted",
+            &["OpenSSH private key", "aes256-ctr, key from bcrypt"],
+        ),
+        (
+            "ssh-ed25519.pub",
+            &[
+                "OpenSSH public key",
+                "SHA256:PNbzqWl/zz6EnAfbo4ikPGeTFaafeOM8ljfgWfsar2s",
+            ],
+        ),
+        (
+            "ssh-rsa.pub",
+            &[
+                "OpenSSH public key",
+                "RSA 3072 bits",
+                "SHA256:1gOVSDzXCGw7SwfdAqU+Ze6bYAJQEFE+HMqdmxhvV6U",
+            ],
+        ),
+        (
+            "ssh-signature.sig",
+            &["SSH signature", "ssh-ed25519", "sha512", "namespace   file"],
+        ),
+        (
+            "ssh2-rsa.pub",
+            &[
+                "SSH2 public key",
+                "RSA 3072 bits",
+                "SHA256:1gOVSDzXCGw7SwfdAqU+Ze6bYAJQEFE+HMqdmxhvV6U",
+            ],
+        ),
+    ];
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/inspect");
+    let mut files: Vec<String> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name != "README.md")
+        .collect();
+    files.sort();
+    let named: Vec<&str> = EXPECTED.iter().map(|(name, _)| *name).collect();
+    assert_eq!(
+        files, named,
+        "every fixture needs its expectation, and only those"
+    );
+    for (name, wants) in EXPECTED {
+        let input = std::fs::read(dir.join(name)).unwrap();
+        let out = run(&["inspect"], &input);
+        let report = text(&out);
+        assert_eq!(out.code, 0, "{name}: {}", out.stderr);
+        for want in *wants {
+            assert!(report.contains(want), "{name}: no {want:?} in\n{report}");
+        }
+        if let Ok(pem) = std::str::from_utf8(&input) {
+            for line in pem.lines().filter(|l| l.len() >= 20 && !l.contains(' ')) {
+                assert!(
+                    !report.contains(line),
+                    "{name}: a line of the input is repeated"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn keyid_mac_and_sha256_give_what_the_crate_gives() {
     let key = key_file("values", 3);

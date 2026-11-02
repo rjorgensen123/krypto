@@ -111,10 +111,11 @@ fn every_public_name_is_in_the_reference_docs() {
     );
 }
 
-/// The helper ships with the crate, so its commands are in the reference docs
-/// too. Its parser checks every command against `COMMANDS`, so that constant
-/// IS the authoritative list: parse it instead of guessing from match arms. A
-/// new command that skips the reference docs fails the build.
+/// The test tool ships with the crate, so its commands are documented, in
+/// `docs/Cli.md`, not in the API reference. Its parser checks every command
+/// against `COMMANDS`, so that constant IS the authoritative list: parse it
+/// instead of guessing from match arms. A new command that skips its document
+/// fails the build.
 fn cli_commands() -> Vec<String> {
     let src = read("src/bin/krypto-cli/main.rs");
     let i = src
@@ -133,14 +134,14 @@ fn cli_commands() -> Vec<String> {
 }
 
 #[test]
-fn every_cli_command_is_in_the_reference_docs() {
+fn every_cli_command_is_in_its_document() {
     let cmds = cli_commands();
     assert!(
         cmds.len() >= 9,
         "the extractor found suspiciously few CLI commands ({}) — is it broken?",
         cmds.len()
     );
-    let doc = "docs/API.md";
+    let doc = "docs/Cli.md";
     let text = read(doc);
     let missing: Vec<&String> = cmds
         .iter()
