@@ -7,19 +7,41 @@
 //! unsupported there, and the ffi layer is a no-op anyway.
 
 #[test]
-fn harden_is_ok_and_idempotent() {
+fn harden_turns_off_core_dumps_and_is_idempotent() {
     // Must succeed without special privileges (lowers limits / sets dumpable).
     krypto::harden_process().expect("harden_process should succeed");
     // Idempotent: safe to call multiple times.
     krypto::harden_process().expect("harden_process should be idempotent");
+    // (0.8.0) And the kernel says it took: no core dumps, and not dumpable.
+    #[cfg(not(miri))]
+    {
+        let mut rlim = libc::rlimit {
+            rlim_cur: 1,
+            rlim_max: 1,
+        };
+        // SAFETY: `&mut rlim` points to a valid `rlimit` on the stack.
+        assert_eq!(unsafe { libc::getrlimit(libc::RLIMIT_CORE, &mut rlim) }, 0);
+        assert_eq!((rlim.rlim_cur, rlim.rlim_max), (0, 0), "core dumps are on");
+        // SAFETY: PR_GET_DUMPABLE takes no pointer; the unused arguments are 0.
+        let dumpable = unsafe { libc::prctl(libc::PR_GET_DUMPABLE, 0, 0, 0, 0) };
+        assert_eq!(dumpable, 0, "the process is still dumpable");
+    }
 }
 
 #[test]
-fn no_new_privs_is_ok_and_idempotent() {
+fn no_new_privs_is_set_and_idempotent() {
     // Needs no privileges, and setting the bit twice is fine. Affects only
     // privilege-gaining execve, which the test process never does.
     krypto::no_new_privs().expect("no_new_privs should succeed");
     krypto::no_new_privs().expect("no_new_privs should be idempotent");
+    // (0.8.0) And the kernel says the bit is set.
+    #[cfg(not(miri))]
+    {
+        // SAFETY: PR_GET_NO_NEW_PRIVS takes no pointer; the kernel wants the
+        // unused arguments 0, or it fails with EINVAL.
+        let set = unsafe { libc::prctl(libc::PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) };
+        assert_eq!(set, 1, "no_new_privs is not set");
+    }
 }
 
 #[cfg(not(miri))]

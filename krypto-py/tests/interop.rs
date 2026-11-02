@@ -8,9 +8,6 @@
 //! what Python makes to `python/`, which Rust then opens and checks. Where a
 //! function gives one answer for one input, the peer writes its answer too,
 //! and it must be Rust's.
-//!
-//! The files in `tests/fixtures/` were made once by `krypto`, with the master
-//! key 0..32, and must open for as long as the format is frozen.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -207,33 +204,4 @@ fn passwords_signatures_and_key_agreement_cross_both_ways() {
         dir.read("python/base64"),
         krypto::base64::encode(&message).as_bytes()
     );
-}
-
-#[test]
-fn files_made_once_still_open() {
-    let master = MasterKey::from_bytes(secret(&(0u8..32).collect::<Vec<_>>())).unwrap();
-    let key = master.derive(b"ctx/v1", b"s").unwrap();
-    let fixture = |name: &str| {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures")
-            .join(name)
-    };
-    for (name, _) in ALGS {
-        let blob = fs::read(fixture(&format!("rust-blob-{name}.bin"))).unwrap();
-        assert_eq!(
-            krypto::blob_key_id(&blob).unwrap(),
-            master.key_id().unwrap(),
-            "{name}"
-        );
-        assert_opens(&key, &blob, b"value from rust", name);
-    }
-    // A copy, so the lock file and the 0600 on open stay out of the fixtures.
-    let dir = Dir::new("frozen");
-    fs::copy(fixture("rust.store"), dir.path("rust.store")).unwrap();
-    let store = SecretStore::open(dir.path("rust.store"), &master).unwrap();
-    assert_eq!(store.list(""), ["from-rust"]);
-    store
-        .get("from-rust")
-        .unwrap()
-        .expose(|b| assert_eq!(b, b"value from rust"));
 }

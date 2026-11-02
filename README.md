@@ -93,7 +93,8 @@ same functions from a shell.
 ## Test
 
 ```sh
-cargo test                     # incl. official AEAD/signature/DH vectors, a docs guard and a version guard
+cargo test                     # incl. official AEAD/signature/DH vectors, that the memory protection and
+                               # hardening take effect, a docs guard and a version guard
 cargo clippy --all-targets -- -D warnings
 cargo audit                    # RustSec advisory scan
 

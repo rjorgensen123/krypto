@@ -520,3 +520,39 @@ fn the_lock_file_is_private_and_never_goes_stale() {
     SecretStore::open(&path, &mk).unwrap();
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// (0.8.0) Files made once by an earlier build, with the master key 0..32: a
+/// blob for each algorithm and a store. They must open for as long as the
+/// format is frozen.
+#[test]
+fn files_made_once_still_open() {
+    let mk = MasterKey::from_bytes(SecretBuf::from_vec((0u8..32).collect()).unwrap()).unwrap();
+    let key = mk.derive(b"ctx/v1", b"s").unwrap();
+    let fixture = |name: &str| {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures")
+            .join(name)
+    };
+    for alg in ["aegis256", "xchacha20", "aes256gcm"] {
+        let blob = std::fs::read(fixture(&format!("rust-blob-{alg}.bin"))).unwrap();
+        assert_eq!(
+            krypto::blob_key_id(&blob).unwrap(),
+            mk.key_id().unwrap(),
+            "{alg}"
+        );
+        krypto::open(&key, &blob)
+            .unwrap()
+            .expose(|b| assert_eq!(b, b"value from rust", "{alg}"));
+    }
+    // A copy, so the lock file and the 0600 on open stay out of the fixtures.
+    let dir = store_dir("frozen");
+    std::fs::copy(fixture("rust.store"), dir.join("rust.store")).unwrap();
+    let store = SecretStore::open(dir.join("rust.store"), &mk).unwrap();
+    assert_eq!(store.list(""), ["from-rust"]);
+    store
+        .get("from-rust")
+        .unwrap()
+        .expose(|b| assert_eq!(b, b"value from rust"));
+    drop(store);
+    std::fs::remove_dir_all(&dir).unwrap();
+}

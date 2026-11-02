@@ -8,6 +8,10 @@ between Rust and Python in `interop.rs`, both against the crate, and krypto
 against code it did not write in `test_independent.py`.
 """
 
+import subprocess
+import sys
+import threading
+import time
 from importlib.metadata import version
 
 import pytest
@@ -35,6 +39,12 @@ def test_one_version_and_one_error_tree():
     for e in [k.IoError, k.HardeningError, k.FormatError, k.AuthError, k.KeyNotFoundError, k.WrongKeyError]:
         assert issubclass(e, k.Error)
     assert k.error.AuthError is k.AuthError
+    # The message is the Rust one, so both languages say the same.
+    m = master()
+    blob = k.seal(m.derive(b"c", b"s"), m.key_id(), k.SecretBuf.from_vec(b"x"), k.Alg.Aegis256)
+    with pytest.raises(k.AuthError) as e:
+        k.open(master(32).derive(b"c", b"s"), blob)
+    assert str(e.value) == "authentication failure (tampering or wrong key)"
 
 
 # --------------------------------------------------------------------------- #
@@ -49,6 +59,25 @@ def test_secrets_zero_a_bytearray_and_redact():
     assert "secret" not in repr(buf) and "REDACTED" in repr(buf)
     s = k.SecretString.from_string("hunter2")
     assert s.len() == 7 and s.expose_str(lambda t: t) == "hunter2" and "hunter2" not in repr(s)
+
+
+def test_the_guarantees_hold_from_python():
+    """A secret made from Python is in krypto's memory, locked (`lo`) and kept
+    out of core dumps (`dd`); and harden_process has the same effect as in Rust."""
+    def protected():
+        with open("/proc/self/smaps") as f:
+            return sum(1 for line in f if line.startswith("VmFlags:") and {"lo", "dd"} <= set(line.split()[1:]))
+    before = protected()
+    buf = k.SecretBuf.random(32)
+    assert protected() == before + 1
+    del buf
+    assert protected() == before
+    # In a child, so pytest itself stays as it is.
+    code = ("import ctypes, resource, krypto_py\n"
+            "krypto_py.harden_process()\n"
+            "assert resource.getrlimit(resource.RLIMIT_CORE) == (0, 0)\n"
+            "assert ctypes.CDLL(None).prctl(3, 0, 0, 0, 0) == 0  # PR_GET_DUMPABLE\n")
+    subprocess.run([sys.executable, "-I", "-c", code], check=True)
 
 
 def test_random_is_capped_per_call():
@@ -126,7 +155,19 @@ def test_secretstore(tmp_path):
     with pytest.raises(ValueError):
         s.get("x")  # rotate consumed the old handle
     del new  # the lock goes with the handle
-    assert plain(k.SecretStore.open(path, master(32)).get("x")) == b"y"
+    s = k.SecretStore.open(path, master(32))
+    assert plain(s.get("x")) == b"y"
+    # Several Python threads on the same store: nothing is lost.
+    def writer(i):
+        for j in range(10):
+            s.put(f"t{i}/{j}", k.SecretBuf.from_vec(bytes([i, j])))
+
+    threads = [threading.Thread(target=writer, args=(i,)) for i in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(s.list("t")) == 40 and plain(s.get("t3/9")) == bytes([3, 9])
 
 
 # --------------------------------------------------------------------------- #
@@ -144,6 +185,23 @@ def test_password():
     one = password.derive_key(pw, bytes(16), password.Preset.Interactive)
     two = password.derive_key(pw, bytes(16), password.Preset.Interactive)
     assert plain(one) == plain(two) and len(one) == 32
+    # Other Python threads run while Argon2 works: this one never stands still
+    # for anything near as long as Argon2 takes.
+    took = []
+
+    def work():
+        start = time.monotonic()
+        password.derive_key(pw, bytes(16), password.Preset.Interactive)
+        took.append(time.monotonic() - start)
+
+    worker = threading.Thread(target=work)
+    last, gap = time.monotonic(), 0.0
+    worker.start()
+    while worker.is_alive():
+        now = time.monotonic()
+        gap, last = max(gap, now - last), now
+    worker.join()
+    assert gap < took[0] / 4, f"Python stood still {gap:.3f} s of Argon2's {took[0]:.3f} s"
 
 
 def test_sign_and_exchange():

@@ -55,6 +55,22 @@ running `krypto-cli`: the same 19 checks, in
 `krypto-cli` itself are covered by `tests/cli.rs` and the unit tests of
 `base64`.
 
+### Changed — the tests check that the protections take effect *(2026-11-02)*
+
+`harden_process` and `no_new_privs` are read back from the kernel: core dumps
+off, the process not dumpable, the bit set. A secret's pages are read back from
+`/proc/self/smaps`: locked and kept out of core dumps, a guard page on each
+side, apart from any other secret, and unmapped once dropped. The secret types
+are checked to be Send and Sync when the tests compile. Every kind of error says
+what went wrong and carries no key material or plaintext, and Python raises the
+same text. From Python, a secret is locked and out of core dumps,
+`harden_process` has the same effect, other Python threads run while Argon2
+works, and several threads can share one store. The files made once by an
+earlier build open in krypto's own tests, so `cargo test` alone shows that the
+format holds. What CI cannot show is left out: that memory was wiped before it
+was returned, that no copy is left after Argon2, and what a real core dump
+holds.
+
 ## [0.7.3] — 2026-10-30
 
 ### Fixed — `drop_filesystem` changes the root only as its last step
