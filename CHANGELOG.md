@@ -78,6 +78,27 @@ plainly that a `SecretStore` protects its contents, not the file: the file is no
 as a whole, and `open` does not check the master key, so a wrong one shows as `Auth` from `get`.
 No code changed.
 
+### Fixed — `SecretStore`: a write that fails after the rename, the lock file, and what `open` accepts *(2026-11-15)*
+
+A write that failed after the new file was in place was reported as if nothing
+had been written: `put` and `delete` undid the change in memory although the
+file held it, and a failed `rotate` was documented as leaving the file
+unchanged although it was under the new master key. The directory is now
+opened before the rename, so a directory that cannot be opened fails the write
+while the old file stands. If only the sync of the directory after the rename
+fails, the call still returns `Io`, with a text that says the change is
+written but not confirmed to survive a crash; `put` and `delete` keep the
+change, and for `rotate` the text says the file is under the new master key.
+
+`open` uses the lock file `.<name>.lock` only if it is a regular file, and
+does not follow a symbolic link there: a link or a FIFO at that name is `Io`.
+Before, a link into a directory the process could not write to gave a store
+without a lock. What is at the store path must be a regular file too: a FIFO,
+a device or a directory is `Format`, and a FIFO no longer makes `open` wait.
+An existing file gets mode 0600 only after `open` has read it as a store;
+before, a file that was not a store got 0600 and was then refused. The file
+format and the API are unchanged.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

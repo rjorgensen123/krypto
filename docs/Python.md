@@ -131,6 +131,10 @@ new_master = krypto.MasterKey.from_bytes(krypto.SecretBuf.random(32))
 store = store.rotate(new_master)
 ```
 
+When `rotate` raises, the file is unchanged, except in one case *(0.8.2)*: if only the sync of the
+directory after the rename failed, the `IoError` says the file is under the new master key; reopen
+it with that key.
+
 As in Rust, the store protects its contents, not the file, and `open` does not check the master
 key: a wrong one raises `AuthError` from `get`.
 

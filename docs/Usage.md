@@ -194,7 +194,20 @@ against bloated files — and never written past it either: a `put` that would c
 value to another name in the file, `get` fails with `Auth`. Writes are atomic — either the old file
 is there, or the new one, never half of one. The file gets mode 0600, and an existing one with any
 other mode is set to 0600 when you open it, unless the process may not change it; then it is left
-as it is.
+as it is. *(0.8.2)* That happens only once `open` has read the file as a store, so a file that is
+not a store keeps its mode. If what is at the store path can be opened but is not a regular file —
+a FIFO, a device, a directory — `open` fails with `Format`; what cannot be opened, for example for
+lack of permission or because it is a socket, gives the `Io` error from opening it. A FIFO at the
+store path does not make `open` wait. A symbolic link at the store path is followed, so a link to a
+store file is read through; the first write replaces the link with a regular file, and the file the
+link pointed to keeps its old contents.
+
+*(0.8.2)* **A write that fails.** A write that fails before the new file is in place leaves the
+file as it was, and `put` and `delete` leave the handle as it was. If only the sync of the
+directory after the rename fails, `put`, `delete`, `rotate`, and an `open` that creates a new store
+return `Io` although the change is in the file, and the error says so; `put` and `delete` keep the
+change in the handle too. After `rotate` the file is then under the new master key, so reopen it
+with that key.
 
 **What the store protects.** The store protects what is in it, not the file. Without the master
 key nobody can read a value, or make one that `get` accepts. The file is not sealed as a whole:
@@ -210,8 +223,12 @@ file only once at a time is your job. krypto also guards against it: while a han
 (`WouldBlock`). You can rely on that, or also keep to one handle in your own code; that is your
 choice. Drop the handle to let the next one in. The guard is a lock on an empty `.<name>.lock`
 beside the path you open, which the kernel releases when the handle or the process goes, so it
-never gets stuck. The same file opened through another name, such as a link, takes another lock,
-and where the lock file cannot be created, as in a directory you cannot write to, there is none.
+never gets stuck. The same file opened through another name, such as a link, takes another lock.
+*(0.8.2)* A symbolic link at the lock file's name is not followed, and something there that is not
+a regular file, such as a FIFO, is not used as the lock: `open` fails with `Io` either way, and a
+FIFO there does not make it wait. There is no lock only on a read-only file system, or when there
+is no lock file and you may not create one in the directory. The lock does not keep out someone
+who can write in the directory: they can remove or replace the lock file.
 
 **Rules for names:** non-empty, at most 512 bytes, printable ASCII only (`[\x20-\x7e]`). Names are
 not secret — they are listed by `list()` and may end up in the caller's log. A name with a newline

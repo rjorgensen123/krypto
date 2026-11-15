@@ -242,14 +242,29 @@ impl<'a> SecretStore<'a> {
 Each entry gets its own key derived from its name (`info = "krypto/store/v1|" + name`). A blob
 therefore cannot be moved to another name — the open fails. Writes are atomic (tmp + fsync +
 rename), and the file is private (0600). *(0.7.2)* The tmp file is new, with an unpredictable name,
-so nothing planted next to the store is followed or reused; the directory is synced after the
-rename; and an existing file with any other mode gets 0600 when opened, unless the process may not
-change it, in which case it is left as it is.
+so nothing planted at that name is followed or reused, and the directory is synced after the
+rename. *(0.7.2)* An existing file with any other mode gets 0600 when opened, unless the process may
+not change it, in which case it is left as it is; *(0.8.2)* that happens only once `open` has read the
+file as a store, so a file that is not a store keeps its mode.
+*(0.8.2)* If what is at the store path can be opened but is not a regular file, such as a FIFO, a
+device or a directory, `open` fails with `Format`; what cannot be opened, for example for lack of
+permission or because it is a socket, gives the `Error::Io` from opening it. A FIFO at the store
+path does not make `open` wait. A symbolic link at the store path is followed, so a link to a store
+file is read through; the first write replaces the link with a regular file, and the file the link
+pointed to keeps its old contents.
 File reads are capped at `MAX_STORE_BYTES` (16 MiB), and *(0.7.2)* so are writes: a `put` that would
 grow the file past it fails with `Format`, so the store always opens again.
 Name rules: non-empty, ≤ 512 bytes, printable ASCII only (`[\x20-\x7e]`) — names are
 addresses, not secrets, and get listed out. Checked on read as well as on write
 *(0.7.0)*: a store file need not have come from `put`.
+
+*(0.8.2)* **A write that fails.** The directory is opened before the rename, so a directory that
+cannot be opened fails the write while the old file still stands. A write that fails before the
+rename leaves the file as it was, and `put` and `delete` leave the handle as it was. If only the
+sync of the directory after the rename fails, `put`, `delete`, `rotate`, and an `open` that creates
+a new store return `Error::Io` although the change is in the file, and the error says so; `put` and
+`delete` keep the change in the handle too. After `rotate` the file is then under the new master
+key.
 
 **What the store protects.** krypto protects the contents, not the file. Without the master key
 nobody can read a value, or make or change one that `get` accepts. The file is not authenticated
@@ -271,15 +286,21 @@ same path, in this or another process, fails at once with `Error::Io` (`WouldBlo
 on that guard, or keep to one handle in your own code as well — your choice. The lock is the
 kernel's (`flock`) on an empty `.<name>.lock` beside the path given to `open`: it goes with the
 handle or the process, also after a crash, so it never goes stale. The same file opened through
-another name, such as a link, takes another lock. If the lock file cannot be created, as in a
-directory that cannot be written, `open` goes ahead without it, since nothing can be saved there
-either. On a network filesystem the lock may not hold between machines.
+another name, such as a link, takes another lock. *(0.8.2)* A symbolic link at the lock file's
+name is not followed, and something there that is not a regular file, such as a FIFO, is not used
+as the lock: `open` fails with `Error::Io` either way, and a FIFO there does not make it wait.
+`open` goes ahead without a lock only on a read-only file system, or when there is no lock file and
+the process may not create one in the directory, where a write could not create its tmp file
+either. The lock does not keep out someone who can write in the directory: they can remove or
+replace the lock file. On a network filesystem the lock may not hold between machines.
 
 `rotate` *(0.6.0)* re-encrypts the whole store under a new master key: everything is decrypted
 with the old one FIRST (if anything fails, the file is untouched), and a completely new file
 with a fresh salt and a fresh generation id replaces the old one in a single atomic rename —
 never a half-rotated store. The handle is consumed (it is bound to the old key); you get a new
-one back, bound to the new key.
+one back, bound to the new key. When `rotate` fails, the file is unchanged, except in one case
+*(0.8.2)*: if only the sync of the directory after the rename failed, the file is under the new
+master key, and the `Error::Io` says so; reopen it with the new master key then.
 
 ---
 

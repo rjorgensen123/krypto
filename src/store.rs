@@ -75,8 +75,9 @@ pub struct SecretStore<'a> {
     key_id: [u8; KEY_ID_LEN],
     entries: HashMap<String, Vec<u8>>, // name -> FAFN blob
     /// The lock that keeps this file to this handle, held while it lives
-    /// (0.7.2). `None` only when the directory cannot be written, so nothing
-    /// can be saved there either.
+    /// (0.7.2). `None` only when the file system is read-only, or when there
+    /// is no lock file and the process may not create one in the directory
+    /// (0.8.2), where a write could not create its tmp file either.
     lock: Option<std::fs::File>,
 }
 
@@ -91,7 +92,24 @@ impl<'a> SecretStore<'a> {
     /// (0.7.2) Takes an exclusive lock on the file for as long as the handle
     /// lives. If another handle, in this or another process, holds it, `open`
     /// fails at once with [`Error::Io`] (`WouldBlock`) instead of letting the two
-    /// overwrite each other's writes.
+    /// overwrite each other's writes. (0.8.2) A symbolic link at the lock
+    /// file's name is not followed, and something there that is not a regular
+    /// file, such as a FIFO, is not used as the lock: `open` fails with
+    /// [`Error::Io`] either way, and a FIFO there does not make it wait.
+    ///
+    /// (0.8.2) If what is at `path` can be opened but is not a regular file,
+    /// such as a FIFO, a device or a directory, `open` fails with
+    /// [`Error::Format`]; what cannot be opened, for example for lack of
+    /// permission or because it is a socket, gives the [`Error::Io`] from
+    /// opening it. A FIFO at `path` does not make `open` wait. A symbolic link
+    /// at `path` is followed, so a link to a regular file is read through; the
+    /// first write replaces the link with a regular file, and the file the link
+    /// pointed to keeps its old contents. An existing file gets mode 0600 only
+    /// after it has been read as a store.
+    ///
+    /// (0.8.2) When `open` creates a new store and only the sync of the
+    /// directory after the rename fails, it returns [`Error::Io`] although the
+    /// new, empty store file is in place.
     ///
     /// The master key is not checked here: `open` reads the file and decrypts
     /// nothing. A wrong master key shows as [`Error::Auth`] from `get`, and a
@@ -99,10 +117,13 @@ impl<'a> SecretStore<'a> {
     pub fn open(path: impl AsRef<Path>, master: &'a MasterKey) -> Result<Self, Error> {
         let path = path.as_ref().to_path_buf();
         let lock = take_lock(&path)?;
-        match read_capped(&path, MAX_STORE_BYTES)? {
-            Some(data) => {
-                make_private(&path)?;
-                Self::load(path, master, &data, lock)
+        match open_store_file(&path)? {
+            Some(file) => {
+                let data = read_capped(&file, MAX_STORE_BYTES)?;
+                let store = Self::load(path, master, &data, lock)?;
+                // 0600 only once the file is known to be a store (0.8.2).
+                make_private(&file)?;
+                Ok(store)
             }
             None => {
                 // The file does not exist → create a new, empty store.
@@ -120,8 +141,13 @@ impl<'a> SecretStore<'a> {
                     entries: HashMap::new(),
                     lock,
                 };
-                store.persist()?;
-                Ok(store)
+                match store.persist() {
+                    Ok(()) => Ok(store),
+                    Err(e) => Err(e.into_error(
+                        "a new, empty store file is written, but syncing its directory failed, \
+                         so it is not confirmed to survive a crash",
+                    )),
+                }
             }
         }
     }
@@ -132,26 +158,35 @@ impl<'a> SecretStore<'a> {
     /// Names are not secret and are exposed through [`SecretStore::list`] — a
     /// name with a newline could shift lines in a consumer's log, and an empty
     /// name is not a key anyone can look up again.
+    ///
+    /// (0.8.2) If only the sync of the directory after the rename fails, `put`
+    /// returns [`Error::Io`] although the new value is in the file, and the
+    /// handle keeps it too.
     pub fn put(&mut self, name: &str, secret: &SecretBuf) -> Result<(), Error> {
         validate_name(name)?;
         let dek = self.dek_for(name)?;
         let blob = aead::seal(&dek, &self.key_id, secret, Alg::Aegis256)?;
-        // Persist BEFORE memory and disk can diverge: if persist fails, roll
-        // back the insert so a later `get` cannot return a value that was
-        // never stored.
+        // Memory follows the file. If the write fails before the new file
+        // replaces the old one, roll back the insert, so a later `get` cannot
+        // return a value that was never stored. If only the directory sync
+        // after the rename fails, the file holds the new value, so memory
+        // keeps it (0.8.2).
         let previous = self.entries.insert(name.to_string(), blob);
-        if let Err(e) = self.persist() {
-            match previous {
-                Some(old) => {
-                    self.entries.insert(name.to_string(), old);
+        match self.persist() {
+            Ok(()) => Ok(()),
+            Err(WriteError::NotReplaced(e)) => {
+                match previous {
+                    Some(old) => {
+                        self.entries.insert(name.to_string(), old);
+                    }
+                    None => {
+                        self.entries.remove(name);
+                    }
                 }
-                None => {
-                    self.entries.remove(name);
-                }
+                Err(e)
             }
-            return Err(e);
+            Err(e @ WriteError::ReplacedUnsynced(_)) => Err(e.into_error(CHANGE_UNSYNCED)),
         }
-        Ok(())
     }
 
     /// Fetch a secret. `KeyNotFound` if the name does not exist.
@@ -174,11 +209,23 @@ impl<'a> SecretStore<'a> {
     }
 
     /// Delete a secret. Not an error if the name does not exist.
+    ///
+    /// (0.8.2) If only the sync of the directory after the rename fails,
+    /// `delete` returns [`Error::Io`] although the entry is gone from the file,
+    /// and from the handle too.
     pub fn delete(&mut self, name: &str) -> Result<(), Error> {
         if let Some(old) = self.entries.remove(name) {
-            if let Err(e) = self.persist() {
-                self.entries.insert(name.to_string(), old); // roll back on persist failure
-                return Err(e);
+            match self.persist() {
+                Ok(()) => {}
+                // Nothing was replaced: put the entry back.
+                Err(WriteError::NotReplaced(e)) => {
+                    self.entries.insert(name.to_string(), old);
+                    return Err(e);
+                }
+                // The file no longer holds the entry, so memory does not either.
+                Err(e @ WriteError::ReplacedUnsynced(_)) => {
+                    return Err(e.into_error(CHANGE_UNSYNCED))
+                }
             }
         }
         Ok(())
@@ -214,7 +261,10 @@ impl<'a> SecretStore<'a> {
     ///
     /// The handle is consumed even on failure (a stale handle over a replaced
     /// file could persist old-generation data back over the new one) — on
-    /// error, reopen the file; it is unchanged.
+    /// error, reopen the file. It is unchanged, except in one case (0.8.2): if
+    /// only the sync of the directory after the rename fails, the file is
+    /// already under the new master key, and the [`Error::Io`] says so; reopen
+    /// it with the new master key then.
     ///
     /// A store file that was rotated away from an old master fails `get` with
     /// [`Error::Auth`] under that master (the per-name DEKs no longer match).
@@ -250,8 +300,14 @@ impl<'a> SecretStore<'a> {
         }
 
         // 3. One atomic write replaces the file.
-        new_store.persist()?;
-        Ok(new_store)
+        match new_store.persist() {
+            Ok(()) => Ok(new_store),
+            Err(e) => Err(e.into_error(
+                "the store file is written under the new master key, but syncing its directory \
+                 failed, so it is not confirmed to survive a crash; reopen the store with the new \
+                 master key",
+            )),
+        }
     }
 
     // --- internal ---
@@ -336,7 +392,7 @@ impl<'a> SecretStore<'a> {
         })
     }
 
-    fn persist(&self) -> Result<(), Error> {
+    fn persist(&self) -> Result<(), WriteError> {
         let mut buf = Vec::new();
         buf.extend_from_slice(STORE_MAGIC);
         buf.push(STORE_VER);
@@ -346,8 +402,9 @@ impl<'a> SecretStore<'a> {
         names.sort(); // deterministic file
         for name in names {
             let blob = &self.entries[name];
-            let blen = u32::try_from(blob.len())
-                .map_err(|_| Error::Format("blob too big for the store format".into()))?;
+            let blen = u32::try_from(blob.len()).map_err(|_| {
+                WriteError::NotReplaced(Error::Format("blob too big for the store format".into()))
+            })?;
             buf.extend_from_slice(&(name.len() as u16).to_le_bytes());
             buf.extend_from_slice(name.as_bytes());
             buf.extend_from_slice(&blen.to_le_bytes());
@@ -356,24 +413,74 @@ impl<'a> SecretStore<'a> {
         // `open` refuses a file past MAX_STORE_BYTES, so writing one would lock
         // every secret in it out (0.7.2). `put` rolls back on this error.
         if buf.len() > MAX_STORE_BYTES {
-            return Err(Error::Format(format!(
+            return Err(WriteError::NotReplaced(Error::Format(format!(
                 "the store would grow past {MAX_STORE_BYTES} bytes, which `open` refuses"
-            )));
+            ))));
         }
         atomic_write(&self.path, &buf)
     }
 }
 
-/// Read a file with an upper size cap. `Ok(None)` = the file does not exist
-/// (the caller creates a new store); `Ok(Some(bytes))` = contents within the
-/// cap; `Err(Format)` = too big (bounded input, no OOM); other I/O errors → `Err(Io)`.
-fn read_capped(path: &Path, cap: usize) -> Result<Option<Vec<u8>>, Error> {
-    use std::io::Read;
-    let f = match std::fs::File::open(path) {
+/// The error text of `put` and `delete` when only the directory sync after
+/// the rename failed (0.8.2).
+const CHANGE_UNSYNCED: &str = "the change is written to the store file, but syncing its \
+                               directory failed, so it is not confirmed to survive a crash";
+
+/// How a write of the store file failed: before or after the new file replaced
+/// the old one (0.8.2). The callers undo their change in memory only when the
+/// file was not replaced; after the rename, memory follows the file.
+enum WriteError {
+    /// The write failed before the rename: the file at the path is as it was.
+    NotReplaced(Error),
+    /// The new file replaced the old one, but syncing the directory failed:
+    /// the change is in the file, but not confirmed to survive a crash.
+    ReplacedUnsynced(std::io::Error),
+}
+
+impl WriteError {
+    /// The error to return to the caller. `NotReplaced` gives its error as it
+    /// is; `ReplacedUnsynced` gives [`Error::Io`] of the same kind, with
+    /// `written` (what the file now holds) before the original error text.
+    fn into_error(self, written: &str) -> Error {
+        match self {
+            WriteError::NotReplaced(e) => e,
+            WriteError::ReplacedUnsynced(e) => {
+                Error::Io(std::io::Error::new(e.kind(), format!("{written}: {e}")))
+            }
+        }
+    }
+}
+
+/// Open the store file for reading (0.8.2). `Ok(None)` = the file does not
+/// exist (the caller creates a new store). On unix it is opened with
+/// `O_NONBLOCK`, so a FIFO cannot block; what is opened but is not a regular
+/// file is `Err(Format)`, checked on the opened file. A symbolic link is
+/// followed, so a link to a regular file is read through. Errors from opening
+/// other than `NotFound` → `Err(Io)`.
+fn open_store_file(path: &Path) -> Result<Option<std::fs::File>, Error> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(libc::O_NONBLOCK);
+    }
+    let f = match opts.open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(Error::Io(e)),
     };
+    if !f.metadata()?.file_type().is_file() {
+        return Err(Error::Format("the store path is not a regular file".into()));
+    }
+    Ok(Some(f))
+}
+
+/// Read the opened store file with an upper size cap. `Ok(bytes)` = contents
+/// within the cap; `Err(Format)` = too big (bounded input, no OOM); I/O
+/// errors → `Err(Io)`.
+fn read_capped(f: &std::fs::File, cap: usize) -> Result<Vec<u8>, Error> {
+    use std::io::Read;
     let mut bytes = Vec::new();
     f.take(cap as u64 + 1).read_to_end(&mut bytes)?;
     if bytes.len() > cap {
@@ -381,7 +488,7 @@ fn read_capped(path: &Path, cap: usize) -> Result<Option<Vec<u8>>, Error> {
             "store file is too big (> {cap} bytes)"
         )));
     }
-    Ok(Some(bytes))
+    Ok(bytes)
 }
 
 /// The directory and file name of a store path.
@@ -400,8 +507,12 @@ fn dir_and_name(path: &Path) -> (PathBuf, &str) {
 /// The lock is the kernel's (`flock`) on an empty `.<name>.lock` beside the
 /// store file, not on the file itself, because every write replaces that.
 /// The kernel drops it when the handle is dropped or the process ends, even in
-/// a crash, so the lock file never goes stale; it is never deleted. `None`
-/// when the directory cannot be written: nothing can be saved there either.
+/// a crash, so the lock file never goes stale; krypto never deletes it. A
+/// symbolic link at the lock file's name is an error, never followed, and so
+/// is anything there that is not a regular file (0.8.2).
+/// `None` only when the file system is read-only, or when there is no lock
+/// file and the process may not create one in the directory, where a write
+/// could not create its tmp file either.
 fn take_lock(path: &Path) -> Result<Option<std::fs::File>, Error> {
     use std::fs::TryLockError;
     let (dir, fname) = dir_and_name(path);
@@ -432,8 +543,12 @@ fn take_lock(path: &Path) -> Result<Option<std::fs::File>, Error> {
     )))
 }
 
-/// Open or create the lock file. `None` when it does not exist and cannot be
-/// created, which means the directory cannot be written.
+/// Open or create the lock file. On unix it is opened with `O_NOFOLLOW` and
+/// `O_NONBLOCK` (0.8.2): a symbolic link at its name is an error, never
+/// followed and never created through, and a FIFO cannot block. What is
+/// opened must be a regular file, checked on the opened file; anything else
+/// is an error too. `None` only when the file system is read-only, or when
+/// the lock file does not exist and the process may not create it.
 fn open_lock_file(lock_path: &Path) -> Result<Option<std::fs::File>, Error> {
     use std::io::ErrorKind;
     let mut opts = std::fs::OpenOptions::new();
@@ -441,27 +556,69 @@ fn open_lock_file(lock_path: &Path) -> Result<Option<std::fs::File>, Error> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
+        opts.mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
-    match opts.open(lock_path) {
-        Ok(f) => Ok(Some(f)),
-        Err(e) if e.kind() == ErrorKind::ReadOnlyFilesystem => Ok(None),
+    let f = match opts.open(lock_path) {
+        Ok(f) => f,
+        Err(_) if is_symlink(lock_path) => return Err(lock_file_is_a_symlink()),
+        Err(e) if e.kind() == ErrorKind::ReadOnlyFilesystem => return Ok(None),
         // Not writable for us: an existing lock file can still be locked
         // through a read-only handle; a missing one means a read-only directory.
-        Err(e) if e.kind() == ErrorKind::PermissionDenied => match std::fs::File::open(lock_path) {
-            Ok(f) => Ok(Some(f)),
-            Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(Error::Io(e)),
-        },
-        Err(e) => Err(Error::Io(e)),
+        Err(e) if e.kind() == ErrorKind::PermissionDenied => {
+            let mut opts = std::fs::OpenOptions::new();
+            opts.read(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+            }
+            match opts.open(lock_path) {
+                Ok(f) => f,
+                Err(_) if is_symlink(lock_path) => return Err(lock_file_is_a_symlink()),
+                Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+                Err(e) => return Err(Error::Io(e)),
+            }
+        }
+        Err(e) => return Err(Error::Io(e)),
+    };
+    if !f.metadata()?.file_type().is_file() {
+        return Err(Error::Io(std::io::Error::other(
+            "the store's lock file is not a regular file",
+        )));
     }
+    Ok(Some(f))
+}
+
+/// Whether `path` itself is a symbolic link, to tell an open refused by
+/// `O_NOFOLLOW` from other failures (0.8.2). Always `false` off unix, where
+/// the lock file is opened without that flag.
+fn is_symlink(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// The error for a symbolic link at the lock file's name (0.8.2).
+fn lock_file_is_a_symlink() -> Error {
+    Error::Io(std::io::Error::other(
+        "the store's lock file is a symbolic link, which is not followed",
+    ))
 }
 
 #[cfg(unix)]
 fn is_same_file(f: &std::fs::File, path: &Path) -> Result<bool, Error> {
     use std::os::unix::fs::MetadataExt;
     let held = f.metadata()?;
-    match std::fs::metadata(path) {
+    // Not following a link (0.8.2): a symbolic link put at the name is not the
+    // file held, even when it points to it.
+    match std::fs::symlink_metadata(path) {
         Ok(now) => Ok(held.dev() == now.dev() && held.ino() == now.ino()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(e) => Err(Error::Io(e)),
@@ -473,17 +630,19 @@ fn is_same_file(_f: &std::fs::File, _path: &Path) -> Result<bool, Error> {
     Ok(true)
 }
 
-/// Give an existing store file mode 0600, as every write does (0.7.2). A file
-/// this process does not own is left as it is: changing it is not its right,
-/// and reading it must still work.
+/// Give the opened store file mode 0600, as every write does (0.7.2). `open`
+/// calls it only after the file has been read as a store, and it works on the
+/// opened file, not on the path (0.8.2). A file this process does not own is
+/// left as it is: changing it is not its right, and reading it must still
+/// work.
 #[cfg(unix)]
-fn make_private(path: &Path) -> Result<(), Error> {
+fn make_private(file: &std::fs::File) -> Result<(), Error> {
     use std::os::unix::fs::PermissionsExt;
-    let mode = std::fs::metadata(path)?.permissions().mode() & 0o777;
+    let mode = file.metadata()?.permissions().mode() & 0o777;
     if mode == 0o600 {
         return Ok(());
     }
-    match std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)) {
+    match file.set_permissions(std::fs::Permissions::from_mode(0o600)) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Ok(()),
         Err(e) => Err(Error::Io(e)),
@@ -491,23 +650,27 @@ fn make_private(path: &Path) -> Result<(), Error> {
 }
 
 #[cfg(not(unix))]
-fn make_private(_path: &Path) -> Result<(), Error> {
+fn make_private(_file: &std::fs::File) -> Result<(), Error> {
     Ok(())
 }
 
 /// Write `data` atomically to `path` (tmp + fsync + rename), mode 0600 (unix).
 ///
 /// The tmp file is created **with** 0600 (unix) — not chmod'ed afterwards — so
-/// there is never a window where it is world-readable. On any failure before
-/// the rename the tmp file is removed, so an aborted write leaves no `.tmp-*`
-/// files behind.
-fn atomic_write(path: &Path, data: &[u8]) -> Result<(), Error> {
+/// there is never a window where it is world-readable. On unix the directory
+/// is opened before the rename and synced after it (0.8.2). On any failure
+/// before the rename the tmp file is removed, so an aborted write leaves no
+/// `.tmp-*` files behind, and the result is [`WriteError::NotReplaced`]. A
+/// failed sync of the directory after the rename is
+/// [`WriteError::ReplacedUnsynced`]: the new file is in place by then.
+fn atomic_write(path: &Path, data: &[u8]) -> Result<(), WriteError> {
     let (dir, fname) = dir_and_name(path);
     // An unpredictable name, and the file must be new (0.7.2): a symlink or a
     // file planted where the tmp file goes is refused, never followed or
     // reused, so the tmp file is always this write's own and always 0600.
     let mut nonce = [0u8; 8];
-    getrandom::fill(&mut nonce).map_err(|e| Error::Hardening(format!("getrandom: {e}")))?;
+    getrandom::fill(&mut nonce)
+        .map_err(|e| WriteError::NotReplaced(Error::Hardening(format!("getrandom: {e}"))))?;
     let tmp = dir.join(format!(
         ".tmp-{}-{}-{fname}",
         std::process::id(),
@@ -521,9 +684,11 @@ fn atomic_write(path: &Path, data: &[u8]) -> Result<(), Error> {
         use std::os::unix::fs::OpenOptionsExt;
         opts.mode(0o600);
     }
-    let f = opts.open(&tmp)?;
+    let f = opts
+        .open(&tmp)
+        .map_err(|e| WriteError::NotReplaced(Error::Io(e)))?;
     let result = write_then_rename(f, &tmp, path, &dir, data);
-    if result.is_err() {
+    if let Err(WriteError::NotReplaced(_)) = result {
         let _ = std::fs::remove_file(&tmp); // clean up a half-written tmp
     }
     result
@@ -535,15 +700,23 @@ fn write_then_rename(
     path: &Path,
     dir: &Path,
     data: &[u8],
-) -> Result<(), Error> {
-    f.write_all(data)?;
-    f.sync_all()?;
+) -> Result<(), WriteError> {
+    let not_replaced = |e: std::io::Error| WriteError::NotReplaced(Error::Io(e));
+    f.write_all(data).map_err(not_replaced)?;
+    f.sync_all().map_err(not_replaced)?;
     drop(f);
-    std::fs::rename(tmp, path)?;
-    // Sync the directory too, so the rename itself survives a crash (0.7.2).
+    // Open the directory before the rename (0.8.2): if it cannot be opened,
+    // the write fails while the old file still stands.
     #[cfg(unix)]
-    std::fs::File::open(dir)?.sync_all()?;
+    let dir_handle = std::fs::File::open(dir).map_err(not_replaced)?;
     #[cfg(not(unix))]
     let _ = dir;
+    std::fs::rename(tmp, path).map_err(not_replaced)?;
+    // Sync the directory too, which holds the rename (0.7.2). The new file is
+    // in place by now, so a failure here is not "nothing written" (0.8.2).
+    #[cfg(unix)]
+    dir_handle
+        .sync_all()
+        .map_err(WriteError::ReplacedUnsynced)?;
     Ok(())
 }

@@ -368,12 +368,14 @@ fn mode_of(p: &std::path::Path) -> u32 {
     std::fs::metadata(p).unwrap().mode() & 0o777
 }
 
-/// 0.7.2: the tmp file is new and unpredictable. A symlink planted where the
-/// tmp file used to go (`.tmp-<pid>-<name>`) made the store overwrite the file
-/// it pointed to; now it is not used at all, and no tmp file is left behind.
+/// 0.7.2: the tmp name carries a random part. A symlink planted at the name
+/// the tmp file had before (`.tmp-<pid>-<name>`) made the store overwrite the
+/// file it pointed to; now that name is not used at all, and no tmp file is
+/// left behind. The real tmp name cannot be known in advance, so this test
+/// does not reach the `create_new` that refuses a link planted there.
 #[cfg(unix)]
 #[test]
-fn a_planted_symlink_at_the_tmp_name_is_not_followed() {
+fn a_symlink_at_the_old_predictable_tmp_name_is_not_used() {
     let mk = master("plant");
     let dir = store_dir("plant");
     let victim = dir.join("victim.conf");
@@ -555,4 +557,194 @@ fn files_made_once_still_open() {
         .expose(|b| assert_eq!(b, b"value from rust"));
     drop(store);
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+// --- what is at the paths (0.8.2) ---
+
+#[cfg(unix)]
+fn set_mode(p: &std::path::Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
+}
+
+/// Make a FIFO at `p` with `mode`.
+#[cfg(unix)]
+fn make_fifo(p: &std::path::Path, mode: u32) {
+    use std::os::unix::ffi::OsStrExt;
+    let c_path = std::ffi::CString::new(p.as_os_str().as_bytes()).unwrap();
+    // SAFETY: `c_path` is a NUL-terminated path that outlives the call.
+    assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+    set_mode(p, mode);
+}
+
+/// Run `SecretStore::open(path)` in a thread and wait at most 10 s for it, so
+/// an `open` that blocks on the FIFO `fifo` fails the test instead of hanging
+/// the suite. On timeout the FIFO is opened for writing, which lets the
+/// blocked `open` go, and the test fails.
+#[cfg(unix)]
+fn open_within_time_limit(
+    tag: &str,
+    path: &std::path::Path,
+    fifo: &std::path::Path,
+) -> Result<(), Error> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (tag, opened) = (tag.to_string(), path.to_path_buf());
+    std::thread::spawn(move || {
+        let mk = master(&tag);
+        let _ = tx.send(SecretStore::open(&opened, &mk).map(|_| ()));
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+        Ok(outcome) => outcome,
+        Err(_) => {
+            set_mode(fifo, 0o600);
+            let _ = std::fs::OpenOptions::new()
+                .write(true)
+                .custom_flags(libc::O_NONBLOCK)
+                .open(fifo);
+            panic!("open blocked on the FIFO {}", fifo.display());
+        }
+    }
+}
+
+/// (0.8.2) A symbolic link at the lock file's name is an error. It is not
+/// followed: nothing is made where it points, also when it points into a
+/// directory the process cannot write to, which before gave a store without
+/// a lock. A FIFO at the lock file's name is an error too, at once; with mode
+/// 0400 the read-only open used to wait for a writer.
+#[cfg(unix)]
+#[test]
+fn a_symlink_or_a_fifo_at_the_lock_name_is_an_error() {
+    let mk = master("locklink");
+    let dir = store_dir("locklink");
+    let closed = dir.join("closed");
+    std::fs::create_dir(&closed).unwrap();
+    set_mode(&closed, 0o500);
+
+    for (store, target) in [
+        ("dangling", dir.join("missing-target")),
+        ("into-closed", closed.join("lock")),
+    ] {
+        let lock = dir.join(format!(".{store}.lock"));
+        std::os::unix::fs::symlink(&target, &lock).unwrap();
+        match SecretStore::open(dir.join(store), &mk) {
+            Err(Error::Io(e)) => assert!(
+                e.to_string().contains("symbolic link"),
+                "{store}: unexpected error: {e}"
+            ),
+            other => panic!("{store}: expected Io, got {:?}", other.map(|_| ())),
+        }
+        assert!(
+            std::fs::symlink_metadata(&target).is_err(),
+            "{store}: something was made at the link's target"
+        );
+        assert!(
+            std::fs::symlink_metadata(dir.join(store)).is_err(),
+            "{store}: a store file was made"
+        );
+    }
+
+    let fifo = dir.join(".fifo.lock");
+    make_fifo(&fifo, 0o400);
+    match open_within_time_limit("lockfifo", &dir.join("fifo"), &fifo) {
+        Err(Error::Io(e)) => assert!(
+            e.to_string().contains("not a regular file"),
+            "fifo: unexpected error: {e}"
+        ),
+        other => panic!("fifo: expected Io, got {other:?}"),
+    }
+    assert!(
+        std::fs::symlink_metadata(dir.join("fifo")).is_err(),
+        "fifo: a store file was made"
+    );
+
+    set_mode(&closed, 0o700);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// (0.8.2) A symbolic link at the store path is still read through, but a
+/// file that is not a store gives `Format` and keeps its mode: 0600 comes only
+/// after the file has been read as a store.
+#[cfg(unix)]
+#[test]
+fn a_symlink_at_the_store_path_to_a_file_that_is_not_a_store_keeps_its_mode() {
+    let mk = master("storelink");
+    let dir = store_dir("storelink");
+    let victim = dir.join("victim.conf");
+    std::fs::write(&victim, b"important = true\n").unwrap();
+    set_mode(&victim, 0o644);
+    std::os::unix::fs::symlink(&victim, dir.join("store")).unwrap();
+
+    assert!(matches!(
+        SecretStore::open(dir.join("store"), &mk),
+        Err(Error::Format(_))
+    ));
+    assert_eq!(mode_of(&victim), 0o644);
+    assert_eq!(std::fs::read(&victim).unwrap(), b"important = true\n");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// (0.8.2) A FIFO at the store path gives `Format` at once; before, `open`
+/// waited for a writer that never came. The `open` runs in a thread with a
+/// time limit, so a regression fails the test instead of hanging the suite.
+#[cfg(unix)]
+#[test]
+fn a_fifo_at_the_store_path_is_an_error_not_a_hang() {
+    let dir = store_dir("fifo");
+    let path = dir.join("store");
+    make_fifo(&path, 0o600);
+    let outcome = open_within_time_limit("fifo", &path, &path);
+    assert!(matches!(outcome, Err(Error::Format(_))), "{outcome:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// (0.8.2) The directory is opened before the rename. In a directory that can
+/// be written and searched but not read (0300), opening it fails; before, that
+/// came after the rename, so `put` reported an error and rolled back in
+/// memory while the file already held the new value. Now `put` fails with the
+/// file unchanged, and the handle still returns the old value. Root reads any
+/// directory, so the test is skipped as root.
+#[cfg(unix)]
+#[test]
+fn put_fails_before_the_rename_when_the_directory_cannot_be_opened() {
+    // SAFETY: geteuid has no preconditions.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("skipped: root can open any directory");
+        return;
+    }
+    let mk = master("dirread");
+    let dir = store_dir("dirread");
+    let path = dir.join("store");
+    let mut s = SecretStore::open(&path, &mk).unwrap();
+    s.put(
+        "alpha",
+        &SecretBuf::from_vec(b"first value".to_vec()).unwrap(),
+    )
+    .unwrap();
+    let before = std::fs::read(&path).unwrap();
+
+    set_mode(&dir, 0o300);
+    let result = s.put(
+        "alpha",
+        &SecretBuf::from_vec(b"second value".to_vec()).unwrap(),
+    );
+    let after = std::fs::read(&path).unwrap();
+    set_mode(&dir, 0o700);
+
+    match result {
+        Err(Error::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied),
+        other => panic!("expected Io(PermissionDenied), got {other:?}"),
+    }
+    assert_eq!(after, before, "the store file changed");
+    s.get("alpha")
+        .unwrap()
+        .expose(|b| assert_eq!(b, b"first value"));
+    let left: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .filter(|n| n.starts_with(".tmp-"))
+        .collect();
+    assert!(left.is_empty(), "tmp files left behind: {left:?}");
+    drop(s);
+    let _ = std::fs::remove_dir_all(&dir);
 }
