@@ -99,6 +99,18 @@ An existing file gets mode 0600 only after `open` has read it as a store;
 before, a file that was not a store got 0600 and was then refused. The file
 format and the API are unchanged.
 
+### Changed — krypto-py declares that it needs the GIL, and denies `unsafe` *(2026-11-15)*
+
+The `krypto_py` module declares that it needs the GIL (`gil_used = true`),
+because krypto-py is built and tested only with Python that has the GIL; it is
+not tested on a free-threaded Python. `krypto-py` is compiled with
+`deny(unsafe_code)`, like the library, and its two `unsafe` places each carry
+their own `allow`. `docs/Python.md` and `docs/API.md` say that `rotate`
+consumes the handle also when the rotation fails, and that the file can then
+be opened again. A test checks that `password.derive_key` refuses a
+`bytearray` or `memoryview` salt: the salt is borrowed while other threads
+run, so it must stay immutable.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

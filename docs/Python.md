@@ -18,7 +18,9 @@ guarantee.
 pip install krypto-py
 ```
 
-It needs Python 3.11 or newer, and is tested with 3.11 and 3.12.
+It needs Python 3.11 or newer, and is tested with 3.11 and 3.12. *(0.8.2)* The module declares that
+it needs the GIL (`gil_used = true`), because krypto-py is built and tested only with Python that
+has the GIL; it is not tested on a free-threaded Python.
 
 ```python
 import krypto_py as krypto
@@ -131,9 +133,10 @@ new_master = krypto.MasterKey.from_bytes(krypto.SecretBuf.random(32))
 store = store.rotate(new_master)
 ```
 
-When `rotate` raises, the file is unchanged, except in one case *(0.8.2)*: if only the sync of the
-directory after the rename failed, the `IoError` says the file is under the new master key; reopen
-it with that key.
+When the rotation itself fails, the old handle is consumed all the same: using it is a `ValueError`.
+Open the file again; it is unchanged, still under the old master key, except in one case
+*(0.8.2)*: if only the sync of the directory after the rename failed, the `IoError` says the file
+is under the new master key; reopen it with that key.
 
 As in Rust, the store protects its contents, not the file, and `open` does not check the master
 key: a wrong one raises `AuthError` from `get`.

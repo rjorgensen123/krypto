@@ -94,7 +94,8 @@ advance — and a switch does not make old data unreadable.
 All `unsafe` in the library is isolated in a single layer that talks to the operating system
 (memory locking and process hardening). The rest of the library is compiled with
 `deny(unsafe_code)`, which only that layer overrides. `krypto-py`, the Python binding, has `unsafe`
-of its own.
+of its own: *(0.8.2)* it is compiled with `deny(unsafe_code)` too, and two places in its source
+override it, each with its own `allow`.
 
 ## Built alongside
 

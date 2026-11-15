@@ -8,6 +8,7 @@ between Rust and Python in `interop.rs`, both against the crate, and krypto
 against code it did not write in `test_independent.py`.
 """
 
+import os
 import subprocess
 import sys
 import threading
@@ -170,6 +171,29 @@ def test_secretstore(tmp_path):
     assert len(s.list("t")) == 40 and plain(s.get("t3/9")) == bytes([3, 9])
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can write in a read-only directory")
+def test_failed_rotate_consumes_the_handle_and_keeps_the_file(tmp_path):
+    """A `rotate` that fails before anything is written consumes the old
+    handle all the same; the file is unchanged and opens with the old master
+    key."""
+    d = tmp_path / "store"
+    d.mkdir()
+    path = d / "s.store"
+    s = k.SecretStore.open(str(path), master())
+    s.put("x", k.SecretBuf.from_vec(b"y"))
+    before = path.read_bytes()
+    d.chmod(0o555)  # the atomic write cannot create its tmp file
+    try:
+        with pytest.raises(k.IoError):
+            s.rotate(master(32))
+    finally:
+        d.chmod(0o755)
+    with pytest.raises(ValueError):
+        s.get("x")
+    assert path.read_bytes() == before
+    assert plain(k.SecretStore.open(str(path), master()).get("x")) == b"y"
+
+
 # --------------------------------------------------------------------------- #
 # password, sign, exchange, hex, base64, utilities
 # --------------------------------------------------------------------------- #
@@ -202,6 +226,15 @@ def test_password():
         gap, last = max(gap, now - last), now
     worker.join()
     assert gap < took[0] / 4, f"Python stood still {gap:.3f} s of Argon2's {took[0]:.3f} s"
+
+
+def test_derive_key_takes_no_mutable_salt():
+    """`derive_key` refuses a `bytearray` or `memoryview` salt."""
+    # The salt is borrowed while other threads run, so it must be immutable `bytes`.
+    pw = k.SecretString.from_string("correct horse")
+    for salt in (bytearray(16), memoryview(bytearray(16))):
+        with pytest.raises(TypeError):
+            password.derive_key(pw, salt, password.Preset.Interactive)
 
 
 def test_sign_and_exchange():

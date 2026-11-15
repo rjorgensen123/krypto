@@ -297,10 +297,11 @@ replace the lock file. On a network filesystem the lock may not hold between mac
 `rotate` *(0.6.0)* re-encrypts the whole store under a new master key: everything is decrypted
 with the old one FIRST (if anything fails, the file is untouched), and a completely new file
 with a fresh salt and a fresh generation id replaces the old one in a single atomic rename —
-never a half-rotated store. The handle is consumed (it is bound to the old key); you get a new
-one back, bound to the new key. When `rotate` fails, the file is unchanged, except in one case
-*(0.8.2)*: if only the sync of the directory after the rename failed, the file is under the new
-master key, and the `Error::Io` says so; reopen it with the new master key then.
+never a half-rotated store. `rotate` consumes the handle (it is bound to the old key) and gives a
+new one back, bound to the new key. When it fails, the handle is consumed all the same and there
+is no new one. Open the file again; it is unchanged, except in one case *(0.8.2)*: if only the
+sync of the directory after the rename failed, the file is under the new master key, and the
+`Error::Io` says so; reopen it with the new master key then.
 
 ---
 

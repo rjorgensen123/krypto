@@ -11,6 +11,10 @@
 //! `Result<T, Error>` becomes a return value or an exception: `Error`, with
 //! one subclass per variant (`Error::Auth` is `AuthError`, and so on).
 
+// The binding denies `unsafe` code; the two places that need it carry an
+// `allow`, one on a statement, one on a small function (0.8.2).
+#![deny(unsafe_code)]
+
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
@@ -119,6 +123,7 @@ impl SecretBuf {
     fn from_vec(v: &Bound<'_, PyAny>) -> PyResult<Self> {
         let data = if let Ok(ba) = v.cast::<PyByteArray>() {
             let data = ba.to_vec();
+            #[allow(unsafe_code)] // zeroing needs the buffer mutably (0.8.2)
             // SAFETY: the GIL is held and nothing else borrows the buffer
             // during this call.
             unsafe { ba.as_bytes_mut() }.fill(0);
@@ -364,6 +369,7 @@ struct SecretStore {
 /// SAFETY of the callers: the reference is only kept in a `SecretStore` that
 /// also holds `master`, so the object outlives it; `MasterKey` is frozen, so
 /// what it points to never moves or changes.
+#[allow(unsafe_code)] // the cast that lets a SecretStore keep its MasterKey (0.8.2)
 fn master_ref(master: &Py<MasterKey>) -> &'static krypto::MasterKey {
     let r: &krypto::MasterKey = &master.get().inner;
     // SAFETY: see above.
@@ -696,7 +702,9 @@ fn add_errors(m: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-#[pymodule]
+// The module declares that it needs the GIL: krypto-py is built and tested
+// only with Python that has the GIL, not on a free-threaded Python (0.8.2).
+#[pymodule(gil_used = true)]
 fn krypto_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("VERSION", krypto::VERSION)?;
     m.add("__version__", krypto::VERSION)?;
