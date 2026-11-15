@@ -240,6 +240,14 @@ string can be read but was cut short or altered. If the stored string cannot be 
 from another scheme, you get `Error::Format` — so a string krypto cannot check is not taken for a
 wrong password.
 
+*(0.8.2)* `verify` accepts only what krypto makes or can make: Argon2id, version 19 (`v=19` in the
+string), with parameters from the floor up to a little above `High` — memory 64–320 MiB, t from 2
+to 5, p from 1 to 5. Associated data (`data=`) in the string is accepted and used. Anything else,
+such as an Argon2i or Argon2d hash from another tool, version 16, a hash made with a secret key
+(`keyid=`, which krypto does not have), or numbers outside that range, also gives `Error::Format`,
+before Argon2 runs. A stored string therefore cannot make one check use more memory or time than
+that.
+
 ### Give me the key this password unlocks (encryption at rest)
 
 ```rust
@@ -265,7 +273,8 @@ code or your documentation — that makes two places to keep in sync, and sooner
 
 **Store the profile's name** with the data where it is not self-evident. Then profiles can be
 tuned later without old data becoming unreadable. For password hashing you do not need to think
-about it — the parameters live in the stored string, and `verify` reads them from there.
+about it — the parameters live in the stored string, and `verify` reads them from there, within
+the range it accepts *(0.8.2)*.
 
 *In Python: [Passwords](Python.md#passwords).*
 

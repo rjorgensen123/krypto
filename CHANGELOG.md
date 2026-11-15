@@ -28,6 +28,19 @@ krypto-py) does what `ed25519_verify` did: it only checks the equation and
 accepts weak keys. It is for a caller that must accept such keys, never for
 checking who signed with a public key from someone else. P-256 is unchanged.
 
+### ⚠ Changed — `password::verify` accepts only the hashes krypto makes *(2026-11-15)*
+
+`password::verify` checks the stored PHC string before Argon2 runs, and refuses
+with `Format` what krypto does not make or could not make: Argon2i and Argon2d,
+a version other than 19 or a string without `v=`, a `keyid` (a secret key
+krypto does not have), and parameters below the floor (`m ≥ 64 MiB, t ≥ 2,
+p ≥ 1`) or above a ceiling a little over `High` (m ≤ 320 MiB, t ≤ 5, p ≤ 5; it
+follows `High`). Associated data (`data=`) is accepted. Before, the string
+decided how much memory and time one call used, without a limit, and a weaker
+or foreign hash was verified as if krypto had made it. Hashes made by krypto
+keep verifying; hashes made by other tools may now give `Format` (`FormatError`
+in `krypto-py`).
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

@@ -153,6 +153,11 @@ master = krypto.MasterKey.from_bytes(key)
 The three functions let other Python threads run while Argon2 works. The two jobs, and the presets:
 [Passwords](Usage.md#passwords).
 
+*(0.8.2)* `password.verify` accepts only what krypto makes or can make: Argon2id, version 19, with
+parameters within the range in [Passwords](Usage.md#passwords), and associated data if the string
+carries it. Any other stored string, such as an Argon2i hash from another tool or one made with a
+secret key (`keyid=`), raises `FormatError`, before Argon2 runs.
+
 ---
 
 ## Putting a seal on something

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Tests for argon2id password hashing.
 
+use argon2::password_hash::PasswordHasher;
+use argon2::{Algorithm, Argon2, AssociatedData, KeyId, Params, ParamsBuilder, Version};
 use krypto::password::{self, Preset};
 use krypto::{Error, SecretString};
 
@@ -32,9 +34,10 @@ fn invalid_phc_gives_format() {
 
 #[test]
 fn foreign_hash_gives_format_not_auth() {
-    // A scrypt PHC parses fine as PasswordHash, but Argon2::verify cannot
-    // handle it → must give Format (corrupt/foreign hash), NOT Auth (which
-    // would misdiagnose a database problem as "wrong password").
+    // A scrypt PHC parses fine as PasswordHash, but it is not Argon2id, so
+    // krypto refuses it before argon2 runs → must give Format (corrupt/foreign
+    // hash), NOT Auth (which would misdiagnose a database problem as "wrong
+    // password").
     let pw = SecretString::from_string("password".to_string()).unwrap();
     let scrypt_phc = "$scrypt$ln=16,r=8,p=1$c2FsdHNhbHQ$aGFzaGhhc2hoYXNoaGFzaA";
     assert!(matches!(
@@ -59,8 +62,173 @@ fn presets_encode_their_parameters_in_the_phc_string() {
             "{preset:?} should carry m={m_kib} in the PHC string: {phc}"
         );
         // Old hashes keep verifying after a profile revision because the
-        // params live in the string itself.
+        // params live in the string itself, as long as they stay within the
+        // range `verify` accepts.
         let again = SecretString::from_string("preset-check".to_string()).unwrap();
         password::verify(&again, &phc).unwrap();
     }
+}
+
+// --------------------------------------------------------------------------- //
+// What `verify` accepts (0.8.2): Argon2id, version 19, and parameters between
+// the floor (m = 64 MiB, t = 2, p = 1) and the ceiling (High plus a margin:
+// m = 320 MiB, t = 5, p = 5). Associated data is accepted; a `keyid` is not.
+// Anything else is `Format`, even with the right password.
+// --------------------------------------------------------------------------- //
+
+const RANGE_PASSWORD: &str = "range-check-password";
+
+/// A valid salt and hash field, for hand-written PHC strings that must be
+/// refused before argon2 runs.
+const SALT_AND_HASH: &str = "c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g";
+
+/// A PHC string made by argon2 itself for `RANGE_PASSWORD`, so the only thing
+/// `verify` can refuse in it is the variant, version or parameters it carries.
+fn argon2_phc(algorithm: Algorithm, version: Version, m_kib: u32, t: u32, p: u32) -> String {
+    let params = Params::new(m_kib, t, p, None).unwrap();
+    Argon2::new(algorithm, version, params)
+        .hash_password(RANGE_PASSWORD.as_bytes())
+        .unwrap()
+        .to_string()
+}
+
+/// Asserts that `verify` refuses `phc` with `Format` given the right password,
+/// and that the message carries neither the password nor the salt and hash.
+fn assert_refused(phc: &str) {
+    let pw = SecretString::from_string(RANGE_PASSWORD.to_string()).unwrap();
+    match password::verify(&pw, phc) {
+        Err(Error::Format(msg)) => {
+            assert!(
+                !msg.contains(RANGE_PASSWORD),
+                "message carries the password: {msg}"
+            );
+            for field in phc.rsplit('$').take(2) {
+                assert!(
+                    !msg.contains(field),
+                    "message carries the salt or hash: {msg}"
+                );
+            }
+        }
+        other => panic!("expected Format for {phc}, got {other:?}"),
+    }
+}
+
+#[test]
+fn argon2i_hash_gives_format() {
+    let phc = argon2_phc(Algorithm::Argon2i, Version::V0x13, 65_536, 2, 1);
+    assert_refused(&phc);
+}
+
+#[test]
+fn argon2d_hash_gives_format() {
+    let phc = argon2_phc(Algorithm::Argon2d, Version::V0x13, 65_536, 2, 1);
+    assert_refused(&phc);
+}
+
+#[test]
+fn version_16_gives_format() {
+    let phc = argon2_phc(Algorithm::Argon2id, Version::V0x10, 65_536, 2, 1);
+    assert!(phc.contains("$v=16$"), "PHC string: {phc}");
+    assert_refused(&phc);
+}
+
+#[test]
+fn missing_version_field_gives_format() {
+    let phc = argon2_phc(Algorithm::Argon2id, Version::V0x13, 65_536, 2, 1);
+    let without_version = phc.replacen("$v=19$", "$", 1);
+    assert_ne!(without_version, phc, "PHC string: {phc}");
+    assert_refused(&without_version);
+}
+
+#[test]
+fn memory_above_the_ceiling_gives_format() {
+    assert_refused(&format!("$argon2id$v=19$m=327681,t=2,p=1${SALT_AND_HASH}"));
+}
+
+#[test]
+fn passes_above_the_ceiling_give_format() {
+    assert_refused(&format!("$argon2id$v=19$m=65536,t=6,p=1${SALT_AND_HASH}"));
+}
+
+#[test]
+fn parallelism_above_the_ceiling_gives_format() {
+    assert_refused(&format!("$argon2id$v=19$m=65536,t=2,p=6${SALT_AND_HASH}"));
+}
+
+#[test]
+fn memory_below_the_floor_gives_format() {
+    let phc = argon2_phc(Algorithm::Argon2id, Version::V0x13, 65_535, 2, 1);
+    assert_refused(&phc);
+}
+
+#[test]
+fn passes_below_the_floor_give_format() {
+    let phc = argon2_phc(Algorithm::Argon2id, Version::V0x13, 65_536, 1, 1);
+    assert_refused(&phc);
+}
+
+/// argon2 cannot make a hash with p = 0, so the string is written by hand.
+#[test]
+fn parallelism_below_the_floor_gives_format() {
+    assert_refused(&format!("$argon2id$v=19$m=65536,t=2,p=0${SALT_AND_HASH}"));
+}
+
+/// Asserts that `verify` accepts `phc` with the right password.
+fn assert_verifies(phc: &str) {
+    let pw = SecretString::from_string(RANGE_PASSWORD.to_string()).unwrap();
+    if let Err(e) = password::verify(&pw, phc) {
+        panic!("expected Ok for {phc}, got {e:?}");
+    }
+}
+
+#[test]
+fn parameters_at_the_floor_verify() {
+    let phc = argon2_phc(Algorithm::Argon2id, Version::V0x13, 65_536, 2, 1);
+    assert_verifies(&phc);
+}
+
+#[test]
+fn parameters_at_the_ceiling_verify() {
+    let phc = argon2_phc(Algorithm::Argon2id, Version::V0x13, 327_680, 5, 5);
+    assert_verifies(&phc);
+}
+
+/// Associated data lives in the PHC string itself, so `verify` can use it.
+#[test]
+fn hash_with_associated_data_verifies() {
+    let mut builder = ParamsBuilder::new();
+    builder.m_cost(65_536).t_cost(2).p_cost(1);
+    builder.data(AssociatedData::new(b"example-data").unwrap());
+    let phc = Argon2::new(
+        Algorithm::Argon2id,
+        Version::V0x13,
+        builder.build().unwrap(),
+    )
+    .hash_password(RANGE_PASSWORD.as_bytes())
+    .unwrap()
+    .to_string();
+    assert!(phc.contains(",data="), "PHC string: {phc}");
+    assert_verifies(&phc);
+}
+
+/// A `keyid` names a secret key (a pepper) that is not in the string, and
+/// krypto has no way to be given it.
+#[test]
+fn hash_with_keyid_gives_format() {
+    let mut builder = ParamsBuilder::new();
+    builder.m_cost(65_536).t_cost(2).p_cost(1);
+    builder.keyid(KeyId::new(b"key-1").unwrap());
+    let params = builder.build().unwrap();
+    let phc = Argon2::new_with_secret(
+        b"example-pepper",
+        Algorithm::Argon2id,
+        Version::V0x13,
+        params,
+    )
+    .unwrap()
+    .hash_password(RANGE_PASSWORD.as_bytes())
+    .unwrap()
+    .to_string();
+    assert!(phc.contains(",keyid="), "PHC string: {phc}");
+    assert_refused(&phc);
 }

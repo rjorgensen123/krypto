@@ -292,6 +292,13 @@ pub fn derive_key(password: &SecretString, salt: &[u8], preset: Preset)
 - `verify` is constant-time. `Auth` means the password does not match: a **wrong password**, or a
   PHC string that can be read but was cut short or altered. `Format` means the PHC string cannot
   be read or is foreign. Do not merge them.
+- *(0.8.2)* `verify` accepts only what krypto makes or can make: **Argon2id, version 19** with the
+  `v=19` field present, and parameters between the floor and a ceiling a little above `High`:
+  `65 536 ≤ m ≤ 327 680` KiB (64–320 MiB), `2 ≤ t ≤ 5`, `1 ≤ p ≤ 5`. The ceiling is `High` plus a
+  margin (m + 25 %, t + 1, p + 1) and moves with it. Associated data (`data=`) is accepted and
+  used. Anything else — Argon2i, Argon2d, version 16, a string without `v=`, a `keyid` (it names a
+  secret key krypto does not have), parameters outside the range — is `Format`, refused before
+  Argon2 runs, so a stored string cannot make one call use more memory or time than that.
 - `derive_key` requires a salt of **at least 16 bytes**. The salt is not secret and is stored in
   plaintext next to the encrypted data.
 
@@ -309,10 +316,11 @@ The crate owns the numbers. You pick a profile and store its **name**, not the n
 | `Balanced` | 128 MiB (t=3, p=3) | the middle ground *(new in 0.5.0; p adjusted 2 → 3 in 0.6.0 — note that `derive_key` then yields a different key than 0.5.x)* |
 | `High` | 256 MiB (t=4, p=4) | high value, or anything an attacker can attack offline |
 
-The floor is `m ≥ 64 MiB, t ≥ 2, p ≥ 1` — every preset sits on or above it. The numbers may be
-tuned: old PHC strings keep verifying unchanged (the parameters live in the string; *rehash on
-login* is the consumer's part of a raise), but **`derive_key` is parameter-dependent** — a
-preset adjustment changes the key it yields.
+The floor is `m ≥ 64 MiB, t ≥ 2, p ≥ 1` — every preset sits on or above it, and *(0.8.2)*
+`verify` refuses a PHC string below it. The numbers may be tuned: old PHC strings keep verifying
+unchanged as long as they stay within the range `verify` accepts (the parameters live in the
+string; *rehash on login* is the consumer's part of a raise), but **`derive_key` is
+parameter-dependent** — a preset adjustment changes the key it yields.
 
 ---
 
