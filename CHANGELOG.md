@@ -152,6 +152,13 @@ hash, not its working memory. No crate or version changed, and outputs are
 unchanged. It is a measure, not a guarantee: what is left depends on the
 compiler, the build and the platform. Signing and key exchange are not covered.
 
+### Changed — CI checks the `cargo-deny` download against a checksum *(2026-11-15)*
+
+Both CI workflows download a prebuilt `cargo-deny` at a fixed version. The
+download is now checked against a SHA-256 kept in the workflow before it is
+unpacked, so a file that has changed fails the job instead of being run. The
+checksum is replaced together with the version. The crate is unchanged.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

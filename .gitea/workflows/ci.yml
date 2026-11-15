@@ -139,11 +139,13 @@ jobs:
           git checkout -q --detach FETCH_HEAD
 
       # Prebuilt binary at a pinned version — compiling cargo-deny on every run
-      # costs about five minutes. Bump the version here when needed.
+      # costs about five minutes. The download is checked against the SHA-256 of
+      # that exact file before unpacking; version and checksum change together.
       - name: Fetch cargo-deny
         run: |
           curl -sSfL -o /tmp/cd.tgz \
             https://github.com/EmbarkStudios/cargo-deny/releases/download/0.20.2/cargo-deny-0.20.2-x86_64-unknown-linux-musl.tar.gz
+          echo "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f  /tmp/cd.tgz" | sha256sum -c -
           tar -xzf /tmp/cd.tgz -C /tmp --strip-components=1
           install /tmp/cargo-deny /usr/local/bin/
 
