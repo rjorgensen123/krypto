@@ -119,7 +119,7 @@ pub fn signature(body: &[u8]) -> Option<Finding> {
             .fact("version", version.to_string())
             .fact("algorithm", key_type(public)?)
             .fact("hash", String::from_utf8_lossy(hash).into_owned())
-            .fact("namespace", super::printable(namespace)),
+            .fact("namespace", String::from_utf8_lossy(namespace).into_owned()),
     )
 }
 
@@ -135,20 +135,20 @@ pub fn putty(text: &str) -> Option<Finding> {
             .map(str::trim)
     };
     let mut found = Finding::new("PuTTY private key (.ppk)")
-        .fact("version", super::printable(version.as_bytes()))
-        .fact("algorithm", super::printable(kind.as_bytes()));
+        .fact("version", version)
+        .fact("algorithm", kind);
     if let Some(enc) = field("Encryption:") {
         found = found.fact(
             "encrypted",
             if enc == "none" {
                 "no".into()
             } else {
-                super::printable(enc.as_bytes())
+                enc.to_string()
             },
         );
     }
     if let Some(kdf) = field("Key-Derivation:") {
-        found = found.fact("key from", super::printable(kdf.as_bytes()));
+        found = found.fact("key from", kdf);
     }
     Some(found.fact("key", "not shown"))
 }

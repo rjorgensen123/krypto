@@ -20,6 +20,11 @@ blob whose header names a format version or an algorithm krypto does not know, a
 when stdin cannot be read; and `2` when stdin is more than 64 MiB. Other changes to a blob still
 give a report and exit `0`; it takes `open`, with the key, to find them.
 
+The report shows only printable ASCII. Any other character, such as a control character or a letter
+outside ASCII in a label or a name taken from the input, is left out, and the line ends with how
+many were, for example `[2 characters not shown]`. So a file cannot drive the terminal or add a
+line to the report. *(0.8.2)*
+
 **Tested** means that `inspect` recognizes the format in a real file made by the tool that makes it
 (`tests/fixtures/inspect`, and the test `inspect_tells_what_others_made`). **Untested** means built
 from the format's description, and not checked against a real file. The files are test data:
@@ -45,7 +50,7 @@ ECDSA P-256 private key is tested with a key made by `openssl`.
 | 64 bytes | the length | that it can be an Ed25519 signature or a SHA-512 hash |
 
 The names in a store file are shown because they are not secret; anything in them that is not
-printable ASCII is shown as `?`.
+printable ASCII is left out and counted, as everywhere in the report. *(0.8.2)*
 
 ---
 

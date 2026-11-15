@@ -179,7 +179,7 @@ fn luks(input: &[u8]) -> Finding {
     let field = |r: std::ops::Range<usize>| {
         input
             .get(r)
-            .map(|b| super::printable(b.split(|&c| c == 0).next().unwrap_or_default()))
+            .map(|b| String::from_utf8_lossy(b.split(|&c| c == 0).next().unwrap_or_default()))
     };
     match version {
         Some(1) => {

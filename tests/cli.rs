@@ -247,6 +247,104 @@ fn inspect_tells_what_others_made() {
     }
 }
 
+/// `inspect` shows only printable ASCII (0.8.2): control characters a file
+/// puts in a PGP armor label, a PHC version, an OpenSSH key's cipher and KDF,
+/// the key type in an SSH key blob or an SSH signature's hash are left out and
+/// counted, and cannot add a line to the report (FS-0105).
+#[test]
+fn inspect_shows_no_control_characters() {
+    let string = |b: &[u8]| [&(b.len() as u32).to_be_bytes()[..], b].concat();
+    let pem = |label: &str, body: Vec<u8>| {
+        let body = krypto::base64::encode(&body);
+        format!("-----BEGIN {label}-----\n{body}\n-----END {label}-----\n").into_bytes()
+    };
+    let key = [string(b"ssh-ed25519"), string(&[7; 32])].concat();
+    let hostile_key = [string(b"ssh-ed25519\x1b]0;owned\x07"), string(&[7; 32])].concat();
+    // Each input, the marker its report must carry, and the start of a line
+    // the input tries to add.
+    let inputs: [(Vec<u8>, &str, Option<&str>); 6] = [
+        (
+            b"-----BEGIN PGP X\x1b[2J\r  cipher      none (not encrypted)-----\n\n\
+              dGVzdA==\n-----END PGP X-----\n"
+                .to_vec(),
+            "[2 characters not shown]",
+            Some("cipher"),
+        ),
+        (
+            b"$argon2id$v=19\x1b[31m\n  injected    true$m=65536,t=3,p=2$c2FsdA$aGFzaA".to_vec(),
+            "[2 characters not shown]",
+            Some("injected"),
+        ),
+        (
+            format!(
+                "ssh-ed25519 {} comment",
+                krypto::base64::encode(&hostile_key)
+            )
+            .into_bytes(),
+            "[2 characters not shown]",
+            None,
+        ),
+        (
+            pem(
+                "OPENSSH PRIVATE KEY",
+                [
+                    &b"openssh-key-v1\0"[..],
+                    &string(b"aes\x1b[2J"),
+                    &string(b"bcrypt\r\n  keys        99"),
+                    &string(b""),
+                    &1u32.to_be_bytes(),
+                    &string(&key),
+                ]
+                .concat(),
+            ),
+            "[3 characters not shown]",
+            Some("keys        99"),
+        ),
+        (
+            pem(
+                "SSH SIGNATURE",
+                [
+                    &b"SSHSIG"[..],
+                    &1u32.to_be_bytes(),
+                    &string(&key),
+                    &string(b"file"),
+                    &string(b""),
+                    &string(b"sha512\x1b]52;c;ZXhhbXBsZQ==\x07"),
+                ]
+                .concat(),
+            ),
+            "[2 characters not shown]",
+            None,
+        ),
+        (
+            b"$argon2id$v=19\x07$m=65536,t=3,p=2$c2FsdA$aGFzaA".to_vec(),
+            "[1 character not shown]",
+            None,
+        ),
+    ];
+    for (input, marker, forged) in inputs {
+        let out = run(&["inspect"], &input);
+        let shown = String::from_utf8_lossy(&out.stdout)
+            .escape_debug()
+            .to_string();
+        assert_eq!(out.code, 0, "{shown}: {}", out.stderr);
+        assert!(
+            out.stdout
+                .iter()
+                .all(|&b| (b >= 0x20 || b == b'\n') && b != 0x7f),
+            "a control character reaches stdout: {shown}"
+        );
+        let report = text(&out);
+        assert!(report.contains(marker), "no {marker}: {shown}");
+        if let Some(forged) = forged {
+            assert!(
+                !report.lines().any(|l| l.trim_start().starts_with(forged)),
+                "the input added a line: {shown}"
+            );
+        }
+    }
+}
+
 /// A wrong call is exit 2, reported before stdin is read: stdin is left open
 /// here, so a command that waited for it would hang until the deadline. A
 /// token in the wrong place is never repeated back. `--help` and `version` work.

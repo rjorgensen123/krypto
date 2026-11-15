@@ -3,7 +3,7 @@
 //! age, minisign and signify, Ansible Vault, SOPS, JSON Web Keys and
 //! Sigstore bundles.
 
-use super::{printable, Finding};
+use super::Finding;
 
 /// Any of the formats below.
 pub fn from_text(text: &str) -> Option<Finding> {
@@ -28,7 +28,7 @@ pub fn json_string(json: &str, key: &str) -> Option<String> {
     let rest = json[at..].trim_start().strip_prefix(':')?.trim_start();
     let rest = rest.strip_prefix('"')?;
     let end = rest.find('"')?;
-    Some(printable(&rest.as_bytes()[..end]))
+    Some(rest[..end].to_string())
 }
 
 /// base64url without padding, as in JWT, Fernet and PASETO.
@@ -57,29 +57,18 @@ fn password_hash(text: &str) -> Option<Finding> {
         } else {
             "Argon2d"
         };
-        return found(&format!("PHC string, {variant}")).map(|f| {
-            f.fact(
-                "parameters",
-                printable(rest.split('$').nth(1).unwrap_or("").as_bytes()),
-            )
-        });
+        return found(&format!("PHC string, {variant}"))
+            .map(|f| f.fact("parameters", rest.split('$').nth(1).unwrap_or("")));
     }
     if let Some(rest) = text.strip_prefix("$scrypt$") {
-        return found("PHC string, scrypt").map(|f| {
-            f.fact(
-                "parameters",
-                printable(rest.split('$').next().unwrap_or("").as_bytes()),
-            )
-        });
+        return found("PHC string, scrypt")
+            .map(|f| f.fact("parameters", rest.split('$').next().unwrap_or("")));
     }
     if let Some(rest) = text.strip_prefix("$pbkdf2-") {
         let (hash, rest) = rest.split_once('$')?;
         let rounds = rest.split('$').next().unwrap_or("");
-        return found(&format!(
-            "PBKDF2-{}",
-            printable(hash.to_uppercase().as_bytes())
-        ))
-        .map(|f| f.fact("iterations", printable(rounds.as_bytes())));
+        return found(&format!("PBKDF2-{}", hash.to_uppercase()))
+            .map(|f| f.fact("iterations", rounds));
     }
     for (prefix, name) in [
         ("$2a$", "bcrypt"),
@@ -89,7 +78,7 @@ fn password_hash(text: &str) -> Option<Finding> {
     ] {
         if let Some(rest) = text.strip_prefix(prefix) {
             let cost = rest.split('$').next().unwrap_or("");
-            return found(name).map(|f| f.fact("cost", printable(cost.as_bytes())));
+            return found(name).map(|f| f.fact("cost", cost));
         }
     }
     let crypt = [
@@ -108,7 +97,7 @@ fn password_hash(text: &str) -> Option<Finding> {
             .nth(2)
             .and_then(|s| s.strip_prefix("rounds="))
         {
-            f = f.fact("rounds", printable(r.as_bytes()));
+            f = f.fact("rounds", r);
         }
         return Some(f);
     }
@@ -125,10 +114,7 @@ fn password_hash(text: &str) -> Option<Finding> {
                 prefix.trim_end_matches('$')
             ));
             if prefix.starts_with("pbkdf2") {
-                f = f.fact(
-                    "iterations",
-                    printable(rest.split('$').next().unwrap_or("").as_bytes()),
-                );
+                f = f.fact("iterations", rest.split('$').next().unwrap_or(""));
             }
             return Some(f);
         }
@@ -161,7 +147,7 @@ fn age(text: &str) -> Option<Finding> {
     let recipients: Vec<String> = text
         .lines()
         .filter_map(|l| l.strip_prefix("-> "))
-        .map(|l| printable(l.split_whitespace().next().unwrap_or("").as_bytes()))
+        .map(|l| l.split_whitespace().next().unwrap_or("").to_string())
         .collect();
     Some(
         Finding::new("age encrypted file")
@@ -233,18 +219,14 @@ fn ansible_vault(text: &str) -> Option<Finding> {
     let mut parts = header.split(';');
     let version = parts.next()?;
     let cipher = parts.next().unwrap_or("");
-    Some(
-        Finding::new("Ansible Vault")
-            .fact("version", printable(version.as_bytes()))
-            .fact(
-                "cipher",
-                if cipher == "AES256" {
-                    "AES-256-CTR with HMAC-SHA256, key from PBKDF2-SHA256".to_string()
-                } else {
-                    printable(cipher.as_bytes())
-                },
-            ),
-    )
+    Some(Finding::new("Ansible Vault").fact("version", version).fact(
+        "cipher",
+        if cipher == "AES256" {
+            "AES-256-CTR with HMAC-SHA256, key from PBKDF2-SHA256".to_string()
+        } else {
+            cipher.to_string()
+        },
+    ))
 }
 
 fn sops(text: &str) -> Option<Finding> {

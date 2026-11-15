@@ -5,9 +5,9 @@
 //! recognized, and which of it is tested against real files.
 //!
 //! It tells what something is and which algorithm made it, never what it
-//! holds: no key, no plaintext and no hash value is printed. Text taken from
-//! the input, such as names and labels, has anything that is not printable
-//! ASCII replaced.
+//! holds: no key, no plaintext and no hash value is printed. The report keeps
+//! only printable ASCII: any other character is removed where the report is
+//! written, and the line says how many were (0.8.2).
 
 use krypto::{base64, blob_key_id, hex};
 
@@ -41,13 +41,33 @@ impl Finding {
         self
     }
 
-    /// The report: the name, then one fact per line.
+    /// The report: the name, then one fact per line. The name and each value
+    /// go through [`visible`] here, so all text reaches the terminal by the
+    /// same rule, also text taken from the input (0.8.2).
     pub fn report(&self) -> String {
-        let mut out = self.what.clone();
+        let mut out = visible(&self.what);
         for (name, value) in &self.facts {
-            out += &format!("\n  {name:<11} {value}");
+            out += &format!("\n  {name:<11} {}", visible(value));
         }
         out
+    }
+}
+
+/// `text` with only printable ASCII (0x20 to 0x7e) kept, so the input cannot
+/// drive the terminal or add a line to the report. How many characters were
+/// removed is said at the end, as `[3 characters not shown]` (0.8.2).
+fn visible(text: &str) -> String {
+    let kept: String = text.chars().filter(|c| matches!(c, ' '..='~')).collect();
+    let removed = text.chars().count() - kept.chars().count();
+    let marker = match removed {
+        0 => return kept,
+        1 => "[1 character not shown]".to_string(),
+        n => format!("[{n} characters not shown]"),
+    };
+    if kept.is_empty() {
+        marker
+    } else {
+        format!("{kept} {marker}")
     }
 }
 
@@ -97,7 +117,6 @@ fn pem(text: &str, depth: u8) -> Option<Finding> {
     if label.starts_with("PGP ") {
         return pgp::from_armor(text);
     }
-    let shown = printable(label.as_bytes());
     let body: String = text
         .lines()
         .skip(1)
@@ -112,21 +131,21 @@ fn pem(text: &str, depth: u8) -> Option<Finding> {
         "RSA PUBLIC KEY" => pkix::pkcs1_public(b),
         _ => Some(inspect_at(b, depth + 1)).filter(|f| f.what != NOT_RECOGNIZED),
     });
-    let mut found = inner.unwrap_or_else(|| Finding::new(pem_label_name(label, &shown)));
+    let mut found = inner.unwrap_or_else(|| Finding::new(pem_label_name(label)));
     found
         .facts
-        .insert(0, ("wrapped in", format!("PEM ({shown})")));
+        .insert(0, ("wrapped in", format!("PEM ({label})")));
     // A legacy encrypted PEM key names its cipher in DEK-Info.
     if let Some(dek) = text.lines().find_map(|l| l.strip_prefix("DEK-Info: ")) {
         let cipher = dek.split(',').next().unwrap_or_default();
-        found = found.fact("encrypted", printable(cipher.as_bytes()));
+        found = found.fact("encrypted", cipher);
     }
     Some(found)
 }
 
 /// What a PEM label says the block is, for when its content cannot be read,
 /// as with a key encrypted the legacy way.
-fn pem_label_name(label: &str, shown: &str) -> String {
+fn pem_label_name(label: &str) -> String {
     match label {
         "RSA PRIVATE KEY" => "RSA private key (PKCS#1)",
         "EC PRIVATE KEY" => "EC private key (SEC1)",
@@ -142,7 +161,7 @@ fn pem_label_name(label: &str, shown: &str) -> String {
         "PKCS7" | "CMS" => "CMS / PKCS#7",
         "DH PARAMETERS" => "Diffie-Hellman parameters",
         "EC PARAMETERS" => "EC parameters",
-        _ => return format!("PEM block: {shown}"),
+        _ => return format!("PEM block: {label}"),
     }
     .to_string()
 }
@@ -233,7 +252,7 @@ fn store(input: &[u8]) -> Option<Finding> {
             damaged = Some(at);
             break;
         };
-        names.push(printable(name));
+        names.push(String::from_utf8_lossy(name).into_owned());
         let alg = if blob.starts_with(b"FAFN") && blob.len() > 5 {
             alg_name(blob[5])
         } else {
@@ -258,21 +277,6 @@ fn store(input: &[u8]) -> Option<Finding> {
         found = found.fact("damaged", format!("at byte {at}"));
     }
     Some(found)
-}
-
-/// Printable ASCII as it is; anything else as `?`, so the input cannot drive
-/// the terminal.
-fn printable(bytes: &[u8]) -> String {
-    bytes
-        .iter()
-        .map(|&b| {
-            if (0x20..0x7f).contains(&b) {
-                b as char
-            } else {
-                '?'
-            }
-        })
-        .collect()
 }
 
 const OID_EC_PUBLIC_KEY: &[u8] = &[0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];

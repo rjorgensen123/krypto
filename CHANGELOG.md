@@ -41,6 +41,18 @@ or foreign hash was verified as if krypto had made it. Hashes made by krypto
 keep verifying; hashes made by other tools may now give `Format` (`FormatError`
 in `krypto-py`).
 
+### Fixed — `krypto-cli inspect` shows only printable ASCII *(2026-11-15)*
+
+`krypto-cli inspect` removes every character that is not printable ASCII
+where the report is written, and the line ends with how many were left out,
+for example `[2 characters not shown]`. Before, five fields took text from the
+input unfiltered: the label of PGP armor, the `v=` of an Argon2id PHC string,
+the cipher and KDF of an OpenSSH private key, the key type inside an SSH key
+blob, and the hash of an SSH signature. A crafted file could put control
+characters and line breaks there, to drive the terminal or add lines to the
+report. The other fields showed such characters as `?`; they now follow the
+same rule. Reports on files without such characters are unchanged.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than
