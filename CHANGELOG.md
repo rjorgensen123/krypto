@@ -4,6 +4,15 @@ Every notable change to this crate is recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.8.2]
+
+### Added — the README and Home say who has reviewed krypto *(2026-11-15)*
+
+The README and `docs/Home.md` list the reviews of krypto: the date, the model,
+the version and the kind of review, and that the MiMo security audit used
+Cloudflare's `security-audit` skill. They are reviews by AI models, not audits
+by a security firm.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

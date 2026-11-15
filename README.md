@@ -111,6 +111,26 @@ VIRTUAL_ENV=.venv .venv/bin/maturin develop --locked -m krypto-py/Cargo.toml
 PYO3_PYTHON=$PWD/.venv/bin/python cargo test -p krypto-py
 ```
 
+## Reviews
+
+krypto has been reviewed by AI models. These are not audits by a security firm.
+
+| Date | Reviewer | Version | Kind |
+|---|---|---|---|
+| 2026-10-09 | MiMo V2.6 Flash | 0.7.0 | code review, read only |
+| 2026-10-30 | MiMo V2.6 Flash | 0.8.0, before release | code review, read only |
+| 2026-11-08 | Mistral Vibe | 0.8.0 | code review |
+| 2026-11-12 | Gemini | 0.8.0 | security audit |
+| 2026-11-12 | MiMo V2.6 Flash | 0.8.0 | security audit |
+
+Earlier versions were also reviewed by DeepSeek, Qwen, Gemini and Fable.
+
+The MiMo security audit used Cloudflare's
+[`security-audit`](https://github.com/cloudflare/security-audit-skill) skill.
+
+Each finding is assessed against the code, and the ones that hold are fixed;
+the CHANGELOG records the fixes.
+
 ## Author
 
 **Roger Jorgensen** — rogerj@gmail.com
@@ -120,8 +140,6 @@ contracts the crate presents outwards; and the decisions about what it does and 
 does not do. 
 
 The code is written by Claude AI (Opus and Fable).
-
-Reviewed independently by DeepSeek, Qwen, Gemini and Fable.
 
 ## License
 
