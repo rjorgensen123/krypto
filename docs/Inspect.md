@@ -9,8 +9,11 @@ krypto-cli inspect < something
 ```
 
 Part 1 is what krypto makes; part 2 is what other tools make. Anything wrapped in PEM or hex is
-unwrapped, and base64 when what it holds is recognized; hex and base64 are unwrapped at most two
-levels deep. What is inside is told, with the wrapping. Anything it cannot place is
+unwrapped, and base64 when what it holds is recognized; PEM, hex and base64 are unwrapped at most
+two levels deep, counted together. Below that, a PEM block is told by its label, and read only
+where the label names a format of its own: OpenSSH private keys, SSH signatures, RSA public keys
+and PGP armor. Where the limit stops the unwrapping, the report ends with a `note` that says so
+*(0.8.2)*. What is inside is told, with the wrapping. Anything it cannot place is
 `not recognized`, with its length and whether it looks like text, random bytes or other binary
 data. Random bytes cannot be told apart: encrypted data, compressed data and key material all look
 the same.

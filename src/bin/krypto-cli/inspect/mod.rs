@@ -20,11 +20,14 @@ mod text;
 
 /// What `inspect` found: a name and the facts about it. `changed` is set for a
 /// krypto blob whose header names a format version or an algorithm krypto does
-/// not know, which is exit 3, as for `open`.
+/// not know, which is exit 3, as for `open`. `too_deep` is set where the depth
+/// limit kept `inspect` from unwrapping further, and the report says so
+/// (0.8.2).
 pub struct Finding {
     pub what: String,
     pub facts: Vec<(&'static str, String)>,
     pub changed: bool,
+    pub too_deep: bool,
 }
 
 impl Finding {
@@ -33,6 +36,7 @@ impl Finding {
             what: what.into(),
             facts: Vec::new(),
             changed: false,
+            too_deep: false,
         }
     }
 
@@ -71,9 +75,18 @@ fn visible(text: &str) -> String {
     }
 }
 
+/// The last line of a report where the depth limit kept `inspect` from
+/// unwrapping further (0.8.2).
+const TOO_DEEP: &str = "stopped at the limit of two levels of unwrapping";
+
 /// What `input` is.
 pub fn inspect(input: &[u8]) -> Finding {
-    inspect_at(input, 0)
+    let found = inspect_at(input, 0);
+    if found.too_deep {
+        found.fact("note", TOO_DEEP)
+    } else {
+        found
+    }
 }
 
 fn inspect_at(input: &[u8], depth: u8) -> Finding {
@@ -87,6 +100,7 @@ fn inspect_at(input: &[u8], depth: u8) -> Finding {
     if let Some(found) = theirs.iter().find_map(|f| f(input)) {
         return found;
     }
+    let mut too_deep = false;
     if let Ok(text) = std::str::from_utf8(input) {
         let text = text.trim();
         if let Some(found) = phc_argon2id(text) {
@@ -100,18 +114,26 @@ fn inspect_at(input: &[u8], depth: u8) -> Finding {
         if let Some(found) = found {
             return found;
         }
-        // Hex and base64 are unwrapped once or twice, never more.
+        // Hex and base64 are unwrapped once or twice, never more; where the
+        // limit stops them, the report says so (0.8.2).
         if depth < 2 {
-            if let Some(found) = unwrapped(text, depth) {
+            if let Some(found) = unwrapped(text, depth, &mut too_deep) {
                 return found;
             }
+        } else {
+            too_deep = looks_wrapped(text);
         }
     }
-    by_length(input).unwrap_or_else(|| unknown(input))
+    let mut found = by_length(input).unwrap_or_else(|| unknown(input));
+    found.too_deep = too_deep;
+    found
 }
 
 /// PEM: `-----BEGIN <label>-----`, base64, `-----END <label>-----`. The label
 /// says what to look for; the content is told as DER or by its own format.
+/// Content that could hold more wrapping is looked into at most two levels
+/// deep, as for hex and base64; deeper, the block is told by its label, and
+/// the report says the limit was reached (0.8.2).
 fn pem(text: &str, depth: u8) -> Option<Finding> {
     let label = text.strip_prefix("-----BEGIN ")?.split("-----").next()?;
     if label.starts_with("PGP ") {
@@ -125,13 +147,26 @@ fn pem(text: &str, depth: u8) -> Option<Finding> {
         .map(str::trim)
         .collect();
     let bytes = base64::decode(&body).ok();
+    let mut too_deep = false;
     let inner = bytes.as_deref().and_then(|b| match label {
         "OPENSSH PRIVATE KEY" => ssh::private_key(b),
         "SSH SIGNATURE" => ssh::signature(b),
         "RSA PUBLIC KEY" => pkix::pkcs1_public(b),
-        _ => Some(inspect_at(b, depth + 1)).filter(|f| f.what != NOT_RECOGNIZED),
+        _ if depth < 2 => {
+            let inner = inspect_at(b, depth + 1);
+            too_deep = inner.too_deep;
+            Some(inner).filter(|f| f.what != NOT_RECOGNIZED)
+        }
+        _ => {
+            too_deep = true;
+            None
+        }
     });
-    let mut found = inner.unwrap_or_else(|| Finding::new(pem_label_name(label)));
+    let mut found = inner.unwrap_or_else(|| {
+        let mut found = Finding::new(pem_label_name(label));
+        found.too_deep = too_deep;
+        found
+    });
     found
         .facts
         .insert(0, ("wrapped in", format!("PEM ({label})")));
@@ -343,8 +378,9 @@ fn phc_argon2id(text: &str) -> Option<Finding> {
 
 /// E8: hex or base64 as krypto writes them, unwrapped. Hex is taken as hex;
 /// base64 only when what it holds is recognized, since many words are valid
-/// base64.
-fn unwrapped(text: &str, depth: u8) -> Option<Finding> {
+/// base64. Base64 not taken still sets `too_deep` where the depth limit
+/// stopped the unwrapping inside it (0.8.2).
+fn unwrapped(text: &str, depth: u8, too_deep: &mut bool) -> Option<Finding> {
     if text.len() >= 2 && text.bytes().all(|b| b.is_ascii_hexdigit()) {
         if let Ok(bytes) = hex::decode(&text.to_ascii_lowercase()) {
             return Some(wrapped(inspect_at(&bytes, depth + 1), "hex"));
@@ -356,9 +392,19 @@ fn unwrapped(text: &str, depth: u8) -> Option<Finding> {
             if inner.what != NOT_RECOGNIZED {
                 return Some(wrapped(inner, "base64"));
             }
+            *too_deep = inner.too_deep;
         }
     }
     None
+}
+
+/// Whether [`unwrapped`] would try `text`: hex, or base64 that decodes. Its
+/// tests are the same as there (0.8.2).
+fn looks_wrapped(text: &str) -> bool {
+    let hex = text.len() >= 2
+        && text.bytes().all(|b| b.is_ascii_hexdigit())
+        && hex::decode(&text.to_ascii_lowercase()).is_ok();
+    hex || (text.len() >= 8 && base64::decode(text).is_ok())
 }
 
 fn wrapped(mut inner: Finding, how: &str) -> Finding {

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Just enough DER to tell what an X.509 or PKCS structure is and which
-//! algorithms it names. It reads tags, lengths and OIDs; it validates nothing.
+//! algorithms it names. It reads tags, lengths and OIDs. It validates nothing,
+//! except an OID's encoding: not empty, and each part minimally encoded and
+//! closed (0.8.2).
 
 /// One DER element: its tag, its content, and what follows it.
 #[derive(Clone, Copy)]
@@ -62,28 +64,51 @@ pub const BIT_STRING: u8 = 0x03;
 pub const OCTET_STRING: u8 = 0x04;
 pub const OID: u8 = 0x06;
 
-/// An OID's content as dotted text.
-pub fn oid_text(body: &[u8]) -> String {
+/// An OID's content as dotted text, the first part split into two arcs as
+/// X.690 says. Otherwise what the report shows instead (0.8.2): `invalid OID`
+/// when the OID is empty, its last part is not closed, or a part starts with
+/// the byte 0x80 (not minimally encoded); `OID too long to show` when it is
+/// valid but a part does not fit in 64 bits. So an OID is never shown as
+/// another one.
+pub fn oid_text(body: &[u8]) -> Result<String, &'static str> {
+    const INVALID: &str = "invalid OID";
+    if body.last().is_none_or(|b| b & 0x80 != 0) {
+        return Err(INVALID);
+    }
     let mut parts: Vec<u64> = Vec::new();
-    let mut value = 0u64;
-    for (i, &b) in body.iter().enumerate() {
-        value = (value << 7) | (b & 0x7f) as u64;
+    // The part being read, or `None` once it no longer fits in 64 bits.
+    let mut value = Some(0u64);
+    let (mut at_start, mut too_long) = (true, false);
+    for &b in body {
+        if at_start && b == 0x80 {
+            return Err(INVALID);
+        }
+        at_start = b & 0x80 == 0;
+        value = value
+            .filter(|v| *v <= u64::MAX >> 7)
+            .map(|v| (v << 7) | (b & 0x7f) as u64);
         if b & 0x80 == 0 {
-            if parts.is_empty() {
-                let first = if i == 0 && value < 80 { value / 40 } else { 2 };
-                parts.push(first);
-                parts.push(value - first * 40);
-            } else {
-                parts.push(value);
+            match value {
+                None => too_long = true,
+                Some(v) if parts.is_empty() => {
+                    // The first part is 40 * X + Y, with X at most 2.
+                    let first = (v / 40).min(2);
+                    parts.push(first);
+                    parts.push(v - first * 40);
+                }
+                Some(v) => parts.push(v),
             }
-            value = 0;
+            value = Some(0);
         }
     }
-    parts
+    if too_long {
+        return Err("OID too long to show");
+    }
+    Ok(parts
         .iter()
         .map(u64::to_string)
         .collect::<Vec<_>>()
-        .join(".")
+        .join("."))
 }
 
 /// The name of an OID, where it is one we know.
@@ -145,10 +170,13 @@ pub fn oid_name(dotted: &str) -> Option<&'static str> {
     })
 }
 
-/// An OID element as a name, or as dotted text when it is not one we know.
+/// An OID element as a name, or as dotted text when it is not one we know,
+/// or as what [`oid_text`] says when it cannot show it (0.8.2).
 pub fn name_of(tlv: &Tlv) -> String {
-    let dotted = oid_text(tlv.body);
-    oid_name(&dotted).map(str::to_string).unwrap_or(dotted)
+    match oid_text(tlv.body) {
+        Ok(dotted) => oid_name(&dotted).map(str::to_string).unwrap_or(dotted),
+        Err(instead) => instead.to_string(),
+    }
 }
 
 /// An AlgorithmIdentifier: the algorithm's OID, and its parameters if any.

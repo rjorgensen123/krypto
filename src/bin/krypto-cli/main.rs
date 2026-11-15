@@ -243,8 +243,8 @@ fn help_of(command: &str) -> &'static str {
              files, password hashes, keys and signatures) and the common formats from\n\
              other tools: OpenPGP, X.509 and PKCS, SSH, encrypted files, tokens,\n\
              password hashes and compressed data. PEM and hex are unwrapped, and base64\n\
-             when what it holds is recognized; hex and base64 at most two levels deep. It\n\
-             never shows a key, a plaintext or a hash value, except the SHA-256\n\
+             when what it holds is recognized; PEM, hex and base64 at most two levels\n\
+             deep. It never shows a key, a plaintext or a hash value, except the SHA-256\n\
              fingerprint of an SSH public key. A krypto blob whose header names a format\n\
              version or an algorithm krypto does not know is exit 3, as for open.\n\
              docs/Inspect.md lists what it knows."

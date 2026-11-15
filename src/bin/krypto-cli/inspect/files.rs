@@ -227,7 +227,6 @@ fn zip(input: &[u8]) -> Finding {
         return found.fact("encrypted", "no");
     }
     if method == 99 {
-        // The AES extra field (0x9901) holds the strength: 1, 2 or 3.
         let name_len = input
             .get(26..28)
             .map(|b| u16::from_le_bytes([b[0], b[1]]) as usize)
@@ -239,11 +238,7 @@ fn zip(input: &[u8]) -> Finding {
         let extra = input
             .get(30 + name_len..30 + name_len + extra_len)
             .unwrap_or_default();
-        let strength = extra
-            .windows(2)
-            .position(|w| w == [0x01, 0x99])
-            .and_then(|at| extra.get(at + 8));
-        let cipher = match strength {
+        let cipher = match aes_strength(extra) {
             Some(1) => "AES-128 (WinZip AE)",
             Some(2) => "AES-192 (WinZip AE)",
             Some(3) => "AES-256 (WinZip AE)",
@@ -252,4 +247,26 @@ fn zip(input: &[u8]) -> Finding {
         return found.fact("encrypted", cipher);
     }
     found.fact("encrypted", "ZipCrypto (traditional PKWARE, weak)")
+}
+
+/// The strength in a zip entry's WinZip AES extra field (0x9901): 1, 2 or 3
+/// for 128, 192 or 256 bits. The extra fields are read record by record (id,
+/// size, data), and the AES record counts only with its 7 bytes of data and
+/// the vendor id `AE` (0.8.2).
+fn aes_strength(extra: &[u8]) -> Option<u8> {
+    let mut rest = extra;
+    while rest.len() >= 4 {
+        let id = u16::from_le_bytes([rest[0], rest[1]]);
+        let size = u16::from_le_bytes([rest[2], rest[3]]) as usize;
+        let data = rest.get(4..4 + size)?;
+        if id == 0x9901 {
+            // Vendor version (2), vendor id (2), strength (1), method (2).
+            return match data {
+                [_, _, b'A', b'E', strength, _, _] => Some(*strength),
+                _ => None,
+            };
+        }
+        rest = &rest[4 + size..];
+    }
+    None
 }

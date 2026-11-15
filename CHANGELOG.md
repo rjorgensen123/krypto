@@ -53,6 +53,24 @@ characters and line breaks there, to drive the terminal or add lines to the
 report. The other fields showed such characters as `?`; they now follow the
 same rule. Reports on files without such characters are unchanged.
 
+### Fixed — `krypto-cli inspect` reads crafted DER, PEM, OpenPGP and zip input right or says it is invalid *(2026-11-15)*
+
+`krypto-cli inspect` no longer panics or shows a made-up value on crafted
+input. An OID whose first part took more than one byte and was below 80, or
+did not fit in 64 bits, made a debug build panic (exit 101) and a release
+build show a made-up OID. An OID with a part that starts with the byte 0x80,
+a last part that is not closed, or no content at all was shown as another
+OID or as nothing; it is now `invalid OID`. A valid OID with a part that does
+not fit in 64 bits, such as one under `2.25`, was shown with a wrong number;
+it is now `OID too long to show`. PEM inside PEM is unwrapped at most two
+levels deep, counted together with hex and base64; before, it had no limit.
+Where that limit stops the unwrapping, the report ends with a note that says
+so. The iteration count of an OpenPGP iterated and salted S2K is read from
+its own byte, not from the last byte of the packet, which was wrong when an
+encrypted session key followed. The strength of a WinZip AES zip entry is
+read from the AES extra field, found record by record, instead of after the
+first place the bytes `01 99` appear.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

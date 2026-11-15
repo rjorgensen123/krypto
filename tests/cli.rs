@@ -345,6 +345,95 @@ fn inspect_shows_no_control_characters() {
     }
 }
 
+/// `inspect` reads a crafted file right or says what in it is invalid, never
+/// with a panic or a made-up value (0.8.2): an OID part with a leading 0x80,
+/// an OID whose last part is not closed and an empty OID are `invalid OID`, a
+/// part too long for 64 bits is `OID too long to show`, PEM inside PEM is
+/// unwrapped at most two levels deep as hex is, and the report notes where
+/// that limit stops it, an S2K count is read from its own byte when a session
+/// key follows, and a WinZip AES strength from the AES extra field (FS-0106).
+#[test]
+fn inspect_reads_crafted_files_right_or_says_invalid() {
+    let der = |h: &str| hex::decode(h).unwrap();
+    let pem = |body: &[u8]| {
+        let body = krypto::base64::encode(body);
+        format!("-----BEGIN X-----\n{body}\n-----END X-----\n").into_bytes()
+    };
+    let ed25519 = der("300a300506032b6570030100");
+    let hex3 = hex::encode(hex::encode(hex::encode(&ed25519).as_bytes()).as_bytes());
+    const TOO_DEEP: &str = "note        stopped at the limit of two levels of unwrapping";
+    // A local zip header, encrypted with method 99, whose first extra field
+    // holds the bytes 01 99 before the AES extra field with strength 3.
+    let zip = [
+        &b"PK\x03\x04\x14\x00\x01\x00\x63\x00"[..],
+        &[0; 16],
+        &[1, 0, 20, 0],
+        b"a",
+        &der("555405000301990000"),
+        &der("0199070002004145030800"),
+    ]
+    .concat();
+    // Each input, the first line of its report, and what the report must hold.
+    let inputs: [(Vec<u8>, &str, &str); 12] = [
+        (
+            der("300a30040602800004020000"),
+            "encrypted private key (PKCS#8)",
+            "scheme      invalid OID",
+        ),
+        (
+            der("3009300406028010030100"),
+            "public key (SubjectPublicKeyInfo)",
+            "algorithm   invalid OID",
+        ),
+        (
+            der("300b300606042b806570030100"),
+            "public key (SubjectPublicKeyInfo)",
+            "algorithm   invalid OID",
+        ),
+        (
+            der("300b300606042b657081030100"),
+            "public key (SubjectPublicKeyInfo)",
+            "algorithm   invalid OID",
+        ),
+        (
+            der("300730020600030100"),
+            "public key (SubjectPublicKeyInfo)",
+            "algorithm   invalid OID",
+        ),
+        (
+            der("3011300c060a82808080808080808000030100"),
+            "public key (SubjectPublicKeyInfo)",
+            "algorithm   OID too long to show",
+        ),
+        (
+            der("3012300d060b2b82808080808080808000030100"),
+            "public key (SubjectPublicKeyInfo)",
+            "algorithm   OID too long to show",
+        ),
+        (
+            pem(&pem(&ed25519)),
+            "public key (SubjectPublicKeyInfo)",
+            "algorithm   Ed25519",
+        ),
+        (pem(&pem(&pem(&ed25519))), "PEM block: X", TOO_DEEP),
+        (hex3.into_bytes(), "not recognized", TOO_DEEP),
+        (
+            der("c31e04090308010203040506070860a1a2a3a4a5a6a7a8a9aaabacadaeafb0ff"),
+            "OpenPGP encrypted message",
+            "iterated and salted SHA-256, 65536 bytes",
+        ),
+        (zip, "zip archive", "encrypted   AES-256 (WinZip AE)"),
+    ];
+    for (input, what, holds) in inputs {
+        let out = run(&["inspect"], &input);
+        let report = text(&out);
+        assert_eq!(out.code, 0, "{what}: {}", out.stderr);
+        assert_eq!(report.lines().next(), Some(what), "{report}");
+        assert!(report.contains(holds), "no {holds}: {report}");
+        assert_eq!(report.contains(TOO_DEEP), holds == TOO_DEEP, "{report}");
+    }
+}
+
 /// A wrong call is exit 2, reported before stdin is read: stdin is left open
 /// here, so a command that waited for it would hang until the deadline. A
 /// token in the wrong place is never repeated back. `--help` and `version` work.

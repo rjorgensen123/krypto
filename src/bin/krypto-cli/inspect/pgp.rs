@@ -300,7 +300,9 @@ fn data_packet(tag: u8, head: &[u8]) -> String {
     }
 }
 
-/// A string-to-key specifier: how a passphrase becomes a key.
+/// A string-to-key specifier: how a passphrase becomes a key. `spec` may go on
+/// past the specifier, as in a SKESK with a session key, so the iterated and
+/// salted count is read from byte 10, not from the end (0.8.2).
 fn s2k(spec: &[u8]) -> String {
     match spec {
         [0, hash, ..] => format!(
@@ -311,7 +313,7 @@ fn s2k(spec: &[u8]) -> String {
             "key from the passphrase with salted {}",
             hash_algorithm(*hash)
         ),
-        [3, hash, .., count] if spec.len() >= 11 => {
+        [3, hash, _, _, _, _, _, _, _, _, count, ..] => {
             let c = *count as u32;
             let n = (16 + (c & 15)) << ((c >> 4) + 6);
             format!(
