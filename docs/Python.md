@@ -131,6 +131,9 @@ new_master = krypto.MasterKey.from_bytes(krypto.SecretBuf.random(32))
 store = store.rotate(new_master)
 ```
 
+As in Rust, the store protects its contents, not the file, and `open` does not check the master
+key: a wrong one raises `AuthError` from `get`.
+
 The rest of the rules: [A small encrypted store on disk](Usage.md#a-small-encrypted-store-on-disk).
 
 ---

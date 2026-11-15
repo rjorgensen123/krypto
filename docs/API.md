@@ -251,6 +251,18 @@ Name rules: non-empty, ≤ 512 bytes, printable ASCII only (`[\x20-\x7e]`) — n
 addresses, not secrets, and get listed out. Checked on read as well as on write
 *(0.7.0)*: a store file need not have come from `put`.
 
+**What the store protects.** krypto protects the contents, not the file. Without the master key
+nobody can read a value, or make or change one that `get` accepts. The file is not authenticated
+as a whole: whoever can write to it can remove an entry, or put back an older copy of an entry or
+of the file, and `get` then answers `KeyNotFound` or returns the older value (a copy from before
+a `rotate` gives `Auth`). Who may write to the file is the caller's to decide.
+
+`open` does not check the master key: it reads the file and decrypts nothing, and neither do
+`contains` and `list`. A wrong master key shows as `Auth` from `get`. A `put` under a wrong master
+key stores that entry under that key (and replaces an entry of the same name, as `put` always
+does): each key then reads only its own entries, and `rotate` fails with `Auth` and leaves the
+file untouched.
+
 *(0.7.2)* **One handle per file.** A `SecretStore` reads the whole file into memory and writes the
 whole file back, so two handles on one file would overwrite each other's writes. Keeping to one
 handle per file is the caller's responsibility. krypto also guards it on its side: `open` takes an

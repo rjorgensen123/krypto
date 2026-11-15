@@ -7,6 +7,13 @@
 //! failing with `Auth`. Key names are plaintext (addresses, not secrets).
 //! Writes are atomic (tmp + fsync + rename), file mode 0600. One handle per
 //! file at a time, held by a lock (0.7.2).
+//!
+//! What is protected is the contents, not the file. Without the master key
+//! no value can be read, and none can be made or changed that `get` accepts.
+//! The file as a whole is not authenticated: whoever can write to it can
+//! remove an entry or put back an older copy, so who may write to it is the
+//! caller's to decide. `open` does not check the master key: a wrong one
+//! shows as [`Error::Auth`] from `get`.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -85,6 +92,10 @@ impl<'a> SecretStore<'a> {
     /// lives. If another handle, in this or another process, holds it, `open`
     /// fails at once with [`Error::Io`] (`WouldBlock`) instead of letting the two
     /// overwrite each other's writes.
+    ///
+    /// The master key is not checked here: `open` reads the file and decrypts
+    /// nothing. A wrong master key shows as [`Error::Auth`] from `get`, and a
+    /// `put` under it stores that entry under the wrong key, beside the others.
     pub fn open(path: impl AsRef<Path>, master: &'a MasterKey) -> Result<Self, Error> {
         let path = path.as_ref().to_path_buf();
         let lock = take_lock(&path)?;

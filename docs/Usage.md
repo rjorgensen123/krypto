@@ -196,6 +196,13 @@ is there, or the new one, never half of one. The file gets mode 0600, and an exi
 other mode is set to 0600 when you open it, unless the process may not change it; then it is left
 as it is.
 
+**What the store protects.** The store protects what is in it, not the file. Without the master
+key nobody can read a value, or make one that `get` accepts. The file is not sealed as a whole:
+someone who can write to it can remove an entry or put back an older copy, so who may write there
+is yours to decide. `open` does not check the master key — it decrypts nothing. Open with the
+wrong key and `get` fails with `Auth`; a `put` with the wrong key stores that value under that
+key, where only that key reads it, and `rotate` then fails with `Auth` until that entry is deleted.
+
 **One handle per file.** The store reads the whole file into memory and writes the whole file
 back, so two handles on the same file would overwrite each other's writes. Making sure you open a
 file only once at a time is your job. krypto also guards against it: while a handle lives, a second

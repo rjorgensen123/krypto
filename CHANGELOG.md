@@ -71,6 +71,13 @@ encrypted session key followed. The strength of a WinZip AES zip entry is
 read from the AES extra field, found record by record, instead of after the
 first place the bytes `01 99` appear.
 
+### Changed — the docs say what `SecretStore` protects *(2026-11-15)*
+
+`docs/API.md`, `docs/Usage.md`, `docs/Python.md` and the doc comments in `src/store.rs` say
+plainly that a `SecretStore` protects its contents, not the file: the file is not authenticated
+as a whole, and `open` does not check the master key, so a wrong one shows as `Auth` from `get`.
+No code changed.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than
