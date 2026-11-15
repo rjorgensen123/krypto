@@ -574,6 +574,11 @@ fn ed25519_verify(public: &[u8], message: &[u8], signature: &[u8]) -> PyResult<(
 }
 
 #[pyfunction]
+fn ed25519_verify_relaxed(public: &[u8], message: &[u8], signature: &[u8]) -> PyResult<()> {
+    krypto::sign::ed25519_verify_relaxed(public, message, signature).map_err(err)
+}
+
+#[pyfunction]
 fn ecdsa_p256_keypair<'py>(py: Python<'py>) -> PyResult<(SecretBuf, Bound<'py, PyBytes>)> {
     Ok(keypair(
         py,
@@ -741,6 +746,7 @@ fn krypto_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
         s.add_function(wrap_pyfunction!(ed25519_public, s)?)?;
         s.add_function(wrap_pyfunction!(ed25519_sign, s)?)?;
         s.add_function(wrap_pyfunction!(ed25519_verify, s)?)?;
+        s.add_function(wrap_pyfunction!(ed25519_verify_relaxed, s)?)?;
         s.add_function(wrap_pyfunction!(ecdsa_p256_keypair, s)?)?;
         s.add_function(wrap_pyfunction!(ecdsa_p256_public, s)?)?;
         s.add_function(wrap_pyfunction!(ecdsa_p256_sign, s)?)?;

@@ -226,6 +226,24 @@ def test_sign_and_exchange():
     assert plain(exchange.x25519_shared(a, pb)) == plain(exchange.x25519_shared(b, pa))
 
 
+def test_ed25519_verify_and_verify_relaxed():
+    """Both Ed25519 verifiers take a normal signature (0.8.2)."""
+    assert callable(sign.ed25519_verify_relaxed)
+    seed, public = sign.ed25519_keypair()
+    sig = sign.ed25519_sign(seed, b"message")
+    sign.ed25519_verify(public, b"message", sig)
+    sign.ed25519_verify_relaxed(public, b"message", sig)
+    with pytest.raises(k.AuthError):
+        sign.ed25519_verify_relaxed(public, b"other message", sig)
+    # The identity point as key, R = identity, S = 0: a forgery for every message.
+    weak = bytes([1]) + bytes(31)
+    forged = bytes([1]) + bytes(63)
+    for message in (b"msg1", b"msg2"):
+        with pytest.raises(k.AuthError):
+            sign.ed25519_verify(weak, message, forged)
+        sign.ed25519_verify_relaxed(weak, message, forged)
+
+
 def test_encodings_and_utilities():
     assert k.sha256(b"abc").hex() == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     assert hex.encode(b"\x01\xab") == "01ab" and hex.decode("01ab") == b"\x01\xab"

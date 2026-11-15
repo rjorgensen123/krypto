@@ -179,7 +179,13 @@ der = sign.ecdsa_p256_sign(pkcs8, b"message")
 sign.ecdsa_p256_verify(sec1_public, b"message", der)
 ```
 
-The key forms: [Signing and verifying](Usage.md#signing-and-verifying).
+*(0.8.2)* `sign.ed25519_verify` is strict: a weak (small-order) public key, for which anyone can
+make signatures, is an `AuthError`, and a public key that is not canonically encoded is a
+`FormatError`. `sign.ed25519_verify_relaxed` takes the same arguments and only checks that the
+signature equation holds, so it accepts weak keys; use it only when you must accept such keys,
+never to check who signed with a public key you got from someone else.
+
+The key forms, and which verifier to use: [Signing and verifying](Usage.md#signing-and-verifying).
 
 ---
 

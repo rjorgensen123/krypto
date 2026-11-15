@@ -13,6 +13,21 @@ the version and the kind of review, and that the MiMo security audit used
 Cloudflare's `security-audit` skill. They are reviews by AI models, not audits
 by a security firm.
 
+### ⚠ Changed — `ed25519_verify` refuses weak keys; `ed25519_verify_relaxed` is new *(2026-11-15)*
+
+`sign::ed25519_verify` is now strict. A public key of small order (a weak key,
+for which anyone can make signatures that hold without a private key) or an R
+of small order in the signature is `Auth`, and a public key that is not the
+canonical 32-byte encoding of its point is `Format`. Up to 0.8.1 it only
+checked the signature equation, so the identity point as key, with R =
+identity and S = 0, verified for every message. Keys and signatures made by
+krypto verify as before; `krypto-cli verify --alg ed25519` is strict too.
+
+The new `sign::ed25519_verify_relaxed` (`sign.ed25519_verify_relaxed` in
+krypto-py) does what `ed25519_verify` did: it only checks the equation and
+accepts weak keys. It is for a caller that must accept such keys, never for
+checking who signed with a public key from someone else. P-256 is unchanged.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

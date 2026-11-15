@@ -7,6 +7,8 @@
 //!
 //! - **Ed25519**: raw 32-byte seed and raw 32-byte public key, 64-byte
 //!   signature — the form public keys are usually distributed in.
+//!   [`ed25519_verify`] is strict and refuses weak (small-order) keys;
+//!   [`ed25519_verify_relaxed`] accepts them, for a caller that must (0.8.2).
 //! - **ECDSA P-256**: private key as PKCS#8 DER, public key as an uncompressed
 //!   SEC1 point (65 bytes, leading `0x04`), signature as ASN.1 DER over
 //!   SHA-256 — bit-compatible with `ring`'s `ECDSA_P256_SHA256_ASN1`, so a
@@ -60,27 +62,68 @@ pub fn ed25519_sign(seed: &SecretBuf, message: &[u8]) -> Result<[u8; ED25519_SIG
     Ok(key.sign(message).to_bytes())
 }
 
-/// Verify an Ed25519 signature against a raw 32-byte public key.
-/// `Error::Auth` when the signature does not hold; `Error::Format` when the
-/// key or signature has the wrong shape.
-pub fn ed25519_verify(public: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Error> {
-    use ed25519_dalek::Verifier;
+fn ed25519_verifying_key(public: &[u8]) -> Result<ed25519_dalek::VerifyingKey, Error> {
     let pk: &[u8; ED25519_PUBLIC_LEN] = public.try_into().map_err(|_| {
         Error::Format(format!(
             "an Ed25519 public key must be {ED25519_PUBLIC_LEN} bytes, got {}",
             public.len()
         ))
     })?;
-    let key = ed25519_dalek::VerifyingKey::from_bytes(pk)
-        .map_err(|_| Error::Format("invalid Ed25519 public key (not a curve point)".into()))?;
+    ed25519_dalek::VerifyingKey::from_bytes(pk)
+        .map_err(|_| Error::Format("invalid Ed25519 public key (not a curve point)".into()))
+}
+
+fn ed25519_signature(signature: &[u8]) -> Result<ed25519_dalek::Signature, Error> {
     let sig: &[u8; ED25519_SIG_LEN] = signature.try_into().map_err(|_| {
         Error::Format(format!(
             "an Ed25519 signature must be {ED25519_SIG_LEN} bytes, got {}",
             signature.len()
         ))
     })?;
-    key.verify(message, &ed25519_dalek::Signature::from_bytes(sig))
-        .map_err(|_| Error::Auth)
+    Ok(ed25519_dalek::Signature::from_bytes(sig))
+}
+
+/// Verify an Ed25519 signature against a raw 32-byte public key, strictly
+/// (0.8.2). A public key of small order (a weak key, for which anyone can make
+/// signatures), an R of small order in the signature, and a public key that is
+/// not in its one canonical 32-byte encoding are refused, so `Ok` means the
+/// signature was made with the private key that belongs to that public key.
+///
+/// `Error::Auth` when the signature does not hold, or the key or R is of small
+/// order; `Error::Format` when the key or signature has the wrong shape, or
+/// the key is not canonically encoded.
+pub fn ed25519_verify(public: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Error> {
+    let key = ed25519_verifying_key(public)?;
+    // The same point can have more than one 32-byte encoding; only the one
+    // the point encodes back to is accepted.
+    if key.to_edwards().compress().as_bytes()[..] != *public {
+        return Err(Error::Format(
+            "invalid Ed25519 public key (not the canonical encoding of its point)".into(),
+        ));
+    }
+    let sig = ed25519_signature(signature)?;
+    key.verify_strict(message, &sig).map_err(|_| Error::Auth)
+}
+
+/// Verify an Ed25519 signature against a raw 32-byte public key, relaxed
+/// (0.8.2). It only checks that the signature equation holds: weak
+/// (small-order) keys, an R of small order and non-canonical key encodings
+/// are not refused, and for a weak key anyone can make signatures without a
+/// private key.
+///
+/// Use it only where such keys must be accepted, never to check who signed
+/// with a public key that came from someone else; that is
+/// [`ed25519_verify`]. `Error::Auth` when the signature does not hold;
+/// `Error::Format` when the key or signature has the wrong shape.
+pub fn ed25519_verify_relaxed(
+    public: &[u8],
+    message: &[u8],
+    signature: &[u8],
+) -> Result<(), Error> {
+    use ed25519_dalek::Verifier;
+    let key = ed25519_verifying_key(public)?;
+    let sig = ed25519_signature(signature)?;
+    key.verify(message, &sig).map_err(|_| Error::Auth)
 }
 
 // --------------------------------------------------------------------------- //

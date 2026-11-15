@@ -331,7 +331,8 @@ pub const ED25519_SIG_LEN: usize = 64;
 pub fn ed25519_keypair() -> Result<(SecretBuf, [u8; 32]), Error>;
 pub fn ed25519_public(seed: &SecretBuf) -> Result<[u8; 32], Error>;
 pub fn ed25519_sign(seed: &SecretBuf, message: &[u8]) -> Result<[u8; 64], Error>;
-pub fn ed25519_verify(public: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Error>;
+pub fn ed25519_verify(public: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Error>;   // strict (0.8.2)
+pub fn ed25519_verify_relaxed(public: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Error>;   // 0.8.2
 
 pub fn ecdsa_p256_keypair() -> Result<(SecretBuf, Vec<u8>), Error>;   // (PKCS#8, SEC1 65B)
 pub fn ecdsa_p256_public(pkcs8: &SecretBuf) -> Result<Vec<u8>, Error>;
@@ -342,6 +343,16 @@ pub fn ecdsa_p256_verify(public_sec1: &[u8], message: &[u8], sig_der: &[u8]) -> 
 A signature that does not hold → `Auth`. Malformed key/signature → `Format`. Signing is RFC 6979
 deterministic; the verifier also accepts randomized signatures (same wire form). Tested against
 RFC 8032 (TEST 1+2) and RFC 6979 A.2.5.
+
+*(0.8.2; up to 0.8.1, `ed25519_verify` was what `ed25519_verify_relaxed` is now)* **Two Ed25519
+verifiers.** `ed25519_verify` is strict: a public key of small order (a *weak* key) or an R of
+small order in the signature → `Auth`, and a public key that is not the canonical 32-byte encoding
+of its point → `Format`. So `Ok` means the signature was made with the private key that belongs to
+that public key. `ed25519_verify_relaxed` only checks that the signature equation holds: it does
+not refuse weak keys, an R of small order or non-canonical key encodings, and for a weak key anyone
+can make signatures that hold, without a private key. Use it only where such keys must be
+accepted, never to check who signed with a public key that came from someone else. Keys from
+`ed25519_keypair` and signatures from `ed25519_sign` verify with both.
 
 ---
 

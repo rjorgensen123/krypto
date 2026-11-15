@@ -309,6 +309,15 @@ sign::ecdsa_p256_verify(&sec1_public, message, &der)?;
 Private keys live in `SecretBuf` like everything else secret. A malformed key/signature gives
 `Format`; a signature that does not hold gives `Auth` — the same split as everywhere else.
 
+*(0.8.2)* **Which Ed25519 verifier to use:** `ed25519_verify`. It refuses the weak public keys —
+the few keys of small order, for which anyone can make signatures that hold, without a private
+key — with `Auth`, and a public key that is not in its one canonical encoding with `Format`. So a
+yes means the signature was made with the private key behind that public key.
+`ed25519_verify_relaxed` takes the same arguments and only checks that the signature equation
+holds, so it accepts weak keys. It is there for a caller that must accept such keys; never use it
+to check who signed with a public key you got from someone else. Keys and signatures made by krypto
+verify with both.
+
 *In Python: [Signing and verifying](Python.md#signing-and-verifying).*
 
 ## Agreeing on a key with a peer (X25519)
