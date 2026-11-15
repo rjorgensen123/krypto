@@ -19,12 +19,16 @@ jobs:
     steps:
       # Checkout without actions/checkout, which is fetched from github. Clone
       # directly with the job token instead; rust:1-bookworm has git + base64.
+      # The token is passed through the environment, so it is not written into
+      # the script text.
       - name: Checkout (no third-party action)
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           git config --global --add safe.directory '*'
           git init -q .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
+          AUTH=$(printf '%s' "x-access-token:${CHECKOUT_TOKEN}" | base64 -w0)
           git -c http.extraheader="Authorization: basic ${AUTH}" \
               fetch -q --depth 1 origin "${GITHUB_SHA}"
           git checkout -q --detach FETCH_HEAD
@@ -56,11 +60,13 @@ jobs:
       options: --ulimit memlock=-1:-1
     steps:
       - name: Checkout (no third-party action)
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           git config --global --add safe.directory '*'
           git init -q .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
+          AUTH=$(printf '%s' "x-access-token:${CHECKOUT_TOKEN}" | base64 -w0)
           git -c http.extraheader="Authorization: basic ${AUTH}" \
               fetch -q --depth 1 origin "${GITHUB_SHA}"
           git checkout -q --detach FETCH_HEAD
@@ -85,11 +91,13 @@ jobs:
       options: --ulimit memlock=-1:-1
     steps:
       - name: Checkout (no third-party action)
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           git config --global --add safe.directory '*'
           git init -q .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
+          AUTH=$(printf '%s' "x-access-token:${CHECKOUT_TOKEN}" | base64 -w0)
           git -c http.extraheader="Authorization: basic ${AUTH}" \
               fetch -q --depth 1 origin "${GITHUB_SHA}"
           git checkout -q --detach FETCH_HEAD
@@ -129,11 +137,13 @@ jobs:
       image: rust:1-bookworm
     steps:
       - name: Checkout (no third-party action)
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           git config --global --add safe.directory '*'
           git init -q .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
+          AUTH=$(printf '%s' "x-access-token:${CHECKOUT_TOKEN}" | base64 -w0)
           git -c http.extraheader="Authorization: basic ${AUTH}" \
               fetch -q --depth 1 origin "${GITHUB_SHA}"
           git checkout -q --detach FETCH_HEAD
@@ -168,11 +178,13 @@ jobs:
       image: rust:1-bookworm
     steps:
       - name: Checkout (no third-party action)
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           git config --global --add safe.directory '*'
           git init -q .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
+          AUTH=$(printf '%s' "x-access-token:${CHECKOUT_TOKEN}" | base64 -w0)
           git -c http.extraheader="Authorization: basic ${AUTH}" \
               fetch -q --depth 1 origin "${GITHUB_SHA}"
           git checkout -q --detach FETCH_HEAD
@@ -193,11 +205,13 @@ jobs:
       options: --ulimit memlock=-1:-1
     steps:
       - name: Checkout (no third-party action)
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
         run: |
           git config --global --add safe.directory '*'
           git init -q .
           git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
-          AUTH=$(printf '%s' "x-access-token:${{ github.token }}" | base64 -w0)
+          AUTH=$(printf '%s' "x-access-token:${CHECKOUT_TOKEN}" | base64 -w0)
           git -c http.extraheader="Authorization: basic ${AUTH}" \
               fetch -q --depth 1 origin "${GITHUB_SHA}"
           git checkout -q --detach FETCH_HEAD

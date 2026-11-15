@@ -10,6 +10,10 @@ on:
     branches: [main]
   pull_request:
 
+# The job token can only read the repository; the jobs need nothing more.
+permissions:
+  contents: read
+
 jobs:
   build-test:
     runs-on: ubuntu-latest
@@ -17,7 +21,11 @@ jobs:
       image: rust:1-bookworm
       options: --ulimit memlock=-1:-1
     steps:
+      # The token is not kept in the checkout for the steps that follow, which
+      # build and run code. The same holds for every job.
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Add clippy + rustfmt
         run: rustup component add clippy rustfmt
@@ -46,6 +54,8 @@ jobs:
       options: --ulimit memlock=-1:-1
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Install the declared rust-version
         run: |
@@ -67,6 +77,8 @@ jobs:
       options: --ulimit memlock=-1:-1
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # Pinned, like the Rust side: krypto-py/requirements-ci.txt fixes maturin,
       # pytest, and cryptography and argon2-cffi, which ARE the independent
@@ -101,6 +113,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       # A pinned binary rather than a third-party action. An action runs with
       # access to this repository and can change under its own tag; the download
@@ -131,6 +145,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Nightly + miri
         run: |

@@ -159,6 +159,14 @@ download is now checked against a SHA-256 kept in the workflow before it is
 unpacked, so a file that has changed fails the job instead of being run. The
 checksum is replaced together with the version. The crate is unchanged.
 
+### Changed — the CI job token is read-only and kept away from the build *(2026-11-15)*
+
+On GitHub the workflow states that the job token can only read the repository,
+and the checkout no longer leaves the token in the working tree for the steps
+that build and run code. On Gitea the checkout step gets the token through its
+environment instead of in the script text. The jobs do the same as before, and
+the crate is unchanged.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than
