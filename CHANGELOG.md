@@ -111,6 +111,16 @@ be opened again. A test checks that `password.derive_key` refuses a
 `bytearray` or `memoryview` salt: the salt is borrowed while other threads
 run, so it must stay immutable.
 
+### Fixed — `hex` and `base64` decode errors no longer show the input *(2026-11-15)*
+
+The `Format` error for an invalid character in `hex::decode`,
+`base64::decode` and `base64::decode_nopad` no longer names the character.
+It did before, so a logged error could hold one character of, for example,
+a hex-encoded key. The message names neither the character nor its position,
+only what is accepted: `invalid hex character — canonical hex is lowercase
+[0-9a-f]` and `invalid base64 character (STANDARD alphabet, no whitespace)`.
+The text of `FormatError` in krypto-py changes with it; the error kind does not.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

@@ -46,10 +46,11 @@ fn nibble(c: u8) -> Result<u8, Error> {
         b'0'..=b'9' => Ok(c - b'0'),
         b'a'..=b'f' => Ok(c - b'a' + 10),
         // Uppercase is rejected on purpose: canonical hex has ONE spelling.
-        _ => Err(Error::Format(format!(
-            "invalid hex character {:?} — canonical hex is lowercase [0-9a-f]",
-            c as char
-        ))),
+        // The message names neither the character nor where it is (0.8.2):
+        // the input may be a key, and either would tell something about it.
+        _ => Err(Error::Format(
+            "invalid hex character — canonical hex is lowercase [0-9a-f]".into(),
+        )),
     }
 }
 

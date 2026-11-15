@@ -119,10 +119,11 @@ fn sextet(c: u8) -> Result<u8, Error> {
         b'+' => Ok(62),
         b'/' => Ok(63),
         // Whitespace too: canonical base64 has ONE spelling, unbroken.
-        _ => Err(Error::Format(format!(
-            "invalid base64 character {:?} (STANDARD alphabet, no whitespace)",
-            c as char
-        ))),
+        // The message names neither the character nor where it is (0.8.2):
+        // the input may be secret, and either would tell something about it.
+        _ => Err(Error::Format(
+            "invalid base64 character (STANDARD alphabet, no whitespace)".into(),
+        )),
     }
 }
 

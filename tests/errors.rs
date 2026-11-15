@@ -57,3 +57,46 @@ fn every_error_says_what_went_wrong_and_nothing_secret() {
         );
     }
 }
+
+/// `hex` and `base64` decoding (0.8.2): the message about an invalid character
+/// names neither the character nor its position, since the input may be a key.
+/// Each probe is the invalid character as the input has it, or as a message
+/// could show its byte (`Ã` for the first byte of `é`, `\u{1b}` for ESC), and
+/// none of them occurs in the fixed message text.
+#[test]
+fn decode_errors_show_nothing_of_the_input() {
+    use krypto::{base64, hex};
+    const HEX: &str = "invalid hex character";
+    const B64: &str = "invalid base64 character";
+
+    let cases: [(Error, &str, &[&str]); 7] = [
+        (hex::decode("ab12CDef").unwrap_err(), HEX, &["C"]),
+        (hex::decode("abé").unwrap_err(), HEX, &["é", "Ã"]),
+        (
+            hex::decode("ab\u{1b}[31mx").unwrap_err(),
+            HEX,
+            &["\u{1b}", "\\u{1b}"],
+        ),
+        (
+            base64::decode("Zm9\nYmFy").unwrap_err(),
+            B64,
+            &["\n", "\\n"],
+        ),
+        (base64::decode("Zm-vYmFy").unwrap_err(), B64, &["-"]),
+        (base64::decode_nopad("Zm_v").unwrap_err(), B64, &["_"]),
+        (base64::decode("Zm=vYmFy").unwrap_err(), B64, &["="]),
+    ];
+
+    let mut texts = std::collections::BTreeSet::new();
+    for (e, says, probes) in cases {
+        assert!(matches!(e, Error::Format(_)), "{e:?} should be Format");
+        let msg = e.to_string();
+        assert!(msg.contains(says), "{msg:?} should say {says:?}");
+        for probe in probes {
+            assert!(!msg.contains(probe), "{msg:?} shows {probe:?}");
+        }
+        texts.insert(msg);
+    }
+    // One text per decoder, wherever the invalid character is (index 2 to 4).
+    assert_eq!(texts.len(), 2, "{texts:?}");
+}
