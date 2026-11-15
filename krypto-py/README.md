@@ -25,12 +25,12 @@ blob = krypto.seal(key, master.key_id(), secret, krypto.Alg.Aegis256)
 back = krypto.open(key, blob)                                 # a SecretBuf: the plaintext stays locked
 ```
 
-Errors are exceptions, one per kind, all under `krypto_py.Error`. `AuthError` means tampering or
-the wrong key, and is the one to alert on.
+Errors are exceptions, one per kind, all under `krypto_py.Error`. `AuthError` means tampering, the
+wrong key or the wrong password, and is the one to alert on.
 
-The secrets live in krypto's locked memory, kept out of core dumps and wiped when dropped. What
-Python itself holds — the `bytes` you pass in, and the copies `expose` hands out — is ordinary
-Python memory, neither locked nor wiped.
+The secrets live in krypto's locked memory, wiped when dropped and, on Linux, kept out of core
+dumps. What Python itself holds — the `bytes` you pass in, and the copies `expose` hands out — is
+ordinary Python memory, neither locked nor wiped.
 
 - **[How to use it](https://github.com/rjorgensen123/krypto/blob/main/docs/Python.md)**, with
   examples

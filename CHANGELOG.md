@@ -121,6 +121,24 @@ only what is accepted: `invalid hex character — canonical hex is lowercase
 [0-9a-f]` and `invalid base64 character (STANDARD alphabet, no whitespace)`.
 The text of `FormatError` in krypto-py changes with it; the error kind does not.
 
+### Changed — documentation *(2026-11-15)*
+
+- The docs say that `close_inherited_fds` also closes the lock of an open
+  `SecretStore`, and that after a `fork` without `exec` parent and child share
+  it until both handles are gone, so both can overwrite each other's writes:
+  call it, or fork, before opening a store. It closes every descriptor above
+  stderr, not only inherited ones.
+- How much locked memory krypto needs: a non-empty secret locks at least one
+  page, about 16 at a 64 KiB `RLIMIT_MEMLOCK`, `Error::Hardening` at the limit,
+  which is raised outside krypto; the test suite needs more than 6 MiB.
+- Python: a `bytearray` given to `SecretBuf.from_vec` is zeroed, and consumed
+  objects stay consumed, also when the operation itself fails; a panic surfaces
+  as `pyo3_runtime.PanicException`, which `except Exception` does not catch.
+- The examples seal under `master.key_id()` and define their salt; the
+  krypto-py README covers a wrong password and says core dumps are excluded on
+  Linux; `docs/Cli.md` says `krypto-cli` warns when hardening fails; the
+  comments on Miri and on what `tests/docs.rs` checks say what they cover.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

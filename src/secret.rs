@@ -14,8 +14,9 @@ use crate::ffi;
 /// - `Debug`/`Display` only ever show `SecretBuf([REDACTED], len=N)`.
 /// - Plaintext is only reachable through [`SecretBuf::expose`].
 /// - Each buffer has whole memory pages of its own, locked in RAM and, on
-///   Linux, kept out of core dumps (0.7.2). It therefore counts at least one
-///   page (usually 4 KiB) against `RLIMIT_MEMLOCK`.
+///   Linux, kept out of core dumps (0.7.2). A non-empty buffer therefore
+///   counts at least one page (usually 4 KiB) against `RLIMIT_MEMLOCK`; an
+///   empty one counts none.
 pub struct SecretBuf {
     pages: ffi::LockedPages,
 }

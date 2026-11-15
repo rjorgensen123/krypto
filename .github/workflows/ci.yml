@@ -117,10 +117,14 @@ jobs:
       - name: cargo deny check
         run: cargo deny check
 
-  # Miri over the unsafe/ffi layer. Miri runs no real syscalls — mlock, madvise
-  # and prctl are no-ops under it (src/ffi.rs) — so what it verifies is the
-  # crate's own pointer and memory handling around them: the `secret` module
-  # alone. aead and store cannot run under miri (aegis is C behind FFI).
+  # Miri runs the `secret` and `harden` tests and checks them for undefined
+  # behaviour. It does not see the unsafe/ffi layer: under Miri, src/ffi.rs
+  # compiles none of its unsafe code — LockedPages is an ordinary heap buffer
+  # and the process calls are no-ops — so mmap, mlock, madvise, the guard pages
+  # and prctl are not checked here. What it covers is the `secret` module
+  # (SecretBuf/SecretString) over that heap buffer, and the code of the
+  # dependencies those tests run. aead and store cannot run under miri (aegis
+  # is C behind FFI).
   miri:
     runs-on: ubuntu-latest
     steps:

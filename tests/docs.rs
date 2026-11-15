@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
-//! Doc guard (0.6.0): every public name in the crate must appear in the
-//! shipped reference doc (`docs/API.md`). A surface
-//! change that skips the docs fails `cargo test` — the same fence
+//! Doc guard (0.6.0): the names the crate exports at its root, the
+//! functions, constants and types of its public modules, and the methods
+//! of `SecretStore` (the test reads `src/store.rs` too) must appear in
+//! the shipped reference doc (`docs/API.md`), and every `krypto-cli`
+//! command in `docs/Cli.md` (0.8.0). It checks names only — not the
+//! methods of the other types, their signatures, or what the text says —
+//! and fails `cargo test` when one is missing: the same fence
 //! `tests/version.rs` puts around VERSION/CHANGELOG.
 
 use std::collections::BTreeSet;

@@ -52,6 +52,9 @@ is `4`, not `3`. The key id is not authenticated until the blob is opened, so a 
 was changed is `4` too. Messages go to stderr in English, and never carry key material or
 plaintext.
 
+At start `krypto-cli` hardens its process with `harden_process`. If that fails, it writes a
+warning to stderr and goes on.
+
 Until 0.7.3 the tool had 21 commands, and its exit codes were a contract; the commands that went
 are done with the crate or `krypto-py`.
 

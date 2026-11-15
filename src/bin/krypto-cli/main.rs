@@ -37,7 +37,7 @@ use zeroize::Zeroizing;
 
 mod inspect;
 
-/// The commands. `tests/docs.rs` reads this list and checks that `docs/API.md`
+/// The commands. `tests/docs.rs` reads this list and checks that `docs/Cli.md`
 /// names each one.
 const COMMANDS: [&str; 9] = [
     "version", "inspect", "keyid", "seal", "open", "mac", "sha256", "verify", "bench",

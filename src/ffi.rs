@@ -12,8 +12,9 @@ use std::path::Path;
 // Under Miri the libc syscalls below are unsupported: `LockedPages` falls back
 // to an ordinary heap buffer and the process calls become no-ops. Miri runs no
 // real process, so there is nothing to lock or exclude from dumps.
-// The point of the Miri run is UB-detection in the crate's own memory and
-// pointer handling — not in the kernel calls.
+// The Miri run therefore checks none of the unsafe code in this module: it
+// checks the `secret` module over that heap buffer, and the dependency code
+// its tests run.
 
 /// The memory of one secret, on pages of its own (0.7.2).
 ///

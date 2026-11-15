@@ -37,6 +37,9 @@ krypto.close_inherited_fds()            # the interpreter's own descriptors too:
 krypto.drop_filesystem("/var/empty")    # irreversible; needs privileges
 ```
 
+`close_inherited_fds` also closes the lock of a `SecretStore` that is already open, after which a
+second `open` of that file succeeds: call it before opening a store.
+
 Why, and in what order: [Getting started](Usage.md#getting-started).
 
 ---
@@ -54,7 +57,7 @@ length = password.expose_str(len)    # the function gets the text and its result
 The secret itself lives in Rust's locked memory, as in Rust. Two things are Python's own:
 
 - What you pass in stays as Python keeps it. A `str` or `bytes` cannot be wiped; a `bytearray`
-  given to `SecretBuf.from_vec` is zeroed, so prefer that.
+  given to `SecretBuf.from_vec` is zeroed, also when the call fails, so prefer that.
 - `expose` and `expose_str` hand the function a Python copy, which is neither locked nor wiped.
   Expose only where you must, and do not keep what you get.
 
@@ -69,7 +72,7 @@ process: [Secrets in memory](Usage.md#secrets-in-memory).
 master = krypto.MasterKey.from_secret_file("/run/secrets/master_key")
 
 key = krypto.SecretBuf.random(32)
-master = krypto.MasterKey.from_bytes(key)   # consumes `key`: using it afterwards is a ValueError
+master = krypto.MasterKey.from_bytes(key)   # consumes `key`, also when it fails: using it afterwards is a ValueError
 ```
 
 ### Derive one key per purpose
@@ -126,7 +129,14 @@ store.delete("api-token")
 In Rust the store borrows the master key; here it keeps the `MasterKey` object alive for as long as
 it lives. One handle per file holds as in Rust, with the same limits: a second `open` of the same
 file through the same path fails with `IoError` while the first lives, and the lock goes when the
-handle does (`del store`). `rotate` returns the new handle and consumes the old one:
+handle does (`del store`). The lock does not protect against two things, and neither gives an
+error. `close_inherited_fds` closes it, after which a second `open` succeeds; call it before
+opening a store. After `os.fork()`, also in `multiprocessing` with the fork start method, parent
+and child share the lock, and it is held until both copies of the handle are gone. Both can write
+through their copies, and the last to write overwrites what the other wrote. Open the store after
+the fork, or use it in one process only.
+
+`rotate` returns the new handle and consumes the old one:
 
 ```python
 new_master = krypto.MasterKey.from_bytes(krypto.SecretBuf.random(32))
@@ -214,6 +224,7 @@ peer_priv, peer_pub = exchange.x25519_keypair()   # in real use, peer_pub comes 
 
 material = exchange.x25519_shared(my_priv, peer_pub)
 master = krypto.MasterKey.from_bytes(material)
+salt = b"my-app-salt"                              # the same on both sides
 key = master.derive(b"my-app/envelope/v1", salt)   # always derive before use
 ```
 
@@ -257,8 +268,12 @@ except krypto.Error:
     ...   # everything else krypto raises
 ```
 
-Besides these, using a consumed object (after `MasterKey.from_bytes` or `rotate`) is a `ValueError`.
-None of the messages carry key material or plaintext.
+Besides these, using a consumed object (after `MasterKey.from_bytes` or `rotate`, also when the
+operation itself failed) is a `ValueError`; an argument of the wrong type is rejected with
+`TypeError` before anything is consumed. None of the messages carry key material or plaintext.
+
+A panic in the Rust code surfaces as `pyo3_runtime.PanicException`. It derives from
+`BaseException`, not `Exception`, so neither `except krypto.Error` nor `except Exception` catches it.
 
 ---
 

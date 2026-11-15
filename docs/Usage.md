@@ -30,7 +30,7 @@ failing hard if it cannot deliver:
 
 ```rust
 krypto::no_new_privs()?;          // never gain privileges — safe for everyone, call it early
-krypto::close_inherited_fds()?;   // close everything inherited above stderr — BEFORE opening your own files
+krypto::close_inherited_fds()?;   // close everything above stderr — BEFORE opening your own files
 // … read your key material …
 krypto::drop_filesystem("/var/empty")?; // chroot: the disk "disappears" — AFTER key reading
 ```
@@ -40,7 +40,9 @@ root can write to. If it fails, the root is as it was, and so is the working dir
 stepping back out of the directory fails too; then the process stays in it, and the error says so.
 After it krypto needs no filesystem — randomness comes straight from the operating system, not from
 `/dev`. And `close_inherited_fds` also closes sockets you inherited *on purpose* (e.g. socket
-activation) — which is why it is its own choice and not part of `harden_process`.
+activation) — which is why it is its own choice and not part of `harden_process`. It closes the
+lock of a [store](#a-small-encrypted-store-on-disk) you have already opened too, after which a
+second `open` of that file succeeds, so call it before opening a store.
 
 *In Python: [Getting started](Python.md#getting-started).*
 
@@ -72,11 +74,13 @@ region, not in a variable that lives on.
 `SecretBuf([REDACTED], len=32)`. That is not something you can turn off.
 
 **Locked memory has a limit.** Each secret has memory pages of its own that are locked in RAM, so
-every secret alive at the same time counts at least one page (usually 4 KiB) against the process's
-locked-memory limit (`RLIMIT_MEMLOCK`, `ulimit -l`), decrypted plaintexts and derived keys
-included. At a limit of 8 MiB that is about 2000 at once. When the limit is reached, creating a
-secret fails with `Hardening`: raise the limit (in Docker, `--ulimit memlock=…`) or keep fewer
-secrets alive at once.
+every non-empty secret alive at the same time counts at least one page (usually 4 KiB) against the
+process's locked-memory limit (`RLIMIT_MEMLOCK`, `ulimit -l`), decrypted plaintexts and derived
+keys included; an empty one counts none. At a limit of 8 MiB that is about 2000 at once; at
+64 KiB, a common default, about 16. The default differs between systems. When the limit is
+reached, creating a secret fails with `Hardening`: raise the limit, which is set outside krypto
+(`ulimit -l`, the service manager, or in Docker `--ulimit memlock=…`), or keep fewer secrets alive
+at once. On Linux, a process with `CAP_IPC_LOCK` is not limited by it.
 
 *In Python: [Secrets in memory](Python.md#secrets-in-memory).*
 
@@ -228,7 +232,12 @@ never gets stuck. The same file opened through another name, such as a link, tak
 a regular file, such as a FIFO, is not used as the lock: `open` fails with `Io` either way, and a
 FIFO there does not make it wait. There is no lock only on a read-only file system, or when there
 is no lock file and you may not create one in the directory. The lock does not keep out someone
-who can write in the directory: they can remove or replace the lock file.
+who can write in the directory: they can remove or replace the lock file. Nor does it hold in two
+cases inside your program, and neither gives an error. `close_inherited_fds` closes it, after
+which a second `open` succeeds: call it before opening a store. After a `fork` without `exec`,
+parent and child share the lock, and it is held until both copies of the handle are gone. Both can
+write through their copies, and the last to write overwrites what the other wrote: open the store
+after the fork, or use it in one process only.
 
 **Rules for names:** non-empty, at most 512 bytes, printable ASCII only (`[\x20-\x7e]`). Names are
 not secret — they are listed by `list()` and may end up in the caller's log. A name with a newline
@@ -362,6 +371,7 @@ let (my_priv, my_pub) = exchange::x25519_keypair()?;
 // ... exchange public keys ...
 let material = exchange::x25519_shared(&my_priv, &peer_pub)?;
 let master = krypto::MasterKey::from_bytes(material)?;
+let salt = b"my-app-salt";                               // the same on both sides
 let key = master.derive(b"my-app/envelope/v1", salt)?;   // HKDF before use — always
 ```
 

@@ -30,9 +30,10 @@ own is implemented**.
 - **Docs (ship with the crate):** overview [`docs/Home.md`](docs/Home.md) · usage guide
   [`docs/Usage.md`](docs/Usage.md) (Rust) and [`docs/Python.md`](docs/Python.md) (Python) ·
   **API contract** [`docs/API.md`](docs/API.md), one for both — every public name; `tests/docs.rs`
-  checks that it names the root exports and the functions, constants and types of the public
-  modules · the test tool `krypto-cli` [`docs/Cli.md`](docs/Cli.md), and what its `inspect`
-  recognizes [`docs/Inspect.md`](docs/Inspect.md)
+  checks that it names the root exports, the functions, constants and types of the public modules,
+  and the methods of `SecretStore` (names only) · the test tool `krypto-cli`
+  [`docs/Cli.md`](docs/Cli.md), where the same test checks that every command is named, and what
+  its `inspect` recognizes [`docs/Inspect.md`](docs/Inspect.md)
 - **Changes:** [`CHANGELOG.md`](CHANGELOG.md) · **Version:** see [`VERSION`](VERSION)
   (kept in lockstep with `Cargo.toml` by `tests/version.rs`)
 
@@ -76,7 +77,7 @@ fn main() -> Result<(), krypto::Error> {
     let key = master.derive(b"my-app/tokens/v1", b"per-store-salt")?;
 
     let secret = krypto::SecretBuf::from_vec(b"api-token".to_vec())?;
-    let blob = krypto::seal(&key, &[0u8; 16], &secret, krypto::Alg::Aegis256)?;
+    let blob = krypto::seal(&key, &master.key_id()?, &secret, krypto::Alg::Aegis256)?;
     let back = krypto::open(&key, &blob)?;                // SecretBuf — plaintext stays fenced
     back.expose(|b| assert_eq!(b, b"api-token"));
     Ok(())
@@ -95,6 +96,9 @@ itself holds; the API contract says exactly where. The bundled **`krypto-cli`** 
 for checking from a shell what they made; it is not a product.
 
 ## Test
+
+One test holds a 6 MiB secret in locked memory, so `cargo test` needs a locked-memory limit
+(`RLIMIT_MEMLOCK`, `ulimit -l`) above 6 MiB.
 
 ```sh
 cargo test                     # incl. official AEAD/signature/DH vectors, that the memory protection and

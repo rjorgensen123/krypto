@@ -41,7 +41,7 @@ The curiosity behind it comes from work on data-plane confidentiality — see
 | **Sign and verify** | Ed25519 and ECDSA P-256 — prove a message came from you |
 | **Agree on a key with a peer** | X25519 — the foundation under sealed envelopes |
 | **The small utilities everyone needs** | canonical hex, plain SHA-256, constant-time comparison, randomness for non-secrets |
-| **Tighten the process itself** | memory, privileges, inherited file descriptors — and finally the whole filesystem. Each step is one call |
+| **Tighten the process itself** | memory, privileges, open file descriptors — and finally the whole filesystem. Each step is one call |
 
 All of it is there from Rust and from Python. `krypto-py` is the same API in Python, with the
 same names, running the same Rust code inside, so what one seals, the other opens. A small helper,

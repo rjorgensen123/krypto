@@ -37,8 +37,8 @@ pub fn no_new_privs() -> Result<(), Error> {
     ffi::no_new_privs()
 }
 
-/// Close every inherited file descriptor above stderr, in one call
-/// (`close_range(3, MAX)` — no `/proc` needed).
+/// Close every file descriptor above stderr, inherited or the process's
+/// own, in one call (`close_range(3, MAX)` — no `/proc` needed).
 ///
 /// A descriptor leaked from the parent — a log file, a socket, someone
 /// else's pipe — is both an information leak and an attack surface.
@@ -49,6 +49,9 @@ pub fn no_new_privs() -> Result<(), Error> {
 ///   systemd socket activation). That is why this is a separate call and
 ///   not part of [`harden_process`] — the service decides.
 /// - Call it early, before the service opens its own files and sockets.
+/// - It also closes the lock of a [`SecretStore`](crate::SecretStore) that
+///   is already open, after which a second `open` of that file succeeds:
+///   call it before opening a store.
 ///
 /// Requires Linux 5.9+; on an older kernel the call fails — fail-closed,
 /// like everything in this module.

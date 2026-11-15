@@ -72,10 +72,15 @@ Owned byte buffer in locked memory. Zeroized when dropped.
 
 *(0.7.2)* Each buffer has whole memory pages of its own, shared with nothing else: they are locked
 in RAM and, on Linux, excluded from core dumps, with an inaccessible guard page on each side. A
-buffer therefore counts at least one page (usually 4 KiB) against `RLIMIT_MEMLOCK`, however short
-it is. If the pages cannot be mapped, locked or excluded from dumps, construction fails with
-`Error::Hardening`. Plaintexts from `open` and `SecretStore::get`, and keys such as `MasterKey` and
-`DerivedKey`, hold a buffer too and count while they live.
+non-empty buffer therefore counts at least one page (usually 4 KiB) against `RLIMIT_MEMLOCK`,
+however short it is; an empty one counts none. If the pages cannot be mapped, locked or excluded
+from dumps, construction fails with `Error::Hardening`. Plaintexts from `open` and
+`SecretStore::get`, and keys such as `MasterKey` and `DerivedKey`, hold a buffer too and count
+while they live. The limit is set outside krypto, and its default differs between systems: at
+64 KiB, a common default, and with 4 KiB pages, about 16 non-empty buffers of up to one page each
+can be alive at once. When it is reached, locking fails, and so does construction, with
+`Error::Hardening`. Raise it outside krypto, with `ulimit -l` or in the service manager; on Linux,
+a process with `CAP_IPC_LOCK` is not limited by it.
 
 ```rust
 impl SecretBuf {
@@ -292,7 +297,12 @@ as the lock: `open` fails with `Error::Io` either way, and a FIFO there does not
 `open` goes ahead without a lock only on a read-only file system, or when there is no lock file and
 the process may not create one in the directory, where a write could not create its tmp file
 either. The lock does not keep out someone who can write in the directory: they can remove or
-replace the lock file. On a network filesystem the lock may not hold between machines.
+replace the lock file. On a network filesystem the lock may not hold between machines. Nor does
+the guard hold in two cases inside the program, and neither gives an error. `close_inherited_fds`
+closes the lock, after which a second `open` of the file succeeds: call it before opening a store.
+After a `fork` without `exec`, parent and child share the lock, and it is held until both copies of
+the handle are gone. Both can write through their copies, and the last to write overwrites what the
+other wrote: open the store after the fork, or use it in one process only.
 
 `rotate` *(0.6.0)* re-encrypts the whole store under a new master key: everything is decrypted
 with the old one FIRST (if anything fails, the file is untouched), and a completely new file
@@ -486,6 +496,10 @@ back out of the directory fails too; then it stays in the directory, and the err
 the chroot krypto needs no filesystem: randomness comes from the `getrandom` syscall, and
 AEAD/KDF/signing/passwords touch no files.
 
+`close_inherited_fds` also closes the lock of a
+[`SecretStore`](#secretstore--encrypted-store-on-file) that is already open, after which a second
+`open` of that file succeeds: call it before opening a store.
+
 Hardening is process-local: it protects the process that calls it. *(0.8.0)* From Python,
 `krypto-py` hardens the Python process with these same functions.
 
@@ -554,7 +568,7 @@ How the Rust forms read in Python:
 | `VERSION` | `VERSION`, and the same value as `__version__` |
 | `SecretBuf::len`, `SecretString::len` | `len()`, and also Python's `len(secret)` |
 | `Alg::Aegis256`, `Preset::High`, … | `Alg.Aegis256`, `password.Preset.High`, …; both compare with `==`, though Rust's `Preset` has no `PartialEq` |
-| A value taken by value: `MasterKey::from_bytes(SecretBuf)`, `SecretStore::rotate(self, …)` | The object is consumed; using it afterwards is a `ValueError` |
+| A value taken by value: `MasterKey::from_bytes(SecretBuf)`, `SecretStore::rotate(self, …)` | The object is consumed, also when the operation itself fails; using it afterwards is a `ValueError`. An argument of the wrong type is rejected with `TypeError` before anything is consumed |
 | `expose(\|b\| …)`, `expose_str(\|s\| …)` | `expose(f)`, `expose_str(f)`: `f` is called with a copy, and what it returns is returned |
 | `SecretStore<'a>` borrows the `MasterKey` | `SecretStore` keeps the `MasterKey` object alive |
 
@@ -563,7 +577,7 @@ How the Rust forms read in Python:
 | | Rust | Python |
 |---|---|---|
 | `SecretBuf`, `SecretString`, `MasterKey`, `DerivedKey`, and in a `SecretStore` the keys and the plaintext it returns | In locked memory, kept out of core dumps, guard pages, wiped on drop; a store's names and sealed blobs are in ordinary memory | The same: the objects hold Rust memory |
-| What goes in | Moved in, or zeroized by `from_vec` | Copied in. The `bytes` or `str` passed stays as Python keeps it, neither locked nor wiped; a `bytearray` given to `SecretBuf.from_vec` is zeroed |
+| What goes in | Moved in, or zeroized by `from_vec` | Copied in. The `bytes` or `str` passed stays as Python keeps it, neither locked nor wiped; a `bytearray` given to `SecretBuf.from_vec` is zeroed, also when the call fails |
 | What comes out | Seen inside the closure, in locked memory | `expose` and `expose_str` hand `f` a Python copy, neither locked nor wiped. `open` and `get` return a `SecretBuf`, so plaintext stays locked until exposed |
 | Locked memory | Counted against `RLIMIT_MEMLOCK` of the process | The same, in the Python process |
 | `fork` | The child's copies of locked pages are not locked | The same |
