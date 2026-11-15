@@ -257,7 +257,7 @@ fn key_id_rejects_invalid_blobs() {
 /// key_id must still yield `Auth` from `open`, not a mis-decrypt.
 #[test]
 fn tampered_key_id_reads_back_but_open_still_fails() {
-    let mk = test_master("key-id");
+    let mk = test_master("key-id-tampered");
     let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
     let secret = SecretBuf::from_vec(b"secret".to_vec()).unwrap();
     let mut blob = seal(&dk, &[1u8; 16], &secret, Alg::Aegis256).unwrap();

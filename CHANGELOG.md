@@ -31,6 +31,11 @@ shows were stated too broadly; a password hash that is cut short or altered
 gives `Auth`, not `Format`; and `docs/API.md` claimed locked memory for all of
 `SecretStore`. The help text of `krypto-cli` is corrected the same way.
 
+### Fixed — two tests shared a temporary key file *(2026-11-15)*
+
+Two tests in `tests/aead.rs` wrote the same temporary key file, so one of them
+could fail when they ran at the same time. Each now has a file of its own.
+
 ## [0.8.0] — 2026-11-02
 
 *krypto-py, the crate's API from Python with PyO3, and krypto-cli rewritten as a
