@@ -17,3 +17,12 @@ Thumbs.db
 # ── Python (the parity tests, and krypto-py) ──
 krypto-py/.venv/
 krypto-py/tests/__pycache__/
+
+# ── Local secrets ──
+# Environment and key files hold secrets and are never committed. Example,
+# sample and template files carry no secrets and stay committable.
+.env*
+*.key
+!.env*example*
+!.env*sample*
+!.env*template*

@@ -173,6 +173,12 @@ The Miri job in both CI workflows and the AddressSanitizer job on Gitea now
 pass `--locked`, like every other build and test step, so they test the
 dependencies `Cargo.lock` names. The crate is unchanged.
 
+### Changed — `.gitignore` covers local environment and key files *(2026-11-16)*
+
+`.env*` and `*.key` are ignored, so a local file with secrets is not committed
+by accident. Example, sample and template files, such as `.env.example`, stay
+committable.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than
