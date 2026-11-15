@@ -42,13 +42,15 @@ The exit code tells the kinds of failure apart:
 | Code | Means | What to do |
 |---|---|---|
 | `0` | ok | |
-| `1` | I/O or internal error | look at the message |
+| `1` | I/O, input the command cannot take (a krypto `Format` error, such as data that is not a blob or a key file that is too short), or an internal error | look at the message |
 | `2` | the call is wrong | fix the call |
-| **`3`** | **authentication failure** | **someone tampered with the data, or the key is wrong** |
-| `4` | the blob belongs to another key generation | find the right key (see `keyid` and `inspect`) — routing, not tampering |
+| **`3`** | **authentication failure** | **someone tampered with the data, or the context or salt is wrong; for `verify`, the signature does not hold** |
+| `4` | the blob names another key generation | find the right key (see `keyid` and `inspect`); a changed key id is `4` too |
 
 `open` compares the key id in the blob with the key's before it opens, so another key generation
-is `4`, not `3`. Messages go to stderr in English, and never carry key material or plaintext.
+is `4`, not `3`. The key id is not authenticated until the blob is opened, so a blob whose key id
+was changed is `4` too. Messages go to stderr in English, and never carry key material or
+plaintext.
 
 Until 0.7.3 the tool had 21 commands, and its exit codes were a contract; the commands that went
 are done with the crate or `krypto-py`.

@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "krypto"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "aegis",
  "aes-gcm",
@@ -446,7 +446,7 @@ dependencies = [
 
 [[package]]
 name = "krypto-py"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "krypto",
  "pyo3",

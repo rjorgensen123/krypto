@@ -69,10 +69,11 @@ pub fn hash(password: &SecretString, preset: Preset) -> Result<String, Error> {
     res
 }
 
-/// Verify a password against a PHC string (constant-time). `Ok(())` on match,
-/// `Error::Auth` **only** on an actually wrong password, `Error::Format` on an
-/// invalid/foreign/corrupt PHC string (e.g. a scrypt hash or unknown params) —
-/// so a corrupt hash in the database is not misdiagnosed as "wrong password".
+/// Verify a password against a PHC string (constant-time). `Ok(())` on match;
+/// `Error::Auth` when it does not match: a wrong password, or a PHC string that
+/// parses but was cut short or altered. `Error::Format` on a PHC string that
+/// cannot be parsed or is foreign (e.g. a scrypt hash or unknown params) — so a
+/// hash krypto cannot check is not misdiagnosed as "wrong password".
 pub fn verify(password: &SecretString, phc: &str) -> Result<(), Error> {
     use argon2::password_hash::Error as PhError;
 

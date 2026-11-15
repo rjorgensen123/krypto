@@ -22,8 +22,8 @@ And first of all in `main`, before anything else:
 krypto::harden_process()?;
 ```
 
-It disables core dumps and stops other processes from reading your memory. Call it once, early.
-It is safe to call again, but there is no reason to.
+It disables core dumps and stops other processes without privileges from reading your memory;
+root still can. Call it once, early. It is safe to call again, but there is no reason to.
 
 If you want to tighten further, there are three more optional steps — each one call, each
 failing hard if it cannot deliver:
@@ -36,7 +36,8 @@ krypto::drop_filesystem("/var/empty")?; // chroot: the disk "disappears" — AFT
 ```
 
 `drop_filesystem` is irreversible, needs privileges, and the directory must be empty; use one only
-root can write to. If it fails, the process is as it was: same root, same working directory.
+root can write to. If it fails, the root is as it was, and so is the working directory, unless
+stepping back out of the directory fails too; then the process stays in it, and the error says so.
 After it krypto needs no filesystem — randomness comes straight from the operating system, not from
 `/dev`. And `close_inherited_fds` also closes sockets you inherited *on purpose* (e.g. socket
 activation) — which is why it is its own choice and not part of `harden_process`.
@@ -99,8 +100,9 @@ let master = MasterKey::from_bytes(key)?;
 `from_bytes` **consumes** the buffer you give it. The key cannot be read back out afterwards — not
 by you, and not by anyone else.
 
-The key file must be at least 32 bytes, and is never read past `MAX_MASTER_KEY_BYTES` (4 KiB) — a
-symlink to `/dev/zero` or a bloated file cannot eat the memory.
+The key file must be at least 32 bytes, and is never read more than one byte past
+`MAX_MASTER_KEY_BYTES` (4 KiB), the byte that shows it is too big — a symlink to `/dev/zero` or a
+bloated file cannot eat the memory.
 
 ### Derive one key per purpose
 
@@ -186,20 +188,23 @@ store.list("api-");                 // all names with this prefix
 store.delete("api-token")?;
 ```
 
-The store file is never read past `MAX_STORE_BYTES` (16 MiB) — the same guard against bloated
-files — and never written past it either: a `put` that would cross it fails with `Format`. Each
-value is encrypted with **its own key derived from its name**. If someone moves a value to another
-name in the file, `get` fails with `Auth`. Writes are atomic — either the old file is there, or the
-new one, never half of one. The file gets mode 0600, and an existing one with wider permissions is
-set to 0600 when you open it.
+The store file is never read more than one byte past `MAX_STORE_BYTES` (16 MiB) — the same guard
+against bloated files — and never written past it either: a `put` that would cross it fails with
+`Format`. Each value is encrypted with **its own key derived from its name**. If someone moves a
+value to another name in the file, `get` fails with `Auth`. Writes are atomic — either the old file
+is there, or the new one, never half of one. The file gets mode 0600, and an existing one with any
+other mode is set to 0600 when you open it, unless the process may not change it; then it is left
+as it is.
 
 **One handle per file.** The store reads the whole file into memory and writes the whole file
 back, so two handles on the same file would overwrite each other's writes. Making sure you open a
 file only once at a time is your job. krypto also guards against it: while a handle lives, a second
-`open` of the same file — in your process or another — fails with `Io` (`WouldBlock`). You can rely
-on that, or also keep to one handle in your own code; that is your choice. Drop the handle to let
-the next one in. The guard is a lock on an empty `.<name>.lock` beside the file, which the kernel
-releases when the handle or the process goes, so it never gets stuck.
+`open` of the same file through the same path — in your process or another — fails with `Io`
+(`WouldBlock`). You can rely on that, or also keep to one handle in your own code; that is your
+choice. Drop the handle to let the next one in. The guard is a lock on an empty `.<name>.lock`
+beside the path you open, which the kernel releases when the handle or the process goes, so it
+never gets stuck. The same file opened through another name, such as a link, takes another lock,
+and where the lock file cannot be created, as in a directory you cannot write to, there is none.
 
 **Rules for names:** non-empty, at most 512 bytes, printable ASCII only (`[\x20-\x7e]`). Names are
 not secret — they are listed by `list()` and may end up in the caller's log. A name with a newline
@@ -230,9 +235,10 @@ password::verify(&attempt, &stored)?;                           // Ok(()) = corr
 The check takes the same time regardless of outcome, so nobody can guess their way in by
 measuring the response time.
 
-You get `Error::Auth` **only** when the password is actually wrong. If the stored string is
-corrupt or from another system, you get `Error::Format` — so you can tell "wrong password" from
-"something is wrong with my data".
+You get `Error::Auth` when the password does not match: when it is wrong, and also when the stored
+string can be read but was cut short or altered. If the stored string cannot be read at all, or is
+from another scheme, you get `Error::Format` — so a string krypto cannot check is not taken for a
+wrong password.
 
 ### Give me the key this password unlocks (encryption at rest)
 
@@ -373,8 +379,9 @@ None of them carry key material or plaintext. You can log them as they are.
 
 | Version | What arrived |
 |---|---|
+| **0.8.1** | No functional change: the documentation is corrected where it said more than the code does, a test file no longer names the machine it was made on, and the Python packages carry no paths from the machine that built them |
 | **0.8.0** | **Python: `krypto-py`.** The same API from Python, built from the same code: what one seals, the other opens; one API reference, with the guarantees that differ set apart · `MasterKey::key_id` in the library, the value `krypto-cli` has always used · the repository is a workspace of `krypto` and `krypto-py` · `krypto-cli` is a small helper with nine commands |
-| **0.7.3** | `drop_filesystem` changes the root only as its last step, on the directory it checked; when it fails, the process is as it was · every change to a blob past its `FAFN` magic gives `Auth` (`krypto-cli` exit 3), and `SecretStore::get` gives `Auth` for a key id that does not match · an empty `info` for `derive` is `Format` · random bytes are capped at 1 MiB per call, with your own cap as an option |
+| **0.7.3** | `drop_filesystem` changes the root only as its last step, on the directory it checked; when it fails, the root is as it was, and so is the working directory unless stepping back fails too · every change to a blob past its `FAFN` magic gives `Auth` (`krypto-cli` exit 3, though `krypto-cli open` gives 4 for a changed key id), and `SecretStore::get` gives `Auth` for a key id that does not match · an empty `info` for `derive` is `Format` · random bytes are capped at 1 MiB per call, with your own cap as an option |
 | **0.7.2** | **Secret memory and the current RustCrypto line.** The dependencies moved to the current RustCrypto line (RUSTSEC-2026-0387), and Rust 1.89 is the minimum · each secret has memory pages of its own: kept out of core dumps, still locked when another secret is dropped, with a guard page on each side (note: each live secret uses at least one page of the locked-memory limit) · the password functions and `derive` wipe what argon2 and HKDF leave on the stack, and derived keys are written straight into locked memory · the per-key limit of AES-256-GCM is documented |
 | **0.7.1** | No functional change: the install snippets point at crates.io, and the published crate no longer carries the CI configuration |
 | **0.7.0** | **First release on crates.io.** `SecretBuf::from_vec` wipes its source even when locking fails · `info` and `salt` for `derive` are capped (`MAX_DERIVE_INPUT_BYTES`), and `MasterKey::from_bytes` caps the key like the file route · the store checks names when it reads a file too (see below) |

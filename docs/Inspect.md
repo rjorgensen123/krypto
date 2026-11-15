@@ -2,24 +2,27 @@
 
 `krypto-cli inspect` takes a file or a dump on stdin and tells what it is and how it was made,
 without a key: the format, and the algorithms used. It never shows a key, a plaintext or a hash
-value. *(0.8.0)*
+value, except the SHA-256 fingerprint of an SSH public key. *(0.8.0)*
 
 ```bash
 krypto-cli inspect < something
 ```
 
-Part 1 is what krypto makes; part 2 is what other tools make. Anything wrapped in PEM, hex or
-base64 is unwrapped, and what is inside is told, with the wrapping. Anything it cannot place is
+Part 1 is what krypto makes; part 2 is what other tools make. Anything wrapped in PEM or hex is
+unwrapped, and base64 when what it holds is recognized; hex and base64 are unwrapped at most two
+levels deep. What is inside is told, with the wrapping. Anything it cannot place is
 `not recognized`, with its length and whether it looks like text, random bytes or other binary
 data. Random bytes cannot be told apart: encrypted data, compressed data and key material all look
 the same.
 
 The exit code is `0` when it has said what something is, also `not recognized`; `3` for a krypto
-blob whose header was changed, as for `open`; and `1` when stdin cannot be read.
+blob whose header names a format version or an algorithm krypto does not know, as for `open`; `1`
+when stdin cannot be read; and `2` when stdin is more than 64 MiB. Other changes to a blob still
+give a report and exit `0`; it takes `open`, with the key, to find them.
 
 **Tested** means that `inspect` recognizes the format in a real file made by the tool that makes it
 (`tests/fixtures/inspect`, and the test `inspect_tells_what_others_made`). **Untested** means built
-from the format's description, and not yet checked against a real file. The files are test data:
+from the format's description, and not checked against a real file. The files are test data:
 the private keys in them are made only for the tests, protect nothing and must never be used; see
 [their README](../tests/fixtures/inspect/README.md).
 
@@ -27,12 +30,13 @@ the private keys in them are made only for the tests, protect nothing and must n
 
 ## Part 1: what krypto makes
 
-All tested, against what the crate makes.
+Tested, against what the crate makes: the krypto blob, the store file and the password hash. The
+ECDSA P-256 private key is tested with a key made by `openssl`.
 
 | Format | Recognized by | What `inspect` tells |
 |---|---|---|
 | krypto blob, from `seal` | `FAFN` | the format version, the algorithm (AEGIS-256, XChaCha20-Poly1305 or AES-256-GCM), the key id and the length |
-| Store file, from `SecretStore` | `FST1` | the format version, the key id, the number of entries, their names and the algorithm of their blobs |
+| Store file, from `SecretStore` | `FST1` | the format version, the key id, the number of entries, their names (at most 20, then how many more) and the algorithm of their blobs |
 | Password hash, from `password::hash` | `$argon2id$` | the Argon2id version, memory, iterations and lanes, and which krypto preset they are |
 | ECDSA P-256 private key | PKCS#8 DER with the OIDs for EC and P-256 | that it is one; the key is not shown |
 | ECDSA P-256 public key | 65 bytes starting with `04` | that it is one, by its length and first byte only |
@@ -49,7 +53,7 @@ printable ASCII is shown as `?`.
 
 | Family | Format | What `inspect` tells | Tested |
 |---|---|---|---|
-| OpenPGP (GnuPG) | encrypted messages, binary and armored | the recipients' algorithms and key ids, a passphrase's cipher and key derivation, and the cipher of the data | yes, `gpg` |
+| OpenPGP (GnuPG) | encrypted messages, binary and armored | the recipients' algorithms and key ids, a passphrase's cipher and key derivation, and the cipher of the data where the message records it (SEIPD v1 keeps it in the encrypted session key) | yes, `gpg` |
 | | public and private keys | the primary key's and subkeys' algorithms, curves or sizes, and the number of user ids | public yes, `gpg`; private untested |
 | | signatures | the signature and hash algorithms | yes, `gpg` |
 | X.509 and PKCS | certificates, PEM and DER | the signature algorithm, the public key, and the validity dates | yes, `openssl` |
@@ -89,7 +93,7 @@ printable ASCII is shown as `?`.
 | | Sigstore bundles | the media type | untested |
 | Not cryptography | gzip, zstd, xz, bzip2, tar | that it is compressed or archived, not encrypted | yes, `gzip`, `zstd`, Python |
 
-Not recognized yet: Branca tokens, VeraCrypt volumes (which have no header to recognize), and
+Not recognized: Branca tokens, VeraCrypt volumes (which have no header to recognize), and
 anything else without a header of its own, such as NaCl or libsodium output.
 
 ---

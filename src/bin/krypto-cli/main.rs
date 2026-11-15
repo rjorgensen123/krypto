@@ -21,10 +21,11 @@
 //! ```
 //!
 //! Input comes on stdin, output goes to stdout. Each command takes only its own
-//! flags. Exit codes: 0 ok · 1 I/O or internal · 2 the call is wrong · 3
-//! authentication failed (tampering or the wrong key) · 4 the blob belongs to
-//! another key generation. Messages go to stderr, never with key material or
-//! plaintext.
+//! flags. Exit codes: 0 ok · 1 I/O, input the command cannot take, or internal
+//! · 2 the call is wrong · 3 authentication failed (tampering, or the wrong
+//! context or salt; for `verify`, the signature does not hold) · 4 the blob's
+//! key id is not this key's (another key generation, or a changed key id).
+//! Messages go to stderr, never with key material or plaintext.
 
 use std::io::{Read, Write};
 use std::process::ExitCode;
@@ -218,10 +219,12 @@ fn overview() -> String {
          \n\
          exit codes:\n\
          \x20 0  ok\n\
-         \x20 1  I/O or internal error\n\
+         \x20 1  I/O, input the command cannot take, or an internal error\n\
          \x20 2  the call is wrong\n\
-         \x20 3  authentication failed: tampering, or the wrong key\n\
-         \x20 4  the blob belongs to another key generation: find the right key\n\
+         \x20 3  authentication failed: tampering, or the wrong context or salt;\n\
+         \x20    for verify, the signature does not hold\n\
+         \x20 4  the blob's key id is not this key's: another key generation, or a\n\
+         \x20    changed key id\n\
          \n\
          A helper, not a product: in code, use the crate, or krypto-py from Python.",
         krypto::VERSION
@@ -239,9 +242,12 @@ fn help_of(command: &str) -> &'static str {
              format and the algorithms used. It knows what krypto makes (blobs, store\n\
              files, password hashes, keys and signatures) and the common formats from\n\
              other tools: OpenPGP, X.509 and PKCS, SSH, encrypted files, tokens,\n\
-             password hashes and compressed data. PEM, hex and base64 are unwrapped. It\n\
-             never shows a key, a plaintext or a hash value. A krypto blob whose header\n\
-             was changed is exit 3, as for open. docs/Inspect.md lists what it knows."
+             password hashes and compressed data. PEM and hex are unwrapped, and base64\n\
+             when what it holds is recognized; hex and base64 at most two levels deep. It\n\
+             never shows a key, a plaintext or a hash value, except the SHA-256\n\
+             fingerprint of an SSH public key. A krypto blob whose header names a format\n\
+             version or an algorithm krypto does not know is exit 3, as for open.\n\
+             docs/Inspect.md lists what it knows."
         }
         "keyid" => {
             "usage: krypto-cli keyid --key-file <file>\n\
@@ -265,9 +271,10 @@ fn help_of(command: &str) -> &'static str {
         "open" => {
             "usage: krypto-cli open --key-file <file> --context <text> --salt <text> < blob\n\
              \n\
-             Decrypts a blob and writes the plaintext to stdout. A blob from another key\n\
-             generation is exit 4; a changed blob, or the wrong key, context or salt, is\n\
-             exit 3.\n\
+             Decrypts a blob and writes the plaintext to stdout. A blob whose key id is\n\
+             not this key's is exit 4: it is from another key generation, or its key id\n\
+             was changed (the key id is not authenticated before the blob is opened). Any\n\
+             other change to the blob, or the wrong context or salt, is exit 3.\n\
              \n\
              \x20 --key-file <file>   the master key\n\
              \x20 --context <text>    the context the blob was sealed with\n\

@@ -39,7 +39,7 @@ pub use aead::{seal, open, reseal, blob_key_id, Alg};  // reseal: 0.6.0
 pub use store::{SecretStore, MAX_STORE_BYTES};
 pub use error::Error;
 pub use harden::{close_inherited_fds, drop_filesystem, harden_process, no_new_privs};
-pub use util::{ct_eq, random_bytes, random_bytes_with_limit, sha256, MAX_RANDOM_BYTES};  // the last two: 0.7.3
+pub use util::{ct_eq, random_bytes, random_bytes_with_limit, sha256, MAX_RANDOM_BYTES};  // random_bytes_with_limit and MAX_RANDOM_BYTES: 0.7.3
 
 pub mod error;
 pub mod exchange;
@@ -62,8 +62,9 @@ joined them in 0.7.3: `random_bytes` and `SecretBuf::random` took any length.)*
 
 ## The secret types
 
-The foundation. Anything secret crosses a boundary as one of these — never as `String`, `&str` or
-`Vec<u8>`.
+The foundation. Anything secret crosses a boundary as one of these. It comes in as a `Vec<u8>` or
+`String` only through `from_vec` and `from_string`, which zeroize the source, and otherwise never
+as `String`, `&str` or `Vec<u8>`.
 
 ### `SecretBuf`
 
@@ -112,7 +113,7 @@ The absences are part of the contract:
 | `Serialize` | ❌ | ❌ |
 | `PartialEq` | ❌ | ❌ |
 | `Default` | ❌ | ❌ |
-| `Debug` / `Display` | ✅ — always `SecretBuf([REDACTED], len=N)` | ✅ — same |
+| `Debug` / `Display` | ✅ — always `SecretBuf([REDACTED], len=N)` | ✅ — always `SecretString([REDACTED], len=N)` |
 | `Drop` | ✅ | *(through the inner buffer)* |
 
 ---
@@ -242,7 +243,8 @@ Each entry gets its own key derived from its name (`info = "krypto/store/v1|" + 
 therefore cannot be moved to another name — the open fails. Writes are atomic (tmp + fsync +
 rename), and the file is private (0600). *(0.7.2)* The tmp file is new, with an unpredictable name,
 so nothing planted next to the store is followed or reused; the directory is synced after the
-rename; and an existing file with wider permissions gets 0600 when opened, if the process owns it.
+rename; and an existing file with any other mode gets 0600 when opened, unless the process may not
+change it, in which case it is left as it is.
 File reads are capped at `MAX_STORE_BYTES` (16 MiB), and *(0.7.2)* so are writes: a `put` that would
 grow the file past it fails with `Format`, so the store always opens again.
 Name rules: non-empty, ≤ 512 bytes, printable ASCII only (`[\x20-\x7e]`) — names are
@@ -252,13 +254,14 @@ addresses, not secrets, and get listed out. Checked on read as well as on write
 *(0.7.2)* **One handle per file.** A `SecretStore` reads the whole file into memory and writes the
 whole file back, so two handles on one file would overwrite each other's writes. Keeping to one
 handle per file is the caller's responsibility. krypto also guards it on its side: `open` takes an
-exclusive lock for as long as the handle lives, and a second `open` of the same file, in this or
-another process, fails at once with `Error::Io` (`WouldBlock`). You can rely on that guard, or keep
-to one handle in your own code as well — your choice. The lock is the kernel's (`flock`) on an
-empty `.<name>.lock` beside the store file: it goes with the handle or the process, also after a
-crash, so it never goes stale. If the directory cannot be written, `open` goes ahead without it,
-since nothing can be saved there either. On a network filesystem the lock may not hold between
-machines.
+exclusive lock for as long as the handle lives, and a second `open` of the same file through the
+same path, in this or another process, fails at once with `Error::Io` (`WouldBlock`). You can rely
+on that guard, or keep to one handle in your own code as well — your choice. The lock is the
+kernel's (`flock`) on an empty `.<name>.lock` beside the path given to `open`: it goes with the
+handle or the process, also after a crash, so it never goes stale. The same file opened through
+another name, such as a link, takes another lock. If the lock file cannot be created, as in a
+directory that cannot be written, `open` goes ahead without it, since nothing can be saved there
+either. On a network filesystem the lock may not hold between machines.
 
 `rotate` *(0.6.0)* re-encrypts the whole store under a new master key: everything is decrypted
 with the old one FIRST (if anything fails, the file is untouched), and a completely new file
@@ -286,8 +289,9 @@ pub fn derive_key(password: &SecretString, salt: &[u8], preset: Preset)
     -> Result<SecretBuf, Error>;
 ```
 
-- `verify` is constant-time. `Auth` means **wrong password**; `Format` means the PHC string itself
-  is corrupt or foreign. Do not merge them.
+- `verify` is constant-time. `Auth` means the password does not match: a **wrong password**, or a
+  PHC string that can be read but was cut short or altered. `Format` means the PHC string cannot
+  be read or is foreign. Do not merge them.
 - `derive_key` requires a salt of **at least 16 bytes**. The salt is not secret and is stored in
   plaintext next to the encrypted data.
 
@@ -315,8 +319,9 @@ preset adjustment changes the key it yields.
 ## `sign` — signatures *(new in 0.5.0)*
 
 Ed25519 with **raw** keys (32-byte seed/public, 64-byte signature) and ECDSA P-256 with a
-**PKCS#8** private key, a **SEC1** public point (65 bytes, leading `0x04`) and an **ASN.1 DER**
-signature over SHA-256 — bit-compatible with `ring`, cross-verified both ways.
+**PKCS#8** private key, a **SEC1** public point (65 bytes, leading `0x04`; verification also takes
+the compressed form, 33 bytes) and an **ASN.1 DER** signature over SHA-256 — the same wire form as
+`ring`'s `ECDSA_P256_SHA256_ASN1`.
 
 ```rust
 pub const ED25519_SEED_LEN: usize = 32;
@@ -423,7 +428,8 @@ call) · `drop_filesystem(dir)` **after** key material is read — irreversible,
 (root or `CAP_SYS_CHROOT`), and the directory must be empty (verified before the chroot).
 *(0.7.3)* Use a directory only root can write to, such as `/var/empty`. The chroot applies to the
 directory that was checked, and the root changes as the last step, with the process already
-inside; on `Err` the root has not changed and the process stands where it stood. After
+inside; on `Err` the root has not changed and the process stands where it stood, unless stepping
+back out of the directory fails too; then it stays in the directory, and the error says so. After
 the chroot krypto needs no filesystem: randomness comes from the `getrandom` syscall, and
 AEAD/KDF/signing/passwords touch no files.
 
@@ -462,12 +468,12 @@ Part of the contract on equal footing with the functions — especially the **ab
 
 | Type | Impls |
 |---|---|
-| `SecretBuf` | `Drop`, `Debug`, `Display` *(always redacted)* |
-| `SecretString` | `Debug`, `Display` *(no own `Drop` — the inner buffer carries it)* |
+| `SecretBuf` | `Drop`, `Debug`, `Display` *(always redacted)*, `Send`, `Sync` |
+| `SecretString` | `Debug`, `Display`, `Send`, `Sync` *(no own `Drop` — the inner buffer carries it)* |
 | `Error` | `Debug`, `Display`, `std::error::Error`, `From<std::io::Error>` |
 | `Alg` | `Clone`, `Copy`, `PartialEq`, `Eq`, `Debug` |
 | `Preset` | `Clone`, `Copy`, `Debug` |
-| `MasterKey`, `DerivedKey`, `SecretStore<'a>` | **none** |
+| `MasterKey`, `DerivedKey`, `SecretStore<'a>` | `Send`, `Sync`; **nothing else** |
 
 No secret-bearing type has `Clone`, `Serialize`, `PartialEq` or `Default` — absence is
 enforcement. The modules `sign`/`exchange`/`hex`/`base64` are free functions + constants.
@@ -492,7 +498,9 @@ How the Rust forms read in Python:
 | `impl AsRef<Path>` | `str` or a path object |
 | `Result<T, Error>` | `T`, or an exception |
 | `Error::Io`, `Hardening`, `Format`, `Auth`, `KeyNotFound`, `WrongKey` | `IoError`, `HardeningError`, `FormatError`, `AuthError`, `KeyNotFoundError`, `WrongKeyError`, all subclasses of `Error` |
-| `Alg::Aegis256`, `Preset::High`, … | `Alg.Aegis256`, `password.Preset.High`, … |
+| `VERSION` | `VERSION`, and the same value as `__version__` |
+| `SecretBuf::len`, `SecretString::len` | `len()`, and also Python's `len(secret)` |
+| `Alg::Aegis256`, `Preset::High`, … | `Alg.Aegis256`, `password.Preset.High`, …; both compare with `==`, though Rust's `Preset` has no `PartialEq` |
 | A value taken by value: `MasterKey::from_bytes(SecretBuf)`, `SecretStore::rotate(self, …)` | The object is consumed; using it afterwards is a `ValueError` |
 | `expose(\|b\| …)`, `expose_str(\|s\| …)` | `expose(f)`, `expose_str(f)`: `f` is called with a copy, and what it returns is returned |
 | `SecretStore<'a>` borrows the `MasterKey` | `SecretStore` keeps the `MasterKey` object alive |
@@ -501,7 +509,7 @@ How the Rust forms read in Python:
 
 | | Rust | Python |
 |---|---|---|
-| `SecretBuf`, `SecretString`, `MasterKey`, `DerivedKey`, `SecretStore` | In locked memory, kept out of core dumps, guard pages, wiped on drop | The same: the objects hold Rust memory |
+| `SecretBuf`, `SecretString`, `MasterKey`, `DerivedKey`, and in a `SecretStore` the keys and the plaintext it returns | In locked memory, kept out of core dumps, guard pages, wiped on drop; a store's names and sealed blobs are in ordinary memory | The same: the objects hold Rust memory |
 | What goes in | Moved in, or zeroized by `from_vec` | Copied in. The `bytes` or `str` passed stays as Python keeps it, neither locked nor wiped; a `bytearray` given to `SecretBuf.from_vec` is zeroed |
 | What comes out | Seen inside the closure, in locked memory | `expose` and `expose_str` hand `f` a Python copy, neither locked nor wiped. `open` and `get` return a `SecretBuf`, so plaintext stays locked until exposed |
 | Locked memory | Counted against `RLIMIT_MEMLOCK` of the process | The same, in the Python process |

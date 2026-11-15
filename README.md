@@ -18,7 +18,8 @@ argon2id password hashing/derivation, signatures
 utilities and process hardening. A thin, opinionated wrapper around established primitives — **no cryptography of our
 own is implemented**.
 
-- **Type:** Rust crate (library), and the same API as a Python module, `krypto-py` (from 0.8.0)
+- **Type:** Rust crate (library), and the same API as a Python package, `krypto-py`, imported as
+  `krypto_py` (from 0.8.0)
 - **Platform:** Linux on x86_64, the one we build, test and stand behind; see
   [Platforms](#platforms)
 - **Lifetime:** long-lived — the version moves when the surface does, and the API document
@@ -28,8 +29,9 @@ own is implemented**.
   crate, which builds its TLS layer on top of it.
 - **Docs (ship with the crate):** overview [`docs/Home.md`](docs/Home.md) · usage guide
   [`docs/Usage.md`](docs/Usage.md) (Rust) and [`docs/Python.md`](docs/Python.md) (Python) ·
-  **API contract** [`docs/API.md`](docs/API.md), one for both — every public name, guarded by
-  `tests/docs.rs` · the test tool `krypto-cli` [`docs/Cli.md`](docs/Cli.md), and what its `inspect`
+  **API contract** [`docs/API.md`](docs/API.md), one for both — every public name; `tests/docs.rs`
+  checks that it names the root exports and the functions, constants and types of the public
+  modules · the test tool `krypto-cli` [`docs/Cli.md`](docs/Cli.md), and what its `inspect`
   recognizes [`docs/Inspect.md`](docs/Inspect.md)
 - **Changes:** [`CHANGELOG.md`](CHANGELOG.md) · **Version:** see [`VERSION`](VERSION)
   (kept in lockstep with `Cargo.toml` by `tests/version.rs`)
@@ -81,8 +83,9 @@ fn main() -> Result<(), krypto::Error> {
 }
 ```
 
-Secrets live in `SecretBuf`/`SecretString` (mlock'ed, zeroized, redacted `Debug`) and never cross
-an API boundary as `String` or `Vec<u8>` — a rule enforced by
+Secrets live in `SecretBuf`/`SecretString` (mlock'ed, zeroized, redacted `Debug`). They come in
+as a `Vec<u8>` or `String` only through `from_vec` and `from_string`, which zeroize the source, and
+otherwise never cross an API boundary as `String` or `Vec<u8>` — a rule enforced by
 the type system.
 
 From Python, the same API is **`krypto-py`** (`pip install krypto-py`, `import krypto_py`): every

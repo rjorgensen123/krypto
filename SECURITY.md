@@ -24,8 +24,8 @@ a vulnerability is to upgrade.
 
 | Version | Supported |
 |---------|-----------|
-| 0.7.x   | yes       |
-| < 0.7   | no        |
+| 0.8.x   | yes       |
+| < 0.8   | no        |
 
 ## Reporting a vulnerability
 
@@ -90,7 +90,7 @@ unless you ask not to be.
 
 ## Scope
 
-This crate is a thin wrapper around established primitives — RustCrypto, *ring*,
+This crate is a thin wrapper around established primitives — RustCrypto, dalek,
 argon2, aegis — and `krypto-py` is built on PyO3.
 
 **A flaw in one of those is not this crate's to fix.** Report it to that project —

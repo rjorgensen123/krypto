@@ -10,9 +10,9 @@
 //! profiles. Where an alternative exists, it is there for a format that demands
 //! it — not as a choice.
 //!
-//! From Python, the same API is the module `krypto-py` (0.8.0): the same
-//! functions, types and modules, running this code. What one seals, the other
-//! opens.
+//! From Python, the same API is the package `krypto-py`, imported as
+//! `krypto_py` (0.8.0): the same functions, types and modules, running this
+//! code. What one seals, the other opens.
 //!
 //! ## Invariants
 //! - Plaintext is only ever exposed through [`SecretBuf::expose`] / [`SecretString::expose_str`].

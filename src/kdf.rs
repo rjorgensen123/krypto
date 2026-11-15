@@ -65,7 +65,8 @@ impl MasterKey {
     /// Read the master key (raw bytes) from a file (typically a Docker secret,
     /// mode 400). Requires 32..=`MAX` bytes. The upper cap (`MAX_MASTER_KEY_BYTES`)
     /// prevents a symlink to `/dev/zero` or a bloated file from causing unbounded
-    /// allocation/OOM (bounded input) — never reads past the cap.
+    /// allocation/OOM (bounded input) — never reads more than one byte past the
+    /// cap, the byte that shows the file is too big.
     pub fn from_secret_file(path: impl AsRef<std::path::Path>) -> Result<Self, Error> {
         use std::io::Read;
         let f = std::fs::File::open(path)?;

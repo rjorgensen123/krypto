@@ -3,8 +3,8 @@
 **In short:** a small, reusable building block that makes sure secrets — passwords, keys and other
 sensitive material — are handled safely, both while in use and at rest. It does not invent its own
 cryptography; it wraps proven, recognized methods so everything is done one correct way, in one
-place. It comes for Rust (the crate `krypto`) and for Python (the module `krypto-py`): the same API
-in both, running the same code.
+place. It comes for Rust (the crate `krypto`) and for Python (the package `krypto-py`, imported as
+`krypto_py`): the same API in both, running the same code.
 
 ## Why does it exist?
 
@@ -36,7 +36,7 @@ The curiosity behind it comes from work on data-plane confidentiality — see
 | **Make many keys out of one** | one key per purpose, without storing several |
 | **A small encrypted store on disk** | secrets under names, like a keyring |
 | **Store and check passwords** | without the timing giving anything away |
-| **Unlock data with a password** | the key is derived; nothing is stored to guess against |
+| **Unlock data with a password** | the key is derived, and no password hash is stored beside the data; the encrypted data itself can still be used to test guesses |
 | **Put a seal on something** | so it can be proven unchanged afterwards |
 | **Sign and verify** | Ed25519 and ECDSA P-256 — prove a message came from you |
 | **Agree on a key with a peer** | X25519 — the foundation under sealed envelopes |
@@ -92,8 +92,9 @@ Encrypted data says for itself which algorithm was used, so the reader does not 
 advance — and a switch does not make old data unreadable.
 
 All `unsafe` in the library is isolated in a single layer that talks to the operating system
-(memory locking and process hardening). The rest of the code cannot contain `unsafe` — the compiler
-refuses.
+(memory locking and process hardening). The rest of the library is compiled with
+`deny(unsafe_code)`, which only that layer overrides. `krypto-py`, the Python binding, has `unsafe`
+of its own.
 
 ## Built alongside
 
@@ -106,7 +107,9 @@ on top. If you need both TLS and secret handling, they belong together — but e
 
 ## Maturity
 
-The format of encrypted data has been stable since early on.
+The format of encrypted data has been the same since early on, but AEGIS-256 blobs from 0.4.4 and
+older do not open in 0.5.0 and newer: 0.5.0 fixed a key and nonce swap in AEGIS-256, and such blobs
+must be encrypted again.
 
 ## Author
 

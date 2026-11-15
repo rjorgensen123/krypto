@@ -122,9 +122,9 @@ store.delete("api-token")
 ```
 
 In Rust the store borrows the master key; here it keeps the `MasterKey` object alive for as long as
-it lives. One handle per file holds as in Rust: a second `open` of the same file fails with
-`IoError` while the first lives, and the lock goes when the handle does (`del store`). `rotate`
-returns the new handle and consumes the old one:
+it lives. One handle per file holds as in Rust, with the same limits: a second `open` of the same
+file through the same path fails with `IoError` while the first lives, and the lock goes when the
+handle does (`del store`). `rotate` returns the new handle and consumes the old one:
 
 ```python
 new_master = krypto.MasterKey.from_bytes(krypto.SecretBuf.random(32))

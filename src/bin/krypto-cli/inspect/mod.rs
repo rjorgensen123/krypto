@@ -19,7 +19,8 @@ mod ssh;
 mod text;
 
 /// What `inspect` found: a name and the facts about it. `changed` is set for a
-/// krypto blob whose header was changed, which is exit 3, as for `open`.
+/// krypto blob whose header names a format version or an algorithm krypto does
+/// not know, which is exit 3, as for `open`.
 pub struct Finding {
     pub what: String,
     pub facts: Vec<(&'static str, String)>,

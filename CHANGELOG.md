@@ -4,13 +4,32 @@ Every notable change to this crate is recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
-## [0.8.1] — not released
+## [0.8.1] — 2026-11-15
+
+*No functional change. The documentation is corrected where it said more than
+the code does, a test file no longer names the machine it was made on, and the
+Python packages carry no paths from the machine that built them.*
 
 ### Fixed — a test file named the machine it was made on *(2026-11-02)*
 
 `tests/fixtures/inspect/ssh2-rsa.pub` carried the comment `ssh-keygen -e`
 writes, with the user and host that converted the key. It is made again with a
 neutral one, `test@example.invalid`; the key and its fingerprint are the same.
+
+### Fixed — the Python packages carry no paths from the build machine *(2026-11-15)*
+
+The wheel of 0.8.0 named directories on the machine that built it, in its SBOM
+and in the compiled module. 0.8.1 is built where those directories have neutral
+names.
+
+### Fixed — the documentation says what the code does *(2026-11-15)*
+
+The documents are corrected where they said more than, or other than, the code
+does. Among them: SECURITY.md named *ring*, which krypto does not use, and
+listed 0.7.x as supported; the exit codes of `krypto-cli` and what `inspect`
+shows were stated too broadly; a password hash that is cut short or altered
+gives `Auth`, not `Format`; and `docs/API.md` claimed locked memory for all of
+`SecretStore`. The help text of `krypto-cli` is corrected the same way.
 
 ## [0.8.0] — 2026-11-02
 
