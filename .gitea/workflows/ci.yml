@@ -195,7 +195,7 @@ jobs:
           rustup override set nightly
 
       - name: Miri (secret + harden — the tests above the unsafe layer)
-        run: cargo miri test --test secret --test harden
+        run: cargo miri test --locked --test secret --test harden
 
   # AddressSanitizer: the whole suite with runtime memory checking (needs nightly).
   asan:
@@ -224,4 +224,4 @@ jobs:
       - name: ASan (full suite, std rebuilt instrumented)
         env:
           RUSTFLAGS: -Zsanitizer=address
-        run: cargo test -Zbuild-std --target x86_64-unknown-linux-gnu --lib --tests
+        run: cargo test --locked -Zbuild-std --target x86_64-unknown-linux-gnu --lib --tests

@@ -167,6 +167,12 @@ that build and run code. On Gitea the checkout step gets the token through its
 environment instead of in the script text. The jobs do the same as before, and
 the crate is unchanged.
 
+### Changed — Miri and ASan in CI build with `--locked` *(2026-11-16)*
+
+The Miri job in both CI workflows and the AddressSanitizer job on Gitea now
+pass `--locked`, like every other build and test step, so they test the
+dependencies `Cargo.lock` names. The crate is unchanged.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

@@ -154,4 +154,4 @@ jobs:
           rustup override set nightly
 
       - name: Miri (secret + harden — the tests above the unsafe layer)
-        run: cargo miri test --test secret --test harden
+        run: cargo miri test --locked --test secret --test harden
