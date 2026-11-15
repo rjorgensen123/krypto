@@ -166,6 +166,10 @@ impl fmt::Display for SecretString {
 /// Some dependencies leave copies of the key material they work on in the
 /// stack frames they used. The function that called them calls this once
 /// they have returned, with an `N` that covers the stack the dependency uses.
+/// It reaches only frames below the caller's, so the work must run in a
+/// function the caller calls, not in the caller's own frame (0.8.2). It is a
+/// measure, not a guarantee: how deep a dependency goes, and where the
+/// compiler puts its state, depend on the compiler, the build and the platform.
 #[inline(never)]
 pub(crate) fn scrub_stack<const N: usize>() {
     let mut area = [0u8; N];

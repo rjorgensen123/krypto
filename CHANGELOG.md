@@ -139,6 +139,19 @@ The text of `FormatError` in krypto-py changes with it; the error kind does not.
   Linux; `docs/Cli.md` says `krypto-cli` warns when hardening fails; the
   comments on Miri and on what `tests/docs.rs` checks say what they cover.
 
+### Changed — `seal`, `open`, `hmac_sha256` and `derive` overwrite the key material they leave on the stack *(2026-11-15)*
+
+Up to 0.8.1, a copy of the derived key stayed on the stack after `seal` and
+`open` (and so `reseal`), and the HMAC midstates, enough to compute a MAC under
+the same key, after `hmac_sha256`, `key_id` and, in an optimised build,
+`derive`. These functions now overwrite that stack after the work. The
+dependencies that have a `zeroize` feature are built with it (aes-gcm,
+chacha20poly1305, hmac, sha2, argon2). AEGIS-256 and HKDF have none; HKDF's
+HMAC state is wiped through sha2, and argon2 wipes only its initial and final
+hash, not its working memory. No crate or version changed, and outputs are
+unchanged. It is a measure, not a guarantee: what is left depends on the
+compiler, the build and the platform. Signing and key exchange are not covered.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

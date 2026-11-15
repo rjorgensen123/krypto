@@ -82,6 +82,16 @@ reached, creating a secret fails with `Hardening`: raise the limit, which is set
 (`ulimit -l`, the service manager, or in Docker `--ulimit memlock=…`), or keep fewer secrets alive
 at once. On Linux, a process with `CAP_IPC_LOCK` is not limited by it.
 
+*(0.8.2)* **What is left on the stack.** The libraries krypto uses for encryption, HMAC, HKDF and
+Argon2 leave copies of keys in the stack memory they used. krypto overwrites that stack after
+`seal`, `open`, `reseal`, `derive`, `key_id`, `hmac_sha256` and the password functions. Where a
+library has a `zeroize` feature, krypto turns it on, so its types wipe what they hold when they are
+dropped: AES-256-GCM, XChaCha20-Poly1305 (except the Poly1305 state it makes for each message),
+HMAC and SHA-256. AEGIS-256 and HKDF have no such feature: for AEGIS-256 only the overwrite removes
+its copy of the key, and HKDF's state is an HMAC over SHA-256, which is wiped. Argon2 wipes only
+its initial and final hash, not its working memory. It is a measure, not a guarantee: what is left
+depends on the compiler, the build and the platform. Signing and key exchange are not covered.
+
 *In Python: [Secrets in memory](Python.md#secrets-in-memory).*
 
 ---

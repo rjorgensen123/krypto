@@ -12,13 +12,28 @@ use crate::error::Error;
 use crate::secret::SecretBuf;
 
 /// How much of the stack below `derive` is overwritten after HKDF (0.7.2).
-/// HKDF, through HMAC-SHA256, leaves copies of the derived key in the stack
-/// frames it used. The size covers all the stack it uses, with a little to
-/// spare: about 1.3 KiB in an optimised build and 6.9 KiB in a debug build.
+/// HKDF, through HMAC-SHA256, leaves copies of the derived key and of its own
+/// state (the HMAC midstates keyed with the PRK) in the stack frames it used;
+/// that state lives in `hkdf_derive`, below `derive`, so the overwrite reaches
+/// it (0.8.2). Measured with HKDF still in `derive`'s own frame, it used about
+/// 1.3 KiB in an optimised build and 6.9 KiB in a debug build. The size adds a
+/// little to spare, and in a debug build a wider margin for the extra frame.
 #[cfg(not(debug_assertions))]
 const HKDF_SCRUB_BYTES: usize = 2 * 1024;
 #[cfg(debug_assertions)]
-const HKDF_SCRUB_BYTES: usize = 8 * 1024;
+const HKDF_SCRUB_BYTES: usize = 16 * 1024;
+
+/// How much of the stack below `hmac_sha256` is overwritten after the MAC
+/// (0.8.2). HMAC-SHA256 leaves copies of its state (the midstates keyed with
+/// the key) in the stack frames it used; that state lives in
+/// `hmac_sha256_raw`, below `hmac_sha256`, so the overwrite reaches it.
+/// Measured with the MAC still in `hmac_sha256`'s own frame, it used about
+/// 0.6 KiB in an optimised build and 6.3 KiB in a debug build. The size adds
+/// some to spare, and in a debug build a wider margin for the extra frame.
+#[cfg(not(debug_assertions))]
+const HMAC_SCRUB_BYTES: usize = 2 * 1024;
+#[cfg(debug_assertions)]
+const HMAC_SCRUB_BYTES: usize = 16 * 1024;
 
 /// Upper bound on a master-key file. A key is 32–64 bytes; 4 KiB is generous
 /// slack and prevents OOM on `/dev/zero`/a bloated file (bounded input).
@@ -123,15 +138,7 @@ impl MasterKey {
                 )));
             }
         }
-        let res = self.key.expose(|ikm| {
-            let hk = Hkdf::<Sha256>::new(Some(salt), ikm);
-            // The key is written straight into locked memory (0.7.2).
-            SecretBuf::fill_with(32, |okm| {
-                hk.expand(info, okm)
-                    .map_err(|_| Error::Hardening("HKDF expand failed".into()))
-            })
-            .map(|key| DerivedKey { key })
-        });
+        let res = self.key.expose(|ikm| hkdf_derive(ikm, salt, info));
         crate::secret::scrub_stack::<HKDF_SCRUB_BYTES>();
         res
     }
@@ -150,6 +157,20 @@ impl MasterKey {
     }
 }
 
+/// HKDF-SHA256 from `ikm` into a new key in locked memory. Kept out of line
+/// (0.8.2), so the HKDF state lives in this frame, below the caller's, where
+/// the caller's `scrub_stack` reaches it.
+#[inline(never)]
+fn hkdf_derive(ikm: &[u8], salt: &[u8], info: &[u8]) -> Result<DerivedKey, Error> {
+    let hk = Hkdf::<Sha256>::new(Some(salt), ikm);
+    // The key is written straight into locked memory (0.7.2).
+    SecretBuf::fill_with(32, |okm| {
+        hk.expand(info, okm)
+            .map_err(|_| Error::Hardening("HKDF expand failed".into()))
+    })
+    .map(|key| DerivedKey { key })
+}
+
 /// The HKDF context of [`MasterKey::key_id`] (0.8.0; frozen).
 const KEY_ID_CONTEXT: &[u8] = b"krypto/key-id/v1";
 
@@ -157,16 +178,24 @@ const KEY_ID_CONTEXT: &[u8] = b"krypto/key-id/v1";
 /// Keyed MAC, not a plain hash, so someone who can edit the data
 /// cannot simply recompute the chain without the key.
 pub fn hmac_sha256(key: &DerivedKey, data: &[u8]) -> Result<[u8; 32], Error> {
+    let res = key.with_key(|k| hmac_sha256_raw(k, data));
+    crate::secret::scrub_stack::<HMAC_SCRUB_BYTES>();
+    res?
+}
+
+/// HMAC-SHA256 over `data` with a raw 32-byte key. Kept out of line (0.8.2),
+/// so the HMAC state lives in this frame, below the caller's, where the
+/// caller's `scrub_stack` reaches it.
+#[inline(never)]
+fn hmac_sha256_raw(key: &[u8; 32], data: &[u8]) -> Result<[u8; 32], Error> {
     use hmac::{Hmac, KeyInit, Mac};
-    key.with_key(|k| {
-        let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(k)
-            .map_err(|_| Error::Hardening("invalid HMAC key length".into()))?;
-        mac.update(data);
-        let out = mac.finalize().into_bytes();
-        let mut arr = [0u8; 32];
-        arr.copy_from_slice(&out);
-        Ok(arr)
-    })?
+    let mut mac = <Hmac<Sha256> as KeyInit>::new_from_slice(key)
+        .map_err(|_| Error::Hardening("invalid HMAC key length".into()))?;
+    mac.update(data);
+    let out = mac.finalize().into_bytes();
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(&out);
+    Ok(arr)
 }
 
 /// A derived 256-bit working key (DEK). Used only by the AEAD layer.

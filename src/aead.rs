@@ -24,6 +24,18 @@ const KEY_ID_LEN: usize = 16;
 const NONCE_FIELD: usize = 32;
 const HEADER_LEN: usize = 4 + 1 + 1 + KEY_ID_LEN + NONCE_FIELD; // 54
 
+/// How much of the stack below `seal` and `open` is overwritten after the
+/// cipher has run (0.8.2). The ciphers leave copies of the key in the stack
+/// frames they used. Measured below the caller of `seal` and `open`, the
+/// deepest of the three algorithms used about 9.9 KiB in an optimised build
+/// and 55.9 KiB in a debug build. The size adds some to spare, and in a debug
+/// build a wider margin for the extra frame `primitive_seal` and
+/// `primitive_open` may take.
+#[cfg(not(debug_assertions))]
+const AEAD_SCRUB_BYTES: usize = 16 * 1024;
+#[cfg(debug_assertions)]
+const AEAD_SCRUB_BYTES: usize = 96 * 1024;
+
 /// AEAD algorithm (the value is stored as `alg_id` in the blob header).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[non_exhaustive]
@@ -87,9 +99,11 @@ pub fn seal(
     header.extend_from_slice(&nonce);
     debug_assert_eq!(header.len(), HEADER_LEN);
 
-    let mut ct_tag = key.with_key(|k| {
+    let res = key.with_key(|k| {
         plaintext.expose(|pt| primitive_seal(alg, k, &nonce[..alg.nonce_len()], pt, &header))
-    })??;
+    });
+    crate::secret::scrub_stack::<AEAD_SCRUB_BYTES>();
+    let mut ct_tag = res??;
 
     let mut blob = header;
     blob.append(&mut ct_tag);
@@ -130,8 +144,9 @@ pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error> {
     // BEFORE attempting to open.
     let nonce = &header[nonce_start..nonce_start + NONCE_FIELD];
 
-    let pt =
-        key.with_key(|k| primitive_open(alg, k, &nonce[..alg.nonce_len()], body, header))??;
+    let res = key.with_key(|k| primitive_open(alg, k, &nonce[..alg.nonce_len()], body, header));
+    crate::secret::scrub_stack::<AEAD_SCRUB_BYTES>();
+    let pt = res??;
     SecretBuf::from_vec(pt)
 }
 
@@ -183,6 +198,9 @@ pub fn blob_key_id(blob: &[u8]) -> Result<[u8; KEY_ID_LEN], Error> {
 // Primitives — caller-supplied nonce + AAD (the basis for interop adapters)
 // ---------------------------------------------------------------------------
 
+/// Kept out of line (0.8.2), so the cipher and its copies of the key live in
+/// frames below the caller's, where the caller's `scrub_stack` reaches them.
+#[inline(never)]
 fn primitive_seal(
     alg: Alg,
     key: &[u8; 32],
@@ -231,6 +249,8 @@ fn primitive_seal(
     }
 }
 
+/// Kept out of line (0.8.2), for the same reason as `primitive_seal`.
+#[inline(never)]
 fn primitive_open(
     alg: Alg,
     key: &[u8; 32],

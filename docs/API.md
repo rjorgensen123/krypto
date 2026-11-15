@@ -121,6 +121,23 @@ The absences are part of the contract:
 | `Debug` / `Display` | ✅ — always `SecretBuf([REDACTED], len=N)` | ✅ — always `SecretString([REDACTED], len=N)` |
 | `Drop` | ✅ | *(through the inner buffer)* |
 
+### What is left on the stack *(0.8.2)*
+
+The libraries krypto uses for encryption, HMAC, HKDF and Argon2 leave copies of the key, and of
+their own state, in the stack memory they used. After `seal`, `open` and `reseal`,
+`MasterKey::derive` and `key_id`, `hmac_sha256`, and `password::hash`, `verify` and `derive_key`,
+krypto overwrites that stack with zeros.
+
+Where a library has a `zeroize` feature, krypto turns it on, so its types wipe what they hold when
+they are dropped: AES-256-GCM, XChaCha20-Poly1305 (except the Poly1305 state it makes for each
+message), HMAC and SHA-256. AEGIS-256 and HKDF have no such feature: for AEGIS-256 only the
+overwrite removes its copy of the key, and HKDF's state is an HMAC over SHA-256, which is wiped.
+Argon2 wipes only its initial and final hash, not its working memory.
+
+This is a measure, not a guarantee. What is left on the stack depends on the compiler, the build
+and the platform, and how much is overwritten was set from measurements on x86-64 Linux. Signing
+and key exchange are not covered by the overwrite.
+
 ---
 
 ## Keys
