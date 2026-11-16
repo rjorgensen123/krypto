@@ -238,8 +238,15 @@ fn blob(input: &[u8]) -> Option<Finding> {
         return None;
     }
     let found = Finding::new("krypto blob (krypto::seal)");
+    // Starts with `FAFN` but is cut short of the 54-byte header: a changed
+    // blob, `Auth` since 0.9.0 — reported as cut short, flagged changed.
+    if input.len() < 54 {
+        let mut found = found.fact("header", "cut short");
+        found.changed = true;
+        return Some(found);
+    }
     // `blob_key_id` reads the header as `open` does: `Auth` if a field was
-    // changed to a value krypto does not know, `Format` if it is cut short.
+    // changed to a value krypto does not know.
     Some(match blob_key_id(input) {
         Ok(id) => found
             .fact("format", input[4].to_string())

@@ -8,9 +8,10 @@
 //! ```
 //! The header up to and including the nonce (54 bytes) is **associated data**,
 //! so a blob never decrypts to anything but what was sealed (the key-id swap
-//! test). Data too short for a header, or not starting with `FAFN`, is not a
-//! krypto blob: `Error::Format`. Any other change — version, alg_id, key_id,
-//! nonce, ciphertext, tag, or a body cut short — is `Error::Auth` (0.7.3).
+//! test). Data shorter than the 4-byte magic, or not starting with `FAFN`, is
+//! not a krypto blob: `Error::Format`. Any other change — the blob cut short
+//! of the 54-byte header, version, alg_id, key_id, nonce, ciphertext, tag —
+//! is `Error::Auth` (0.7.3; the cut-short header since 0.9.0).
 //! The nonce field is a fixed 32 B; AES-256-GCM uses the first 12, XChaCha the
 //! first 24, AEGIS-256 all 32, the rest zero.
 
@@ -110,18 +111,20 @@ pub fn seal(
     Ok(blob)
 }
 
-/// Read a blob's header (0.7.3). Data too short for a header, or not starting
-/// with `FAFN`, is not a krypto blob: `Format`. Past the magic, a version or an
-/// algorithm this krypto does not know is `Auth`, like every other change to a
-/// blob: a sealed blob that says otherwise has been altered.
+/// Read a blob's header (0.7.3). Not starting with `FAFN` (or shorter than the
+/// 4-byte magic) is not a krypto blob: `Format`. Starting with `FAFN` but cut
+/// short of the 54-byte header is a changed blob: `Auth` (0.9.0) — the alarm
+/// class is no longer the tamperer's choice. Past the magic, a version or an
+/// algorithm this krypto does not know is `Auth`, like every other change to
+/// a blob: a sealed blob that says otherwise has been altered.
 fn read_header(blob: &[u8]) -> Result<(Alg, &[u8], &[u8]), Error> {
-    if blob.len() < HEADER_LEN {
-        return Err(Error::Format("blob shorter than header".into()));
-    }
-    let (header, body) = blob.split_at(HEADER_LEN);
-    if &header[0..4] != MAGIC {
+    if blob.len() < 4 || &blob[..4] != MAGIC {
         return Err(Error::Format("wrong magic (not FAFN)".into()));
     }
+    if blob.len() < HEADER_LEN {
+        return Err(Error::Auth);
+    }
+    let (header, body) = blob.split_at(HEADER_LEN);
     if header[4] != FORMAT_VER {
         return Err(Error::Auth);
     }

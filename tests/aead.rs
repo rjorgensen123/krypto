@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Integration tests for the AEAD/blob layer (seal/open + master key + HKDF).
 
-use krypto::{open, seal, Alg, Error, MasterKey, SecretBuf};
+use krypto::{blob_key_id, open, seal, Alg, Error, MasterKey, SecretBuf};
 
 // Write a 32-byte master key to a temporary file and load it.
 fn test_master(tag: &str) -> MasterKey {
@@ -193,7 +193,7 @@ fn unknown_version_or_alg_id_gives_auth() {
     }
 }
 
-/// Data too short for a header, or not starting with `FAFN`, is not a krypto
+/// Not starting with `FAFN` (or shorter than the 4-byte magic) is not a krypto
 /// blob at all: `Format`, not an alarm.
 #[test]
 fn not_a_blob_gives_format() {
@@ -201,13 +201,15 @@ fn not_a_blob_gives_format() {
     let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
     let secret = SecretBuf::from_vec(b"data".to_vec()).unwrap();
     let mut blob = seal(&dk, &[1u8; 16], &secret, Alg::Aegis256).unwrap();
-    assert!(matches!(open(&dk, &blob[..53]), Err(Error::Format(_))));
+    assert!(matches!(open(&dk, &blob[..3]), Err(Error::Format(_))));
     blob[0] = b'X';
     assert!(matches!(open(&dk, &blob), Err(Error::Format(_))));
 }
 
-/// A body cut short is a changed blob: `Auth` for every algorithm (0.7.3; it
-/// was `Format` for AEGIS-256 alone).
+/// A blob cut short is a changed blob: `Auth` for every algorithm — including
+/// a cut inside the 54-byte header, as long as the `FAFN` magic is intact
+/// (0.9.0; before that, 4–53 bytes gave `Format`, letting the tamperer choose
+/// the alarm class). Only data that cannot carry the magic is `Format`.
 #[test]
 fn cut_short_body_gives_auth_for_every_alg() {
     let mk = test_master("cut-short");
@@ -215,9 +217,17 @@ fn cut_short_body_gives_auth_for_every_alg() {
     let secret = SecretBuf::from_vec(b"data".to_vec()).unwrap();
     for alg in [Alg::Aegis256, Alg::XChaCha20Poly1305, Alg::Aes256Gcm] {
         let blob = seal(&dk, &[1u8; 16], &secret, alg).unwrap();
-        for keep in [54, 55, 60] {
+        for keep in [4, 10, 53, 54, 55, 60] {
             assert!(
                 matches!(open(&dk, &blob[..keep]), Err(Error::Auth)),
+                "{alg:?}, {keep} bytes"
+            );
+        }
+        // A header cut short (magic intact, < 54 bytes) is `Auth` already at
+        // `blob_key_id`; a whole header is enough for `blob_key_id` to read.
+        for keep in [4, 10, 53] {
+            assert!(
+                matches!(blob_key_id(&blob[..keep]), Err(Error::Auth)),
                 "{alg:?}, {keep} bytes"
             );
         }

@@ -109,6 +109,10 @@ except krypto.AuthError:
     pass   # tampering or the wrong key: alarm
 ```
 
+*(0.9.0)* A blob that starts with `FAFN` but is cut short of its 54-byte header raises
+`AuthError` too, not `FormatError` — the alarm class is no longer the tamperer's choice. Only data
+that cannot carry the magic (shorter than 4 bytes, or not starting with `FAFN`) is `FormatError`.
+
 The algorithms and the tampering rules: [Encrypt and decrypt](Usage.md#encrypt-and-decrypt).
 
 ---

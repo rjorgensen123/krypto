@@ -217,7 +217,9 @@ produced.
 > **Tampering gives `Auth`, never wrong plaintext.** The whole blob header is part of the
 > authentication, so changing the algorithm id, key id or version makes the open fail with `Auth`
 > — *(0.7.3)* a version or algorithm krypto does not know included. Only data that is not a krypto
-> blob at all, too short for a header or not starting with `FAFN`, gives `Format`. Never wrong
+> blob at all — shorter than its 4-byte magic, or not starting with `FAFN` — gives `Format`.
+> *(0.9.0)* A blob starting with `FAFN` but cut short of the 54-byte header is a changed blob and
+> gives `Auth` too, so the alarm class is no longer the tamperer's choice. Never wrong
 > plaintext is an absolute guarantee, not a detail.
 
 ### The blob format (`FAFN`, format_ver 1 — unchanged since 0.2)
@@ -231,7 +233,9 @@ magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciph
   is associated data — the "key-id swap test": a changed header never yields a mis-decrypt.
   *(0.7.3)* A changed version, alg_id, key_id or nonce, or a body cut short, yields `Auth`, in
   `open`, `reseal` and `blob_key_id` alike; data too short for a header or without the `FAFN`
-  magic yields `Format`.
+  magic yields `Format`. *(0.9.0)* The magic is checked before the length: a blob that starts
+  with `FAFN` but is cut short of the 54-byte header yields `Auth` (in `blob_key_id` too), not
+  `Format`.
 - The nonce is random per blob from the OS CSPRNG. The 32-byte field is used partially:
   AEGIS-256 all 32, XChaCha 24, AES-GCM 12 — the rest zero.
 - *(0.7.2)* **AES-256-GCM: at most 2³² blobs per key.** With a 12-byte random nonce, NIST SP 800-38D
@@ -282,7 +286,8 @@ file is read through; the first write replaces the link with a regular file, and
 pointed to keeps its old contents.
 File reads are capped at `MAX_STORE_BYTES` (16 MiB), and *(0.7.2)* so are writes: a `put` that would
 grow the file past it fails with `Format`, so the store always opens again. *(0.9.0)* The cap
-counts the whole file, header included — 37 bytes in v1, 109 in v2.
+counts the whole file, header included — 37 bytes in v1, 109 in v2 — and `put` checks it on the
+prospective file size before the value is sealed, not after.
 Name rules: non-empty, ≤ 512 bytes, printable ASCII only (`[\x20-\x7e]`) — names are
 addresses, not secrets, and get listed out. Checked on read as well as on write
 *(0.7.0)*: a store file need not have come from `put`.
@@ -611,8 +616,8 @@ pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotF
 |---|---|
 | `Io` | file or directory |
 | `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening — never a verdict on the data; treated fail-closed *(0.7.3: described as what it covers)* |
-| `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob (too short for a header, or not starting with `FAFN`), or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info` |
-| `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, and a key id in a `SecretStore` that does not match |
+| `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob (shorter than its 4-byte magic, or not starting with `FAFN`), or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info` |
+| `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, a header cut short past the magic included *(0.9.0)*, and a key id in a `SecretStore` that does not match |
 | `KeyNotFound` | the name does not exist in the store |
 | `WrongKey` | the blob belongs to another key generation — routing, not tampering *(new in 0.5.0)*. *(0.7.3)* No library function returns it: a `SecretStore` holds one generation, so a different key id there is `Auth`. It is the answer for a caller that routes between generations |
 | `Rollback { file_counter, min_counter }` | *(0.9.0)* only from `SecretStore::open_with_min_counter`: a v2 store file whose `counter` (`file_counter`) is below the caller's minimum (`min_counter`) — an older copy of the file may have been put back. Distinct from `Auth`, which means the content itself does not verify |

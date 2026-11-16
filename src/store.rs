@@ -282,6 +282,17 @@ impl<'a> SecretStore<'a> {
     /// counter increases on every write (it is covered by the container MAC).
     pub fn put(&mut self, name: &str, secret: &SecretBuf) -> Result<(), Error> {
         validate_name(name)?;
+        // (0.9.0) The cap is checked on the size the file WOULD get, before
+        // anything is sealed or built (the blob would be 86 + value bytes:
+        // 54-byte FAFN header + 32-byte tag). Over the cap: the same `Format`
+        // persist would give, but no sealing, no blob allocation and no file
+        // build happen first. The check in `persist` stays as the guard.
+        let new_blob_len = 86usize.saturating_add(secret.len());
+        if self.prospective_file_len(name, new_blob_len) > MAX_STORE_BYTES {
+            return Err(Error::Format(format!(
+                "the store would grow past {MAX_STORE_BYTES} bytes, which `open` refuses"
+            )));
+        }
         let dek = self.dek_for(name)?;
         let blob = aead::seal(&dek, &self.key_id, secret, Alg::Aegis256)?;
         // The counter the coming write carries (v2 only). Computed before
@@ -513,6 +524,31 @@ impl<'a> SecretStore<'a> {
     }
 
     // --- internal ---
+
+    /// The header length of this store's file version: 37 for v1, 109 for v2
+    /// (0.9.0).
+    fn header_len(&self) -> usize {
+        if self.version == STORE_VER_V2 {
+            V2_HEADER_LEN
+        } else {
+            HEADER_LEN_V1
+        }
+    }
+
+    /// The size the store file would get if `name` were stored with a blob of
+    /// `blob_len` bytes: the current file size with the old entry under the
+    /// same name (if any) replaced by the new one. Header included, so the
+    /// v2 header counts too (0.9.0).
+    fn prospective_file_len(&self, name: &str, blob_len: usize) -> usize {
+        let mut size = self.header_len();
+        for (n, b) in &self.entries {
+            size = size.saturating_add(2 + n.len() + 4 + b.len());
+        }
+        if let Some(old) = self.entries.get(name) {
+            size = size.saturating_sub(2 + name.len() + 4 + old.len());
+        }
+        size.saturating_add(2 + name.len() + 4 + blob_len)
+    }
 
     fn dek_for(&self, name: &str) -> Result<DerivedKey, Error> {
         let mut info = Vec::with_capacity(16 + name.len());
@@ -1027,4 +1063,49 @@ fn write_then_rename(
         .sync_all()
         .map_err(WriteError::ReplacedUnsynced)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_store(version: u8) -> SecretStore<'static> {
+        let mk: &'static MasterKey = Box::leak(Box::new(
+            MasterKey::from_bytes(SecretBuf::from_vec(vec![7u8; 32]).unwrap()).unwrap(),
+        ));
+        SecretStore {
+            path: PathBuf::from("/tmp/krypto-store-unittest.store"),
+            master: mk,
+            salt: [1u8; SALT_LEN],
+            key_id: [2u8; KEY_ID_LEN],
+            version,
+            counter: 0,
+            entries: HashMap::new(),
+            lock: None,
+        }
+    }
+
+    #[test]
+    fn header_len_matches_the_file_version() {
+        assert_eq!(test_store(STORE_VER_V1).header_len(), 37);
+        assert_eq!(test_store(STORE_VER_V2).header_len(), 109);
+    }
+
+    /// 0.9.0: the cap is computed on the prospective file size (header
+    /// included, old entry of the same name replaced) before `put` seals
+    /// anything.
+    #[test]
+    fn prospective_len_counts_header_entries_and_replacement() {
+        let mut s = test_store(STORE_VER_V2);
+        s.entries.insert("a".to_string(), vec![0u8; 10]); // 109 + (2+1+4+10) = 126
+        assert_eq!(s.prospective_file_len("a", 10), 126, "replace same size");
+        assert_eq!(
+            s.prospective_file_len("b", 100),
+            126 + (2 + 1 + 4 + 100),
+            "add new entry"
+        );
+        let mut s1 = test_store(STORE_VER_V1);
+        s1.entries.insert("a".to_string(), vec![0u8; 10]);
+        assert_eq!(s1.prospective_file_len("a", 10), 37 + 17, "v1 header is 37");
+    }
 }

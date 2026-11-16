@@ -175,8 +175,9 @@ The blob says for itself which one was used, so the reader does not need to know
 
 The whole blob header — version, algorithm, key id and nonce — is **authenticated**. If anyone
 changes a single byte of it, or of what follows, you get `Error::Auth`. Only data that is not a
-krypto blob at all — too short, or not starting with `FAFN` — gives `Error::Format`. You **never**
-get wrong plaintext back instead.
+krypto blob at all — shorter than the 4-byte magic, or not starting with `FAFN` — gives
+`Error::Format`. *(0.9.0)* A blob that starts with `FAFN` but is cut short of the 54-byte header
+gives `Auth` too. You **never** get wrong plaintext back instead.
 
 That includes someone swapping the key id to trick you into the wrong key. That case has its own
 test in the crate.
@@ -491,7 +492,7 @@ None of them carry key material or plaintext. You can log them as they are.
 
 | Version | What arrived |
 |---|---|
-| **0.9.0** | **Store file format v2** (`spec/SPEC-secretstore.md`): the whole file is authenticated (`container_mac`), the master key is checked at `open` (`key_check`), and a write counter enables rollback detection (`open_with_min_counter`, `Error::Rollback`) · new stores are v2, an opened file keeps its version · `upgrade()` (v1 → v2, one-way), `open_with_version`, `version()`, `counter()` · `rotate` keeps the version and resets the counter on v2 |
+| **0.9.0** | **Store file format v2** (`spec/SPEC-secretstore.md`): the whole file is authenticated (`container_mac`), the master key is checked at `open` (`key_check`), and a write counter enables rollback detection (`open_with_min_counter`, `Error::Rollback`) · new stores are v2, an opened file keeps its version · `upgrade()` (v1 → v2, one-way), `open_with_version`, `version()`, `counter()` · `rotate` keeps the version and resets the counter on v2 · a blob cut short of its 54-byte header past the `FAFN` magic now gives `Auth`, not `Format` · `SecretStore::put` checks the 16 MiB cap on the prospective file size before sealing |
 | **0.8.1** | No functional change: the documentation is corrected where it said more than the code does, a test file no longer names the machine it was made on, and the Python packages carry no paths from the machine that built them |
 | **0.8.0** | **Python: `krypto-py`.** The same API from Python, built from the same code: what one seals, the other opens; one API reference, with the guarantees that differ set apart · `MasterKey::key_id` in the library, the value `krypto-cli` has always used · the repository is a workspace of `krypto` and `krypto-py` · `krypto-cli` is a small helper with nine commands |
 | **0.7.3** | `drop_filesystem` changes the root only as its last step, on the directory it checked; when it fails, the root is as it was, and so is the working directory unless stepping back fails too · every change to a blob past its `FAFN` magic gives `Auth` (`krypto-cli` exit 3, though `krypto-cli open` gives 4 for a changed key id), and `SecretStore::get` gives `Auth` for a key id that does not match · an empty `info` for `derive` is `Format` · random bytes are capped at 1 MiB per call, with your own cap as an option |

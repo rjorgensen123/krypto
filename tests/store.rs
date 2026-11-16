@@ -1219,3 +1219,29 @@ fn the_v2_header_counts_toward_max_store_bytes() {
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(&path1);
 }
+
+/// 0.9.0: a stored entry whose blob is cut short of the 54-byte header — the
+/// `FAFN` magic intact — is a changed blob: `Auth` from `get`, not `Format`.
+/// (Before 0.9.0, cutting a blob below 54 bytes let the tamperer choose
+/// `Format` as the alarm class.)
+#[test]
+fn cut_entry_blob_gives_auth_not_format() {
+    let mk = master("cut-entry");
+    let path = store_path("cut-entry");
+    {
+        let mut s = SecretStore::open_with_version(&path, &mk, 1).unwrap();
+        s.put("k", &SecretBuf::from_vec(b"v".to_vec()).unwrap())
+            .unwrap();
+    }
+    // Rewrite the entry so its blob is 10 bytes long, keeping those 10 bytes:
+    // the blob still starts with `FAFN`, but its header is cut short.
+    let mut data = std::fs::read(&path).unwrap();
+    let blob_len_off = 37 + 2 + 1; // v1 header + name_len + "k"
+    data[blob_len_off..blob_len_off + 4].copy_from_slice(&10u32.to_le_bytes());
+    data.truncate(blob_len_off + 4 + 10);
+    std::fs::write(&path, &data).unwrap();
+
+    let s = SecretStore::open_with_version(&path, &mk, 1).unwrap();
+    assert!(matches!(s.get("k"), Err(Error::Auth)));
+    let _ = std::fs::remove_file(&path);
+}

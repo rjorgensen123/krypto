@@ -44,7 +44,7 @@ The exit code tells the kinds of failure apart:
 | `0` | ok | |
 | `1` | I/O, input the command cannot take (a krypto `Format` error, such as data that is not a blob or a key file that is too short), or an internal error | look at the message |
 | `2` | the call is wrong | fix the call |
-| **`3`** | **authentication failure** | **someone tampered with the data, or the context or salt is wrong; for `verify`, the signature does not hold** |
+| **`3`** | **authentication failure** | **someone tampered with the data, or the context or salt is wrong; for `verify`, the signature does not hold** · *(0.9.0)* a blob cut short of its 54-byte header — `FAFN` magic intact — is `3` too, not `1` |
 | `4` | the blob names another key generation | find the right key (see `keyid` and `inspect`); a changed key id is `4` too |
 
 `open` compares the key id in the blob with the key's before it opens, so another key generation

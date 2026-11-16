@@ -37,6 +37,17 @@ entry or a changed header fails there too. An unknown version byte is `Format`
 an `upgrade` older binaries can no longer read the store. Version 1 files are unchanged: still
 readable, no key check at `open`, no container MAC, a wrong key still shows as `Auth` from `get`.
 
+### Changed — a blob cut short past its `FAFN` magic is `Auth`, not `Format` *(2026-11-16)*
+
+The magic is now checked before the length, so a blob with intact `FAFN` magic but a header cut
+short of 54 bytes is tampering: `Auth` (CLI exit 3, krypto-py `AuthError`). Only data that cannot
+carry the magic is still `Format`.
+
+### Fixed — `SecretStore::put` checks the 16 MiB cap before sealing *(2026-11-16)*
+
+The prospective file size (header included) is computed before the value is encrypted; over the
+cap fails with the same `Format` as before, just without sealing or building the file first.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*
