@@ -178,6 +178,9 @@ parameters within the range in [Passwords](Usage.md#passwords), and associated d
 carries it. Any other stored string, such as an Argon2i hash from another tool or one made with a
 secret key (`keyid=`), raises `FormatError`, before Argon2 runs.
 
+`password.derive_key` takes a salt of at least 16 bytes and, *(0.8.2)*, at most 1024; outside that
+it raises `FormatError`.
+
 ---
 
 ## Putting a seal on something

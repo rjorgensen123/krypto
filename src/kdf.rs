@@ -46,6 +46,9 @@ pub const MAX_MASTER_KEY_BYTES: usize = 4096;
 /// so a value arriving from a command line or a config file could be any
 /// length. The longest real `info` is the store's `krypto/store/v1|` prefix
 /// plus a key name: 16 + 512 bytes. The cap keeps ample room over that.
+///
+/// It is also the upper bound on the salt of [`crate::password::derive_key`]
+/// (0.8.2).
 pub const MAX_DERIVE_INPUT_BYTES: usize = 1024;
 
 /// The root key (KEK). Injected from outside; derives DEKs via HKDF.

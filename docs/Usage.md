@@ -298,8 +298,9 @@ let key = password::derive_key(&password, &salt, Preset::High)?;
 let master = MasterKey::from_bytes(key)?;
 ```
 
-The salt must be **at least 16 bytes** and is stored in plaintext next to the data. It is not a
-secret — its job is to make precomputed tables useless, and it does that just as well in the open.
+The salt must be **at least 16 bytes** and, *(0.8.2)*, at most 1024 bytes; a longer salt gives
+`Format`. It is stored in plaintext next to the data. It is not a secret — its job is to make
+precomputed tables useless, and it does that just as well in the open.
 
 > **Never store a hash next to the ciphertext here.** If the password is wrong, decryption fails
 > by itself. Put a hash there too and you hand an attacker with the disk **something separate to
