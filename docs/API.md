@@ -55,8 +55,9 @@ wrong.
 
 *(The size caps `MAX_MASTER_KEY_BYTES` (4 KiB) and `MAX_STORE_BYTES` (16 MiB) became reachable in
 0.5.0 — they were named in the contract but lived in private modules. `MAX_DERIVE_INPUT_BYTES`
-(1 KiB) joined them in 0.7.0: `derive` took unbounded `info` and `salt`. `MAX_RANDOM_BYTES` (1 MiB)
-joined them in 0.7.3: `random_bytes` and `SecretBuf::random` took any length.)*
+(1 KiB) joined them in 0.7.0: `derive` took unbounded `info` and `salt`; from 0.8.2 the same cap
+holds for the salt of `password::derive_key`. `MAX_RANDOM_BYTES` (1 MiB) joined them in 0.7.3:
+`random_bytes` and `SecretBuf::random` took any length.)*
 
 ---
 
@@ -360,8 +361,9 @@ pub fn derive_key(password: &SecretString, salt: &[u8], preset: Preset)
   used. Anything else — Argon2i, Argon2d, version 16, a string without `v=`, a `keyid` (it names a
   secret key krypto does not have), parameters outside the range — is `Format`, refused before
   Argon2 runs, so a stored string cannot make one call use more memory or time than that.
-- `derive_key` requires a salt of **at least 16 bytes**. The salt is not secret and is stored in
-  plaintext next to the encrypted data.
+- `derive_key` requires a salt of **at least 16 bytes** and, *(0.8.2)*, at most
+  `MAX_DERIVE_INPUT_BYTES` (1024); a longer salt is `Format`. The salt is not secret and is stored
+  in plaintext next to the encrypted data.
 
 > **Never store a verification hash next to the ciphertext.** If the password is wrong, the open
 > fails by itself. A stored hash would additionally hand an attacker with the disk a separate

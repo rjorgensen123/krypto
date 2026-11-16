@@ -179,6 +179,15 @@ dependencies `Cargo.lock` names. The crate is unchanged.
 by accident. Example, sample and template files, such as `.env.example`, stay
 committable.
 
+### ⚠ Changed — `password::derive_key` caps the salt at 1024 bytes *(2026-11-16)*
+
+`password::derive_key` refuses a salt longer than `MAX_DERIVE_INPUT_BYTES`
+(1024 bytes) with `Format` (`FormatError` in `krypto-py`). Before, the salt had
+only a lower bound of 16 bytes, where every other input to krypto has a cap;
+`MasterKey::derive` has had this one since 0.7.0. A key made with a longer salt
+can no longer be derived; a salt of 16 to 1024 bytes gives the same key as
+before.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

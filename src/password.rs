@@ -16,6 +16,7 @@ use argon2::password_hash::{PasswordHasher, PasswordVerifier};
 use argon2::{Algorithm, Argon2, Params, Version};
 
 use crate::error::Error;
+use crate::kdf::MAX_DERIVE_INPUT_BYTES;
 use crate::secret::SecretString;
 
 /// Calibration preset. The floor follows SEC v10 (`m ≥ 64 MiB, t ≥ 2, p ≥ 1`),
@@ -194,9 +195,10 @@ pub fn verify(password: &SecretString, phc: &str) -> Result<(), Error> {
 ///
 /// # The salt
 ///
-/// Must be at least 16 bytes and is stored in plaintext next to the
-/// ciphertext. It is not a secret — its job is to make precomputed tables
-/// useless, and it does that just as well in the open.
+/// Must be at least 16 bytes and at most [`MAX_DERIVE_INPUT_BYTES`] (1024)
+/// bytes (0.8.2); a salt outside that is `Error::Format`. It is stored in
+/// plaintext next to the ciphertext. It is not a secret — its job is to make
+/// precomputed tables useless, and it does that just as well in the open.
 pub fn derive_key(
     password: &SecretString,
     salt: &[u8],
@@ -205,6 +207,12 @@ pub fn derive_key(
     if salt.len() < 16 {
         return Err(Error::Format(format!(
             "argon2 salt must be at least 16 bytes, got {}",
+            salt.len()
+        )));
+    }
+    if salt.len() > MAX_DERIVE_INPUT_BYTES {
+        return Err(Error::Format(format!(
+            "argon2 salt must be at most {MAX_DERIVE_INPUT_BYTES} bytes, got {}",
             salt.len()
         )));
     }
@@ -254,6 +262,17 @@ mod kdf_tests {
     #[test]
     fn too_short_salt_is_rejected() {
         assert!(derive_key(&pw("x"), b"short", Preset::Interactive).is_err());
+    }
+
+    #[test]
+    fn too_long_salt_is_rejected() {
+        let at_cap = vec![b's'; MAX_DERIVE_INPUT_BYTES];
+        let over = vec![b's'; MAX_DERIVE_INPUT_BYTES + 1];
+        assert!(derive_key(&pw("x"), &at_cap, Preset::Interactive).is_ok());
+        assert!(matches!(
+            derive_key(&pw("x"), &over, Preset::Interactive),
+            Err(Error::Format(_))
+        ));
     }
 
     #[test]
