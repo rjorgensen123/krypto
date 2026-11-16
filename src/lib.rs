@@ -42,7 +42,9 @@ pub mod sign;
 /// (e.g. an About page). Mirrors `Cargo.toml`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub use aead::{blob_key_id, open, reseal, seal, Alg};
+pub use aead::{
+    blob_key_id, open, open_with_aad, reseal, reseal_with_aad, seal, seal_with_aad, Alg,
+};
 pub use error::Error;
 pub use harden::{close_inherited_fds, drop_filesystem, harden_process, no_new_privs};
 // 0.5.0: MAX_MASTER_KEY_BYTES and MAX_STORE_BYTES are now re-exported — they were

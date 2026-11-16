@@ -352,6 +352,31 @@ fn open(key: &DerivedKey, blob: &[u8]) -> PyResult<SecretBuf> {
         .map_err(err)
 }
 
+/// `krypto::seal_with_aad` — caller-supplied associated data (0.9.0). The AAD
+/// is not stored in the blob; supply the same value to `open_with_aad`.
+#[pyfunction]
+fn seal_with_aad<'py>(
+    py: Python<'py>,
+    key: &DerivedKey,
+    key_id: &[u8],
+    plaintext: &SecretBuf,
+    alg: &Alg,
+    aad: &[u8],
+) -> PyResult<Bound<'py, PyBytes>> {
+    let kid = array::<16>(key_id, "key_id")?;
+    let blob = plaintext
+        .with(|pt| krypto::seal_with_aad(&key.inner, &kid, pt, (*alg).into(), aad).map_err(err))?;
+    Ok(PyBytes::new(py, &blob))
+}
+
+/// `krypto::open_with_aad` — a wrong or missing `aad` raises `AuthError`.
+#[pyfunction]
+fn open_with_aad(key: &DerivedKey, blob: &[u8], aad: &[u8]) -> PyResult<SecretBuf> {
+    krypto::open_with_aad(&key.inner, blob, aad)
+        .map(SecretBuf::wrap)
+        .map_err(err)
+}
+
 #[pyfunction]
 fn reseal<'py>(
     py: Python<'py>,
@@ -362,6 +387,24 @@ fn reseal<'py>(
 ) -> PyResult<Bound<'py, PyBytes>> {
     let kid = array::<16>(new_key_id, "new_key_id")?;
     let out = krypto::reseal(&old.inner, &new.inner, &kid, blob).map_err(err)?;
+    Ok(PyBytes::new(py, &out))
+}
+
+/// `krypto::reseal_with_aad` — `old_aad` must match the blob, `new_aad` is
+/// bound into the rotated blob.
+#[pyfunction]
+fn reseal_with_aad<'py>(
+    py: Python<'py>,
+    old: &DerivedKey,
+    new: &DerivedKey,
+    new_key_id: &[u8],
+    blob: &[u8],
+    old_aad: &[u8],
+    new_aad: &[u8],
+) -> PyResult<Bound<'py, PyBytes>> {
+    let kid = array::<16>(new_key_id, "new_key_id")?;
+    let out = krypto::reseal_with_aad(&old.inner, &new.inner, &kid, blob, old_aad, new_aad)
+        .map_err(err)?;
     Ok(PyBytes::new(py, &out))
 }
 
@@ -801,6 +844,9 @@ fn krypto_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(seal, m)?)?;
     m.add_function(wrap_pyfunction!(open, m)?)?;
     m.add_function(wrap_pyfunction!(reseal, m)?)?;
+    m.add_function(wrap_pyfunction!(seal_with_aad, m)?)?;
+    m.add_function(wrap_pyfunction!(open_with_aad, m)?)?;
+    m.add_function(wrap_pyfunction!(reseal_with_aad, m)?)?;
     m.add_function(wrap_pyfunction!(blob_key_id, m)?)?;
     m.add_function(wrap_pyfunction!(ct_eq, m)?)?;
     m.add_function(wrap_pyfunction!(sha256, m)?)?;

@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Integration tests for the AEAD/blob layer (seal/open + master key + HKDF).
 
-use krypto::{blob_key_id, open, seal, Alg, Error, MasterKey, SecretBuf};
+use krypto::{
+    blob_key_id, open, open_with_aad, reseal_with_aad, seal, seal_with_aad, Alg, Error, MasterKey,
+    SecretBuf,
+};
 
 // Write a 32-byte master key to a temporary file and load it.
 fn test_master(tag: &str) -> MasterKey {
@@ -346,5 +349,122 @@ fn reseal_rejects_garbage_input() {
     assert!(matches!(
         krypto::reseal(&dk, &dk, &[2u8; 16], b"not a blob"),
         Err(Error::Format(_))
+    ));
+}
+
+// --- caller-supplied AAD (0.9.0) ---
+
+/// AAD roundtrip for every algorithm: seal with AAD, open with the same AAD.
+#[test]
+fn aad_roundtrip_every_alg() {
+    let mk = test_master("aad-rt");
+    let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
+    let key_id = [1u8; 16];
+    let secret = SecretBuf::from_vec(b"aad-secret".to_vec()).unwrap();
+    let aad = b"record/42 channel/#ops at 2026-11-16";
+    for alg in [Alg::Aegis256, Alg::XChaCha20Poly1305, Alg::Aes256Gcm] {
+        let blob = seal_with_aad(&dk, &key_id, &secret, alg, aad).unwrap();
+        let out = open_with_aad(&dk, &blob, aad).unwrap();
+        out.expose(|b| assert_eq!(b, b"aad-secret", "{alg:?}"));
+    }
+}
+
+/// A wrong, missing or empty AAD is tampering: `Auth`, never wrong plaintext.
+#[test]
+fn wrong_or_missing_aad_gives_auth() {
+    let mk = test_master("aad-wrong");
+    let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
+    let secret = SecretBuf::from_vec(b"aad-secret".to_vec()).unwrap();
+    let blob = seal_with_aad(&dk, &[1u8; 16], &secret, Alg::Aegis256, b"context-A").unwrap();
+    assert!(matches!(
+        open_with_aad(&dk, &blob, b"context-B"),
+        Err(Error::Auth)
+    ));
+    assert!(matches!(open_with_aad(&dk, &blob, b""), Err(Error::Auth)));
+    // The plain `open` (empty AAD) must not open an AAD-bound blob either.
+    assert!(matches!(open(&dk, &blob), Err(Error::Auth)));
+}
+
+/// Empty caller AAD is exactly the old behaviour: `seal_with_aad(.., &[])`
+/// opens with plain `open`, and a plain `seal` blob opens with
+/// `open_with_aad(.., &[])` — the blob format did not change.
+#[test]
+fn empty_aad_is_identical_to_seal_open() {
+    let mk = test_master("aad-empty");
+    let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
+    let secret = SecretBuf::from_vec(b"data".to_vec()).unwrap();
+
+    let blob = seal_with_aad(&dk, &[1u8; 16], &secret, Alg::Aegis256, &[]).unwrap();
+    let out = open(&dk, &blob).unwrap();
+    out.expose(|b| assert_eq!(b, b"data"));
+
+    let blob = seal(&dk, &[1u8; 16], &secret, Alg::Aegis256).unwrap();
+    let out = open_with_aad(&dk, &blob, b"").unwrap();
+    out.expose(|b| assert_eq!(b, b"data"));
+}
+
+/// The AAD is bound into the authentication but is not stored in the blob:
+/// the blob must not contain the AAD bytes, and header tampering still fails.
+#[test]
+fn aad_is_not_stored_in_the_blob() {
+    let mk = test_master("aad-stored");
+    let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
+    let secret = SecretBuf::from_vec(b"data".to_vec()).unwrap();
+    let aad = b"context-Zq9-not-in-blob";
+    let blob = seal_with_aad(&dk, &[1u8; 16], &secret, Alg::XChaCha20Poly1305, aad).unwrap();
+    assert!(
+        !blob.windows(aad.len()).any(|w| w == aad),
+        "AAD leaked into the blob"
+    );
+
+    // Header tampering on an AAD blob is still `Auth`.
+    let mut tampered = blob.clone();
+    tampered[6] ^= 0xff; // key_id
+    assert!(matches!(
+        open_with_aad(&dk, &tampered, aad),
+        Err(Error::Auth)
+    ));
+}
+
+/// `reseal_with_aad` rotates an AAD-bound blob: the new blob opens under the
+/// new key with the NEW AAD only — not with the old AAD, not with none.
+#[test]
+fn reseal_with_aad_rotates_the_binding() {
+    let old_mk = master_with("aad-rs-old", 7);
+    let new_mk = master_with("aad-rs-new", 8);
+    let old_dk = old_mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
+    let new_dk = new_mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
+    let pt = SecretBuf::from_vec(b"rotate me".to_vec()).unwrap();
+    let blob = seal_with_aad(&old_dk, &[1u8; 16], &pt, Alg::Aegis256, b"old-context").unwrap();
+
+    let rotated = reseal_with_aad(
+        &old_dk,
+        &new_dk,
+        &[2u8; 16],
+        &blob,
+        b"old-context",
+        b"new-context",
+    )
+    .unwrap();
+
+    assert_eq!(blob_key_id(&rotated).unwrap(), [2u8; 16]);
+    let out = open_with_aad(&new_dk, &rotated, b"new-context").unwrap();
+    out.expose(|b| assert_eq!(b, b"rotate me"));
+    assert!(matches!(
+        open_with_aad(&new_dk, &rotated, b"old-context"),
+        Err(Error::Auth)
+    ));
+    assert!(matches!(open(&new_dk, &rotated), Err(Error::Auth)));
+    // A wrong old AAD fails closed and produces nothing.
+    assert!(matches!(
+        reseal_with_aad(
+            &old_dk,
+            &new_dk,
+            &[2u8; 16],
+            &blob,
+            b"wrong",
+            b"new-context"
+        ),
+        Err(Error::Auth)
     ));
 }

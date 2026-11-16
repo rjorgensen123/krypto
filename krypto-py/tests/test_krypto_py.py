@@ -140,6 +140,28 @@ def test_reseal_and_hmac():
     assert len(mac) == 32 and mac == k.hmac_sha256(a.derive(b"c", b"s"), b"data")
 
 
+def test_seal_open_reseal_with_aad():
+    a, b = master(), master(32)
+    dk, dk_b = a.derive(b"ctx/v1", b"s"), b.derive(b"ctx/v1", b"s")
+    pt = k.SecretBuf.from_vec(b"data")
+    blob = k.seal_with_aad(dk, a.key_id(), pt, k.Alg.Aegis256, b"record/42")
+    assert plain(k.open_with_aad(dk, blob, b"record/42")) == b"data"
+    with pytest.raises(k.AuthError):
+        k.open_with_aad(dk, blob, b"record/43")  # wrong AAD
+    with pytest.raises(k.AuthError):
+        k.open(dk, blob)  # no AAD given
+    # Empty AAD is exactly the plain seal/open contract.
+    blob0 = k.seal_with_aad(dk, a.key_id(), pt, k.Alg.Aegis256, b"")
+    assert plain(k.open(dk, blob0)) == b"data"
+    # Rotation carries the binding: the new blob takes the NEW AAD only.
+    moved = k.reseal_with_aad(dk, dk_b, b.key_id(), blob, b"record/42", b"record/43")
+    assert plain(k.open_with_aad(dk_b, moved, b"record/43")) == b"data"
+    with pytest.raises(k.AuthError):
+        k.open_with_aad(dk_b, moved, b"record/42")
+    with pytest.raises(k.AuthError):
+        k.reseal_with_aad(dk, dk_b, b.key_id(), blob, b"wrong", b"record/43")
+
+
 def test_secretstore(tmp_path):
     path = str(tmp_path / "s.store")
     s = k.SecretStore.open(path, master())

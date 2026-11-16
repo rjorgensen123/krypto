@@ -198,6 +198,12 @@ pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error>;   // any
 pub fn blob_key_id(blob: &[u8]) -> Result<[u8; 16], Error>;   // unknown version or alg: Auth (0.7.3)
 pub fn reseal(old: &DerivedKey, new: &DerivedKey, new_key_id: &[u8; 16], blob: &[u8])
     -> Result<Vec<u8>, Error>;   // 0.6.0 — key rotation; reads the header as open (0.7.3)
+pub fn seal_with_aad(key: &DerivedKey, key_id: &[u8; 16], plaintext: &SecretBuf, alg: Alg, aad: &[u8])
+    -> Result<Vec<u8>, Error>;   // 0.9.0 — caller AAD appended after the 54-byte header
+pub fn open_with_aad(key: &DerivedKey, blob: &[u8], aad: &[u8])
+    -> Result<SecretBuf, Error>;   // 0.9.0 — wrong or missing aad: Auth
+pub fn reseal_with_aad(old: &DerivedKey, new: &DerivedKey, new_key_id: &[u8; 16], blob: &[u8],
+    old_aad: &[u8], new_aad: &[u8]) -> Result<Vec<u8>, Error>;   // 0.9.0 — rotation with AAD
 ```
 
 `Alg::Aegis256` is the default. The other two exist for compatibility with systems that require
@@ -213,6 +219,15 @@ look*, not proof: tampering is discovered when `open` is called, as `Error::Auth
 under a new generation id — the blob's algorithm is preserved. Both keys come from you (krypto
 is stateless and never owns keys); a wrong old key or tampering gives `Auth`, and nothing is
 produced.
+
+`seal_with_aad`, `open_with_aad` and `reseal_with_aad` *(0.9.0)* add **caller-supplied associated
+data**: the AEAD's AAD is the 54-byte header followed by `aad` — the header has a fixed length,
+so the concatenation is unambiguous, and an empty `aad` is exactly the AAD `seal`/`open` use.
+The blob format is unchanged and every existing blob opens as before. The `aad` is **not stored
+in the blob**: supply the same value at open, and a missing or different one fails with `Auth`
+like any other tampering. Use it to bind a blob to a context the plaintext should not carry — a
+record id, a channel, a timestamp. `reseal_with_aad` takes the old AAD (to open) and the new AAD
+(to seal under); the algorithm is preserved as in `reseal`.
 
 > **Tampering gives `Auth`, never wrong plaintext.** The whole blob header is part of the
 > authentication, so changing the algorithm id, key id or version makes the open fail with `Auth`
@@ -231,6 +246,8 @@ magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciph
 - `alg_id`: 1 = AEGIS-256 (256-bit tag) · 2 = XChaCha20-Poly1305 · 3 = AES-256-GCM.
 - **The AAD contract (absolute):** the whole header up to and including the nonce (**54 bytes**)
   is associated data — the "key-id swap test": a changed header never yields a mis-decrypt.
+  *(0.9.0)* `seal_with_aad` appends caller-supplied AAD after that fixed-length header; an empty
+  caller AAD is identical to before, so the format does not change.
   *(0.7.3)* A changed version, alg_id, key_id or nonce, or a body cut short, yields `Auth`, in
   `open`, `reseal` and `blob_key_id` alike; data too short for a header or without the `FAFN`
   magic yields `Format`. *(0.9.0)* The magic is checked before the length: a blob that starts

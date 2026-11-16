@@ -8,7 +8,10 @@
 //! ```
 //! The header up to and including the nonce (54 bytes) is **associated data**,
 //! so a blob never decrypts to anything but what was sealed (the key-id swap
-//! test). Data shorter than the 4-byte magic, or not starting with `FAFN`, is
+//! test). *(0.9.0)* `seal_with_aad`/`open_with_aad`/`reseal_with_aad` append
+//! caller-supplied associated data after that fixed-length header; an empty
+//! caller AAD is exactly the AAD `seal`/`open` use, so the format is unchanged.
+//! Data shorter than the 4-byte magic, or not starting with `FAFN`, is
 //! not a krypto blob: `Error::Format`. Any other change — the blob cut short
 //! of the 54-byte header, version, alg_id, key_id, nonce, ciphertext, tag —
 //! is `Error::Auth` (0.7.3; the cut-short header since 0.9.0).
@@ -88,6 +91,26 @@ pub fn seal(
     plaintext: &SecretBuf,
     alg: Alg,
 ) -> Result<Vec<u8>, Error> {
+    seal_with_aad(key, key_id, plaintext, alg, &[])
+}
+
+/// [`seal`] with caller-supplied associated data (0.9.0).
+///
+/// The AEAD's AAD is the 54-byte header followed by `aad` — the header has a
+/// fixed length, so the concatenation is unambiguous and an empty `aad` is
+/// byte-for-byte the AAD `seal` uses: **the blob format is unchanged** and
+/// every blob sealed so far still opens. `aad` is *not* stored in the blob;
+/// it must be supplied again at [`open_with_aad`], and a missing or different
+/// `aad` fails with [`Error::Auth`] like any other tampering. Use it to bind a
+/// blob to a context the plaintext should not carry — a record id, a channel,
+/// a timestamp.
+pub fn seal_with_aad(
+    key: &DerivedKey,
+    key_id: &[u8; KEY_ID_LEN],
+    plaintext: &SecretBuf,
+    alg: Alg,
+    aad: &[u8],
+) -> Result<Vec<u8>, Error> {
     let mut nonce = [0u8; NONCE_FIELD];
     getrandom::fill(&mut nonce[..alg.nonce_len()])
         .map_err(|e| Error::Hardening(format!("getrandom failed: {e}")))?;
@@ -100,8 +123,14 @@ pub fn seal(
     header.extend_from_slice(&nonce);
     debug_assert_eq!(header.len(), HEADER_LEN);
 
+    // The header has a fixed length (54), so header ++ aad is unambiguous and
+    // empty aad is exactly the old AAD.
+    let mut aad_full = Vec::with_capacity(HEADER_LEN + aad.len());
+    aad_full.extend_from_slice(&header);
+    aad_full.extend_from_slice(aad);
+
     let res = key.with_key(|k| {
-        plaintext.expose(|pt| primitive_seal(alg, k, &nonce[..alg.nonce_len()], pt, &header))
+        plaintext.expose(|pt| primitive_seal(alg, k, &nonce[..alg.nonce_len()], pt, &aad_full))
     });
     crate::secret::scrub_stack::<AEAD_SCRUB_BYTES>();
     let mut ct_tag = res??;
@@ -136,6 +165,15 @@ fn read_header(blob: &[u8]) -> Result<(Alg, &[u8], &[u8]), Error> {
 /// tampering or a wrong key, `Error::Format` if `blob` is not a krypto blob at
 /// all. Never panics on invalid input.
 pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error> {
+    open_with_aad(key, blob, &[])
+}
+
+/// [`open`] with caller-supplied associated data (0.9.0). `aad` must be the
+/// same value the blob was sealed with via [`seal_with_aad`]; it is not stored
+/// in the blob, so a missing or different `aad` fails with [`Error::Auth`]
+/// like any other tampering. An empty `aad` opens exactly the blobs `seal`
+/// produces.
+pub fn open_with_aad(key: &DerivedKey, blob: &[u8], aad: &[u8]) -> Result<SecretBuf, Error> {
     let (alg, header, body) = read_header(blob)?;
     let nonce_start = 6 + KEY_ID_LEN;
     // `key_id` is covered by the AAD, so it cannot be tampered with silently —
@@ -147,7 +185,12 @@ pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error> {
     // BEFORE attempting to open.
     let nonce = &header[nonce_start..nonce_start + NONCE_FIELD];
 
-    let res = key.with_key(|k| primitive_open(alg, k, &nonce[..alg.nonce_len()], body, header));
+    // Same composition as `seal_with_aad`: the fixed-length header, then `aad`.
+    let mut aad_full = Vec::with_capacity(HEADER_LEN + aad.len());
+    aad_full.extend_from_slice(header);
+    aad_full.extend_from_slice(aad);
+
+    let res = key.with_key(|k| primitive_open(alg, k, &nonce[..alg.nonce_len()], body, &aad_full));
     crate::secret::scrub_stack::<AEAD_SCRUB_BYTES>();
     let pt = res??;
     SecretBuf::from_vec(pt)
@@ -171,9 +214,23 @@ pub fn reseal(
     new_key_id: &[u8; KEY_ID_LEN],
     blob: &[u8],
 ) -> Result<Vec<u8>, Error> {
+    reseal_with_aad(old, new, new_key_id, blob, &[], &[])
+}
+
+/// [`reseal`] with caller-supplied associated data (0.9.0): `old_aad` must
+/// match the blob (as in [`open_with_aad`]), `new_aad` is bound into the new
+/// blob (as in [`seal_with_aad`]). The algorithm is preserved, as in `reseal`.
+pub fn reseal_with_aad(
+    old: &DerivedKey,
+    new: &DerivedKey,
+    new_key_id: &[u8; KEY_ID_LEN],
+    blob: &[u8],
+    old_aad: &[u8],
+    new_aad: &[u8],
+) -> Result<Vec<u8>, Error> {
     let (alg, _, _) = read_header(blob)?;
-    let pt = open(old, blob)?;
-    seal(new, new_key_id, &pt, alg)
+    let pt = open_with_aad(old, blob, old_aad)?;
+    seal_with_aad(new, new_key_id, &pt, alg, new_aad)
 }
 
 /// The `key_id` from a blob header, without attempting to decrypt.

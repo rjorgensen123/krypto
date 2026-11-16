@@ -99,6 +99,14 @@ back = krypto.open(log_key, blob)   # a SecretBuf: the plaintext stays locked un
 assert krypto.blob_key_id(blob) == key_id
 ```
 
+To bind a blob to a context without putting it in the plaintext, pass AAD — it is not stored in
+the blob, so supply the same value when opening (a wrong one raises `AuthError`):
+
+```python
+blob = krypto.seal_with_aad(log_key, key_id, secret, krypto.Alg.Aegis256, b"record/42")
+back = krypto.open_with_aad(log_key, blob, b"record/42")
+```
+
 A changed blob, or the wrong key, raises `AuthError`:
 
 ```python

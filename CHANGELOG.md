@@ -28,6 +28,18 @@ the rollback anchor is kept by the caller, outside the file. `rotate` keeps the 
 and, on a v2 file, resets the counter to 0 with a fresh salt and key id, `key_check` and
 `container_mac` recomputed.
 
+### Added — caller-supplied AAD on blobs: `seal_with_aad` / `open_with_aad` / `reseal_with_aad` *(2026-11-16)*
+
+`seal`, `open` and `reseal` keep their signatures and behaviour. The new `_with_aad` variants let
+the caller bind a blob to a context — a record id, a channel, a timestamp — without putting it in
+the plaintext: the AEAD's AAD is the 54-byte header followed by the caller's `aad`. The header has
+a fixed length, so the concatenation is unambiguous and an empty `aad` is exactly the AAD
+`seal`/`open` have always used: **the `FAFN` blob format is unchanged** and every existing blob
+opens as before. The `aad` is not stored in the blob; it must be supplied again at open, and a
+missing or different `aad` fails with `Auth` like any other tampering. `reseal_with_aad` takes
+the old AAD (to open) and the new AAD (to seal under) and preserves the blob's algorithm, as
+`reseal` does. Mirrored in krypto-py (`seal_with_aad`, `open_with_aad`, `reseal_with_aad`).
+
 ### Changed — `open` on a version 2 file fails closed *(2026-11-16)*
 
 On a v2 file, `open` verifies `key_check` and then `container_mac`, both `Auth` on mismatch: a

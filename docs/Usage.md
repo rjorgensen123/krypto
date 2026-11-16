@@ -84,7 +84,8 @@ at once. On Linux, a process with `CAP_IPC_LOCK` is not limited by it.
 
 *(0.8.2)* **What is left on the stack.** The libraries krypto uses for encryption, HMAC, HKDF and
 Argon2 leave copies of keys in the stack memory they used. krypto overwrites that stack after
-`seal`, `open`, `reseal`, `derive`, `key_id`, `hmac_sha256` and the password functions. Where a
+`seal`, `open`, `reseal` (and their `_with_aad` variants), `derive`, `key_id`, `hmac_sha256` and
+the password functions. Where a
 library has a `zeroize` feature, krypto turns it on, so its types wipe what they hold when they are
 dropped: AES-256-GCM, XChaCha20-Poly1305 (except the Poly1305 state it makes for each message),
 HMAC and SHA-256. AEGIS-256 and HKDF have no such feature: for AEGIS-256 only the overwrite removes
@@ -148,6 +149,19 @@ let blob = seal(&log_key, &key_id, &secret, Alg::Aegis256)?;
 
 let back = open(&log_key, &blob)?;   // gives you a SecretBuf
 ```
+
+*(0.9.0)* To bind a blob to a context — a record id, a channel, a timestamp — without putting it
+in the plaintext, use `seal_with_aad` and `open_with_aad`. The AAD is not stored in the blob;
+supply the same value when opening, and a missing or different one fails like any tampering:
+
+```rust
+use krypto::{seal_with_aad, open_with_aad, Alg};
+
+let blob = seal_with_aad(&log_key, &key_id, &secret, Alg::Aegis256, b"record/42")?;
+let back = open_with_aad(&log_key, &blob, b"record/42")?;   // wrong AAD: Error::Auth
+```
+
+The blob format is unchanged — an empty AAD is exactly what `seal`/`open` have always used.
 
 `key_id` is 16 bytes you choose yourself, carried in the blob in plaintext. It exists so you can
 see **which key generation** a blob belongs to, without opening it:
@@ -492,7 +506,7 @@ None of them carry key material or plaintext. You can log them as they are.
 
 | Version | What arrived |
 |---|---|
-| **0.9.0** | **Store file format v2** (`spec/SPEC-secretstore.md`): the whole file is authenticated (`container_mac`), the master key is checked at `open` (`key_check`), and a write counter enables rollback detection (`open_with_min_counter`, `Error::Rollback`) · new stores are v2, an opened file keeps its version · `upgrade()` (v1 → v2, one-way), `open_with_version`, `version()`, `counter()` · `rotate` keeps the version and resets the counter on v2 · a blob cut short of its 54-byte header past the `FAFN` magic now gives `Auth`, not `Format` · `SecretStore::put` checks the 16 MiB cap on the prospective file size before sealing |
+| **0.9.0** | **Store file format v2** (`spec/SPEC-secretstore.md`): the whole file is authenticated (`container_mac`), the master key is checked at `open` (`key_check`), and a write counter enables rollback detection (`open_with_min_counter`, `Error::Rollback`) · new stores are v2, an opened file keeps its version · `upgrade()` (v1 → v2, one-way), `open_with_version`, `version()`, `counter()` · `rotate` keeps the version and resets the counter on v2 · a blob cut short of its 54-byte header past the `FAFN` magic now gives `Auth`, not `Format` · `SecretStore::put` checks the 16 MiB cap on the prospective file size before sealing · caller-supplied AAD on blobs: `seal_with_aad`/`open_with_aad`/`reseal_with_aad` — the blob format is unchanged, an empty AAD is the old behaviour |
 | **0.8.1** | No functional change: the documentation is corrected where it said more than the code does, a test file no longer names the machine it was made on, and the Python packages carry no paths from the machine that built them |
 | **0.8.0** | **Python: `krypto-py`.** The same API from Python, built from the same code: what one seals, the other opens; one API reference, with the guarantees that differ set apart · `MasterKey::key_id` in the library, the value `krypto-cli` has always used · the repository is a workspace of `krypto` and `krypto-py` · `krypto-cli` is a small helper with nine commands |
 | **0.7.3** | `drop_filesystem` changes the root only as its last step, on the directory it checked; when it fails, the root is as it was, and so is the working directory unless stepping back fails too · every change to a blob past its `FAFN` magic gives `Auth` (`krypto-cli` exit 3, though `krypto-cli open` gives 4 for a changed key id), and `SecretStore::get` gives `Auth` for a key id that does not match · an empty `info` for `derive` is `Format` · random bytes are capped at 1 MiB per call, with your own cap as an option |
