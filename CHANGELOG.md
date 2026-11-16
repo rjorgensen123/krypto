@@ -48,6 +48,11 @@ carry the magic is still `Format`.
 The prospective file size (header included) is computed before the value is encrypted; over the
 cap fails with the same `Format` as before, just without sealing or building the file first.
 
+### Fixed — `hex::decode` and `base64::decode` fail with `Hardening` instead of aborting *(2026-11-16)*
+
+Both decoders reserve the output buffer with `try_reserve_exact`: if the memory cannot be had,
+the error is `Error::Hardening` (krypto-py `HardeningError`), never a process abort.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*

@@ -22,7 +22,9 @@ pub fn encode(bytes: &[u8]) -> String {
 }
 
 /// Decode canonical (lowercase) hex. Fail-closed: odd length, uppercase or
-/// any non-hex character is `Error::Format` — never a guess.
+/// any non-hex character is `Error::Format` — never a guess. The output buffer
+/// is reserved with `try_reserve_exact`: memory that cannot be had is
+/// `Error::Hardening`, never a crash (0.9.0).
 pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
     if !s.len().is_multiple_of(2) {
         return Err(Error::Format(format!(
@@ -31,7 +33,10 @@ pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
         )));
     }
     let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(s.len() / 2);
+    let mut out = Vec::new();
+    out.try_reserve_exact(s.len() / 2).map_err(|_| {
+        Error::Hardening(format!("cannot allocate {} bytes for hex decode", s.len() / 2))
+    })?;
     let (pairs, _) = bytes.as_chunks::<2>();
     for pair in pairs {
         let hi = nibble(pair[0])?;

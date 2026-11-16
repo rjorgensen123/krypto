@@ -533,7 +533,8 @@ pub fn decode(s: &str) -> Result<Vec<u8>, Error>;      // fail-closed: [0-9a-f] 
 ```
 
 One canonical form: `decode` rejects UPPERCASE on purpose — two spellings of the same bytes must
-not be able to exist in signed forms and fingerprint comparisons.
+not be able to exist in signed forms and fingerprint comparisons. *(0.9.0)* The output buffer is
+reserved with `try_reserve_exact`: memory that cannot be had is `Error::Hardening`, never a crash.
 
 ---
 
@@ -548,7 +549,9 @@ pub fn decode_nopad(s: &str) -> Result<Vec<u8>, Error>;    // fail-closed, rejec
 
 Same philosophy as `hex`: one spelling — whitespace, wrong padding and non-canonical trailing
 bits are rejected. Keys and signatures on the wire are still HEX; base64 exists only for formats
-that ARE base64 by nature (`SHA256:<base64-no-pad>` fingerprints, PEM).
+that ARE base64 by nature (`SHA256:<base64-no-pad>` fingerprints, PEM). *(0.9.0)* `decode` and
+`decode_nopad` reserve the output buffer with `try_reserve_exact`: memory that cannot be had is
+`Error::Hardening`, never a crash.
 
 ---
 

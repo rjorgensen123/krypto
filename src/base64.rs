@@ -52,7 +52,8 @@ pub fn encode_nopad(bytes: &[u8]) -> String {
 
 /// Decode canonical padded base64. Fail-closed: whitespace, invalid
 /// characters, missing/misplaced padding or non-zero discarded trailing bits
-/// are `Error::Format` — never a guess.
+/// are `Error::Format` — never a guess. Memory that cannot be had for the
+/// output buffer is `Error::Hardening`, never a crash (0.9.0).
 pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
     if !s.len().is_multiple_of(4) {
         return Err(Error::Format(format!(
@@ -70,6 +71,8 @@ pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
 
 /// Decode canonical unpadded base64 (ssh fingerprint form). Fail-closed:
 /// padding characters are rejected — the unpadded form has ONE spelling.
+/// Memory that cannot be had for the output buffer is `Error::Hardening`,
+/// never a crash (0.9.0).
 pub fn decode_nopad(s: &str) -> Result<Vec<u8>, Error> {
     if s.contains('=') {
         return Err(Error::Format(
@@ -88,7 +91,12 @@ pub fn decode_nopad(s: &str) -> Result<Vec<u8>, Error> {
 /// Decode the alphabet body (no padding chars). Rejects invalid characters
 /// and non-zero discarded bits in the final quantum (canonical: one spelling).
 fn decode_body(s: &str) -> Result<Vec<u8>, Error> {
-    let mut out = Vec::with_capacity(s.len() / 4 * 3 + 2);
+    // The output buffer is reserved with `try_reserve_exact`: memory that
+    // cannot be had is `Error::Hardening`, never a crash (0.9.0).
+    let cap = s.len() / 4 * 3 + 2;
+    let mut out = Vec::new();
+    out.try_reserve_exact(cap)
+        .map_err(|_| Error::Hardening(format!("cannot allocate {cap} bytes for base64 decode")))?;
     let mut acc: u32 = 0;
     let mut nbits: u32 = 0;
     for &c in s.as_bytes() {
