@@ -60,11 +60,14 @@ fn persistence_across_reopen() {
 
 // --- adversarial file input (the parser must never panic) ------------------ #
 
+/// A valid store file made by this build, as **version 1** — the byte-offset
+/// and tamper tests below speak about the frozen v1 format (since 0.9.0,
+/// `open` creates v2 files; `open_with_version(.., 1)` pins v1).
 fn valid_store_bytes(tag: &str) -> (std::path::PathBuf, MasterKey, Vec<u8>) {
     let mk = master(tag);
     let path = store_path(tag);
     {
-        let mut s = SecretStore::open(&path, &mk).unwrap();
+        let mut s = SecretStore::open_with_version(&path, &mk, 1).unwrap();
         s.put("dev/x", &SecretBuf::from_vec(b"secret".to_vec()).unwrap())
             .unwrap();
     }
@@ -132,11 +135,13 @@ fn hostile_blob_length_gives_format_not_panic() {
 
 #[test]
 fn blob_is_bound_to_its_name() {
-    // Change the name a blob sits under → open must give Auth (per-name DEK).
+    // Change the name a blob sits under → get must give Auth (per-name DEK).
+    // A v1 store, so `open` does not already reject the tampering (0.9.0 v2
+    // files carry a container MAC over the entry table).
     let mk = master("bind");
     let path = store_path("bind");
     {
-        let mut s = SecretStore::open(&path, &mk).unwrap();
+        let mut s = SecretStore::open_with_version(&path, &mk, 1).unwrap();
         s.put("a", &SecretBuf::from_vec(b"value".to_vec()).unwrap())
             .unwrap();
     }
@@ -161,10 +166,12 @@ fn blob_is_bound_to_its_name() {
 /// alarm.
 #[test]
 fn key_id_mismatch_in_a_store_gives_auth() {
+    // A v1 store, so the tampering is caught by `get`, not already at `open`
+    // by the v2 container MAC (0.9.0).
     let mk = master("gen");
     let path = store_path("gen");
     {
-        let mut s = SecretStore::open(&path, &mk).unwrap();
+        let mut s = SecretStore::open_with_version(&path, &mk, 1).unwrap();
         s.put("a", &SecretBuf::from_vec(b"value".to_vec()).unwrap())
             .unwrap();
     }
@@ -313,15 +320,19 @@ fn rotate_reencrypts_everything_under_the_new_master() {
     drop(rotated); // one handle per file (0.7.2)
 
     // Reopening the FILE with the new master works; with the old master the
-    // per-name DEKs no longer match → Auth on get (the file is one generation).
+    // file no longer even opens (0.9.0): a v2 store checks the master key at
+    // `open` through its key_check, so the old master is Auth right there.
     let reopened = SecretStore::open(&path, &new_mk).unwrap();
+    assert_eq!(reopened.version(), 2);
     reopened
         .get("b")
         .unwrap()
         .expose(|b| assert_eq!(b, b"second"));
     drop(reopened);
-    let stale = SecretStore::open(&path, &old_mk).unwrap();
-    assert!(matches!(stale.get("a"), Err(Error::Auth)));
+    assert!(matches!(
+        SecretStore::open(&path, &old_mk),
+        Err(Error::Auth)
+    ));
 
     let _ = std::fs::remove_file(&path);
 }
@@ -332,7 +343,9 @@ fn rotate_with_the_wrong_master_leaves_the_file_untouched() {
     let wrong = master_with("rot-fc-wrong", 11);
     let path = store_path("rotate-failclosed");
 
-    let mut store = SecretStore::open(&path, &mk).unwrap();
+    // A v1 store: `open` does not check the master key on v1, so the wrong
+    // master gets a handle and the failure shows up when rotate decrypts.
+    let mut store = SecretStore::open_with_version(&path, &mk, 1).unwrap();
     store
         .put("a", &SecretBuf::from_vec(b"keep me".to_vec()).unwrap())
         .unwrap();
@@ -550,12 +563,30 @@ fn files_made_once_still_open() {
     let dir = store_dir("frozen");
     std::fs::copy(fixture("rust.store"), dir.join("rust.store")).unwrap();
     let store = SecretStore::open(dir.join("rust.store"), &mk).unwrap();
+    assert_eq!(store.version(), 1, "rust.store is the frozen v1 fixture");
+    assert_eq!(store.counter(), 0, "a v1 file has no counter");
     assert_eq!(store.list(""), ["from-rust"]);
     store
         .get("from-rust")
         .unwrap()
         .expose(|b| assert_eq!(b, b"value from rust"));
     drop(store);
+    // The v2 fixture, made once by this code with the same master key (0.9.0).
+    std::fs::copy(fixture("rust-v2.store"), dir.join("rust-v2.store")).unwrap();
+    let store = SecretStore::open(dir.join("rust-v2.store"), &mk).unwrap();
+    assert_eq!(store.version(), 2);
+    assert_eq!(store.list(""), ["from-rust"]);
+    store
+        .get("from-rust")
+        .unwrap()
+        .expose(|b| assert_eq!(b, b"value from rust"));
+    drop(store);
+    // A wrong master key is Auth at `open` on a v2 file, even with entries.
+    let wrong = MasterKey::from_bytes(SecretBuf::from_vec(vec![7u8; 32]).unwrap()).unwrap();
+    assert!(matches!(
+        SecretStore::open(dir.join("rust-v2.store"), &wrong),
+        Err(Error::Auth)
+    ));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -747,4 +778,444 @@ fn put_fails_before_the_rename_when_the_directory_cannot_be_opened() {
     assert!(left.is_empty(), "tmp files left behind: {left:?}");
     drop(s);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// --- store file format v2 (0.9.0) -------------------------------------------
+//
+// v2 header, 109 bytes: magic "FST1"(4) | ver=2(1) | salt(16) @5 | key_id(16)
+// @21 | key_check(32) @37 | counter u64LE(8) @69 | container_mac(32) @77 |
+// entries @109 in the identical v1 encoding.
+
+/// A valid v2 store file made by this build, with `names` as entries holding
+/// equal-length values (so entries can be swapped byte-for-byte).
+fn v2_store_bytes(tag: &str, names: &[&str]) -> (std::path::PathBuf, MasterKey, Vec<u8>) {
+    let mk = master(tag);
+    let path = store_path(tag);
+    {
+        let mut s = SecretStore::open(&path, &mk).unwrap();
+        assert_eq!(s.version(), 2);
+        for (i, n) in names.iter().enumerate() {
+            let v = SecretBuf::from_vec(format!("value-{i:02}").into_bytes()).unwrap();
+            s.put(n, &v).unwrap();
+        }
+    }
+    let bytes = std::fs::read(&path).unwrap();
+    (path, master(tag), bytes)
+}
+
+/// The byte ranges of the entries in a v2 store file (entries start at 109).
+fn v2_entry_ranges(bytes: &[u8]) -> Vec<(usize, usize)> {
+    let mut off = 109;
+    let mut out = Vec::new();
+    while off < bytes.len() {
+        let nlen = u16::from_le_bytes([bytes[off], bytes[off + 1]]) as usize;
+        let blen_off = off + 2 + nlen;
+        let blen = u32::from_le_bytes(bytes[blen_off..blen_off + 4].try_into().unwrap()) as usize;
+        let end = blen_off + 4 + blen;
+        out.push((off, end));
+        off = end;
+    }
+    out
+}
+
+#[test]
+fn a_new_store_made_by_open_is_version_2() {
+    let mk = master("v2new");
+    let path = store_path("v2new");
+    let s = SecretStore::open(&path, &mk).unwrap();
+    assert_eq!(s.version(), 2);
+    assert_eq!(s.counter(), 0, "a new v2 store starts at counter 0");
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(&bytes[0..4], b"FST1");
+    assert_eq!(bytes[4], 2);
+    assert_eq!(bytes.len(), 109, "an empty v2 store is exactly its header");
+    drop(s);
+    // And it reopens as v2.
+    let s = SecretStore::open(&path, &mk).unwrap();
+    assert_eq!(s.version(), 2);
+    assert_eq!(s.counter(), 0);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn open_with_version_1_creates_a_v1_store_and_put_keeps_it_v1() {
+    let mk = master("v1sticky");
+    let path = store_path("v1sticky");
+    let mut s = SecretStore::open_with_version(&path, &mk, 1).unwrap();
+    assert_eq!(s.version(), 1);
+    assert_eq!(s.counter(), 0, "a v1 file has no counter");
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(bytes[4], 1);
+    assert_eq!(bytes.len(), 37, "an empty v1 store is exactly its header");
+    s.put("k", &SecretBuf::from_vec(b"v".to_vec()).unwrap())
+        .unwrap();
+    assert_eq!(
+        std::fs::read(&path).unwrap()[4],
+        1,
+        "put keeps the file v1 (sticky version)"
+    );
+    drop(s);
+    // Reopening the existing file keeps v1, however it is asked for.
+    assert_eq!(SecretStore::open(&path, &mk).unwrap().version(), 1);
+    assert_eq!(
+        SecretStore::open_with_version(&path, &mk, 2).unwrap().version(),
+        1
+    );
+    // Anything but 1 or 2 is Format, whether or not the file exists.
+    assert!(matches!(
+        SecretStore::open_with_version(&path, &mk, 3),
+        Err(Error::Format(_))
+    ));
+    let other = store_path("v1sticky-bad");
+    assert!(matches!(
+        SecretStore::open_with_version(&other, &mk, 0),
+        Err(Error::Format(_))
+    ));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn upgrade_v1_to_v2_keeps_everything_readable_and_is_one_way() {
+    let mk = master("upg");
+    let path = store_path("upg");
+    let mut s = SecretStore::open_with_version(&path, &mk, 1).unwrap();
+    s.put("a", &SecretBuf::from_vec(b"first".to_vec()).unwrap())
+        .unwrap();
+    s.put("b/c", &SecretBuf::from_vec(b"second".to_vec()).unwrap())
+        .unwrap();
+    let v1_bytes = std::fs::read(&path).unwrap();
+    assert_eq!(v1_bytes[4], 1);
+    drop(s);
+
+    let s = SecretStore::open(&path, &mk).unwrap();
+    assert_eq!(s.version(), 1);
+    let s = s.upgrade().unwrap();
+    assert_eq!(s.version(), 2);
+    assert_eq!(s.counter(), 0);
+    s.get("a").unwrap().expose(|b| assert_eq!(b, b"first"));
+    s.get("b/c").unwrap().expose(|b| assert_eq!(b, b"second"));
+    assert_eq!(s.list(""), ["a", "b/c"]);
+    let v2_bytes = std::fs::read(&path).unwrap();
+    assert_eq!(v2_bytes[4], 2);
+    // Re-wrap only, no re-encryption: the entry table is byte-identical and
+    // the file grows by exactly the 72 extra header bytes (109 - 37).
+    assert_eq!(&v2_bytes[109..], &v1_bytes[37..]);
+    assert_eq!(v2_bytes.len(), v1_bytes.len() + 72);
+    drop(s);
+
+    // One-way: reopening the file — even asking for v1 — keeps it v2.
+    let s = SecretStore::open_with_version(&path, &mk, 1).unwrap();
+    assert_eq!(s.version(), 2);
+    assert_eq!(std::fs::read(&path).unwrap()[4], 2);
+    s.get("a").unwrap().expose(|b| assert_eq!(b, b"first"));
+    drop(s);
+    // Upgrading a store that is already v2 is a no-op.
+    let s = SecretStore::open(&path, &mk).unwrap();
+    let s = s.upgrade().unwrap();
+    assert_eq!(s.version(), 2);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn upgrade_with_the_wrong_master_leaves_the_file_untouched() {
+    let mk = master_with("upg-fc", 9);
+    let wrong = master_with("upg-fc-wrong", 11);
+    let path = store_path("upgrade-failclosed");
+    {
+        let mut s = SecretStore::open_with_version(&path, &mk, 1).unwrap();
+        s.put("a", &SecretBuf::from_vec(b"keep me".to_vec()).unwrap())
+            .unwrap();
+    }
+    let before = std::fs::read(&path).unwrap();
+    // v1 `open` does not check the master key, but upgrade decrypts and
+    // verifies every entry first, so the wrong master aborts with Auth and
+    // nothing is written.
+    let stale = SecretStore::open_with_version(&path, &wrong, 1).unwrap();
+    assert!(matches!(stale.upgrade(), Err(Error::Auth)));
+    assert_eq!(std::fs::read(&path).unwrap(), before, "file untouched");
+    assert_eq!(std::fs::read(&path).unwrap()[4], 1);
+    // The real master still reads it.
+    let s = SecretStore::open(&path, &mk).unwrap();
+    s.get("a").unwrap().expose(|b| assert_eq!(b, b"keep me"));
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Tampering with the entry table of a v2 file is Auth at `open`: the
+/// container MAC covers header[0..77] || entries as one unit.
+#[test]
+fn a_flipped_byte_in_a_v2_entry_gives_auth_at_open() {
+    let (path, mk, mut bytes) = v2_store_bytes("tamper-flip", &["aa"]);
+    let (start, end) = v2_entry_ranges(&bytes)[0];
+    let _ = start;
+    bytes[end - 1] ^= 0xff; // last byte of the blob (the AEAD tag)
+    std::fs::write(&path, &bytes).unwrap();
+    assert!(matches!(SecretStore::open(&path, &mk), Err(Error::Auth)));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_deleted_entry_in_a_v2_store_gives_auth_at_open() {
+    let (path, mk, bytes) = v2_store_bytes("tamper-del", &["aa", "bb"]);
+    let r = v2_entry_ranges(&bytes);
+    let mut out = bytes[..r[0].0].to_vec();
+    out.extend_from_slice(&bytes[r[1].0..]); // drop the first entry entirely
+    std::fs::write(&path, &out).unwrap();
+    assert!(matches!(SecretStore::open(&path, &mk), Err(Error::Auth)));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn two_swapped_entries_in_a_v2_store_give_auth_at_open() {
+    // Equal-length names and values, so the swapped file still parses — it is
+    // the container MAC that catches the reordering.
+    let (path, mk, mut bytes) = v2_store_bytes("tamper-swap", &["aa", "bb"]);
+    let r = v2_entry_ranges(&bytes);
+    assert_eq!(r.len(), 2);
+    assert_eq!(r[0].1 - r[0].0, r[1].1 - r[1].0, "entries must be same-sized");
+    let e0 = bytes[r[0].0..r[0].1].to_vec();
+    let e1 = bytes[r[1].0..r[1].1].to_vec();
+    bytes[r[0].0..r[0].1].copy_from_slice(&e1);
+    bytes[r[1].0..r[1].1].copy_from_slice(&e0);
+    std::fs::write(&path, &bytes).unwrap();
+    assert!(matches!(SecretStore::open(&path, &mk), Err(Error::Auth)));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn an_injected_entry_in_a_v2_store_gives_auth_at_open() {
+    let (path, mk, mut bytes) = v2_store_bytes("tamper-inject", &["aa"]);
+    // Append a well-formed entry with a garbage blob: the structure is valid,
+    // so the container MAC is what rejects it (a name must not be injectable
+    // into list()).
+    let mut entry = Vec::new();
+    entry.extend_from_slice(&5u16.to_le_bytes());
+    entry.extend_from_slice(b"evil!");
+    entry.extend_from_slice(&32u32.to_le_bytes());
+    entry.extend_from_slice(&[0u8; 32]);
+    bytes.extend_from_slice(&entry);
+    std::fs::write(&path, &bytes).unwrap();
+    assert!(matches!(SecretStore::open(&path, &mk), Err(Error::Auth)));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_truncated_v2_store_gives_auth_at_open() {
+    // Cut the file back to just the 109-byte header: the entry table is then
+    // empty but still well-formed, so it is the container MAC that fails.
+    // (A cut inside an entry is a structure error — Format — which the spec
+    // checks before the MACs.)
+    let (path, mk, bytes) = v2_store_bytes("tamper-trunc", &["aa", "bb"]);
+    std::fs::write(&path, &bytes[..109]).unwrap();
+    assert!(matches!(SecretStore::open(&path, &mk), Err(Error::Auth)));
+    let _ = std::fs::remove_file(&path);
+}
+
+/// Any flipped byte in the v2-only header fields is Auth at `open`: the
+/// key_check covers the salt, the container_mac covers the key_id, the
+/// counter and the entries, and the MAC field itself is compared.
+#[test]
+fn a_tampered_v2_header_gives_auth_at_open() {
+    let (path, mk, bytes) = v2_store_bytes("tamper-hdr", &["aa"]);
+    // salt(5..21), key_id(21..37), key_check(37..69), counter(69..77),
+    // container_mac(77..109).
+    for offset in [5, 30, 50, 70, 90, 108] {
+        let mut tampered = bytes.clone();
+        tampered[offset] ^= 0xff;
+        std::fs::write(&path, &tampered).unwrap();
+        assert!(
+            matches!(SecretStore::open(&path, &mk), Err(Error::Auth)),
+            "offset {offset}"
+        );
+    }
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_wrong_master_key_on_a_v2_store_gives_auth_at_open() {
+    let mk = master("v2wrong");
+    let wrong = master_with("v2wrong-wrong", 7);
+    // An empty v2 store: the key_check alone already rejects the wrong master.
+    let path = store_path("v2wrong-empty");
+    drop(SecretStore::open(&path, &mk).unwrap());
+    assert!(matches!(SecretStore::open(&path, &wrong), Err(Error::Auth)));
+    let _ = std::fs::remove_file(&path);
+
+    // A v2 store with entries: same, and the right master still opens it.
+    let (path, _mk, _bytes) = v2_store_bytes("v2wrong-full", &["aa"]);
+    assert!(matches!(SecretStore::open(&path, &wrong), Err(Error::Auth)));
+    let s = SecretStore::open(&path, &mk).unwrap();
+    s.get("aa").unwrap().expose(|b| assert_eq!(b, b"value-00"));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn open_with_min_counter_detects_a_rolled_back_file() {
+    let mk = master("rollback");
+    let path = store_path("rollback");
+    let mut s = SecretStore::open(&path, &mk).unwrap();
+    assert_eq!(s.counter(), 0);
+    s.put("a", &SecretBuf::from_vec(b"1".to_vec()).unwrap())
+        .unwrap();
+    s.put("b", &SecretBuf::from_vec(b"2".to_vec()).unwrap())
+        .unwrap();
+    assert_eq!(s.counter(), 2);
+    drop(s);
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(u64::from_le_bytes(bytes[69..77].try_into().unwrap()), 2);
+
+    // Anchored at or below the file's counter: opens.
+    assert_eq!(
+        SecretStore::open_with_min_counter(&path, &mk, 2).unwrap().counter(),
+        2
+    );
+    assert_eq!(
+        SecretStore::open_with_min_counter(&path, &mk, 0).unwrap().counter(),
+        2
+    );
+    // Above it: Rollback, with both counters in the error.
+    match SecretStore::open_with_min_counter(&path, &mk, 3) {
+        Err(Error::Rollback {
+            file_counter,
+            min_counter,
+        }) => {
+            assert_eq!(file_counter, 2);
+            assert_eq!(min_counter, 3);
+        }
+        other => panic!("expected Rollback, got {:?}", other.map(|_| ())),
+    }
+    // The failed open did not touch the file.
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+
+    // A v1 file counts as counter 0: any positive anchor is a rollback.
+    let v1path = store_path("rollback-v1");
+    drop(SecretStore::open_with_version(&v1path, &mk, 1).unwrap());
+    match SecretStore::open_with_min_counter(&v1path, &mk, 1) {
+        Err(Error::Rollback {
+            file_counter,
+            min_counter,
+        }) => {
+            assert_eq!((file_counter, min_counter), (0, 1));
+        }
+        other => panic!("expected Rollback, got {:?}", other.map(|_| ())),
+    }
+    SecretStore::open_with_min_counter(&v1path, &mk, 0).unwrap();
+
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(&v1path);
+}
+
+#[test]
+fn the_v2_counter_increases_on_every_write() {
+    let mk = master("counter");
+    let path = store_path("counter");
+    let mut s = SecretStore::open(&path, &mk).unwrap();
+    assert_eq!(s.counter(), 0, "a new v2 store starts at 0");
+    let v = SecretBuf::from_vec(b"v".to_vec()).unwrap();
+    s.put("a", &v).unwrap();
+    assert_eq!(s.counter(), 1);
+    s.put("b", &v).unwrap();
+    assert_eq!(s.counter(), 2);
+    s.delete("a").unwrap();
+    assert_eq!(s.counter(), 3);
+    drop(s);
+    // The counter is in the file, u64 LE at offset 69, and survives a reopen.
+    let bytes = std::fs::read(&path).unwrap();
+    assert_eq!(u64::from_le_bytes(bytes[69..77].try_into().unwrap()), 3);
+    assert_eq!(SecretStore::open(&path, &mk).unwrap().counter(), 3);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn rotate_on_a_v2_store_keeps_the_version_and_resets_the_counter() {
+    let old_mk = master_with("rotv2-old", 9);
+    let new_mk = master_with("rotv2-new", 10);
+    let path = store_path("rotv2");
+    let mut s = SecretStore::open(&path, &old_mk).unwrap();
+    assert_eq!(s.version(), 2);
+    s.put("a", &SecretBuf::from_vec(b"first".to_vec()).unwrap())
+        .unwrap();
+    s.put("b", &SecretBuf::from_vec(b"second".to_vec()).unwrap())
+        .unwrap();
+    assert_eq!(s.counter(), 2);
+    let before = std::fs::read(&path).unwrap();
+
+    let r = s.rotate(&new_mk).unwrap();
+    assert_eq!(r.version(), 2, "rotation keeps the file version (sticky)");
+    assert_eq!(r.counter(), 0, "the new generation starts at counter 0");
+    r.get("a").unwrap().expose(|b| assert_eq!(b, b"first"));
+    r.get("b").unwrap().expose(|b| assert_eq!(b, b"second"));
+    let after = std::fs::read(&path).unwrap();
+    assert_eq!(after[4], 2);
+    assert_eq!(u64::from_le_bytes(after[69..77].try_into().unwrap()), 0);
+    assert_ne!(&after[5..21], &before[5..21], "rotation draws a fresh salt");
+    assert_ne!(
+        &after[21..37],
+        &before[21..37],
+        "rotation draws a fresh key id"
+    );
+    drop(r);
+
+    // Reopens as v2 under the new master, at counter 0; the old master is
+    // Auth at open (the key_check no longer matches).
+    let s = SecretStore::open(&path, &new_mk).unwrap();
+    assert_eq!((s.version(), s.counter()), (2, 0));
+    drop(s);
+    assert!(matches!(
+        SecretStore::open(&path, &old_mk),
+        Err(Error::Auth)
+    ));
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The MAX_STORE_BYTES cap covers the whole file, the 109-byte v2 header
+/// included: a put that would cross it fails with Format and leaves the file
+/// unchanged — where the same content in a v1 file (37-byte header) still fits.
+#[test]
+fn the_v2_header_counts_toward_max_store_bytes() {
+    let mk = master("capv2");
+    // Calibrate the AEAD blob overhead: a v1 store with one 1-byte value is
+    // 37 + (2 + 1 + 4) + blob(1) bytes, and blob(len) = overhead + len.
+    let cal = store_path("capv2-cal");
+    {
+        let mut s = SecretStore::open_with_version(&cal, &mk, 1).unwrap();
+        s.put("a", &SecretBuf::from_vec(vec![0u8; 1]).unwrap())
+            .unwrap();
+    }
+    let blob_overhead = std::fs::read(&cal).unwrap().len() - 37 - 7 - 1;
+    let _ = std::fs::remove_file(&cal);
+
+    // One big entry sized so the v2 file lands 36 bytes below the cap. The v2
+    // header (109) is exactly 72 bytes longer than the v1 header (37), so the
+    // same content in a v1 file leaves room for one more small entry.
+    let big_len = krypto::MAX_STORE_BYTES - 109 - (2 + 3 + 4) - blob_overhead - 36;
+    let big = SecretBuf::from_vec(vec![0x5a; big_len]).unwrap();
+    let small = SecretBuf::from_vec(vec![0u8; 1]).unwrap();
+
+    let path = store_path("capv2");
+    let mut s = SecretStore::open(&path, &mk).unwrap();
+    s.put("big", &big).unwrap();
+    let before = std::fs::read(&path).unwrap();
+    assert!(before.len() <= krypto::MAX_STORE_BYTES);
+    assert!(matches!(s.put("x", &small), Err(Error::Format(_))));
+    assert!(!s.contains("x"));
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        before,
+        "the file must be unchanged"
+    );
+    drop(s);
+    // The store still opens with what it had.
+    let s = SecretStore::open(&path, &mk).unwrap();
+    assert_eq!(s.list(""), ["big"]);
+
+    // v1 with the same content: the small put fits, because the header there
+    // is only 37 bytes — the difference is exactly the 72 extra v2 bytes.
+    let path1 = store_path("capv2-v1");
+    let mut s1 = SecretStore::open_with_version(&path1, &mk, 1).unwrap();
+    s1.put("big", &big).unwrap();
+    s1.put("x", &small).unwrap();
+    assert!(std::fs::read(&path1).unwrap().len() <= krypto::MAX_STORE_BYTES);
+
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(&path1);
 }

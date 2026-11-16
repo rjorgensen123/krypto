@@ -60,6 +60,13 @@ pyo3::create_exception!(
     Error,
     "`Error::WrongKey`: another key generation. Routing, not tampering."
 );
+pyo3::create_exception!(
+    krypto_py,
+    RollbackError,
+    Error,
+    "`Error::Rollback`: the store file's counter is below the caller's minimum; \
+     `file_counter` and `min_counter` are its attributes."
+);
 
 fn err(e: krypto::Error) -> PyErr {
     let msg = e.to_string();
@@ -70,6 +77,20 @@ fn err(e: krypto::Error) -> PyErr {
         krypto::Error::Auth => AuthError::new_err(msg),
         krypto::Error::KeyNotFound => KeyNotFoundError::new_err(msg),
         krypto::Error::WrongKey => WrongKeyError::new_err(msg),
+        krypto::Error::Rollback {
+            file_counter,
+            min_counter,
+        } => {
+            let e = RollbackError::new_err(msg);
+            // The two counters ride along as attributes, so the caller can
+            // anchor on them (0.9.0).
+            Python::attach(|py| {
+                let value = e.value(py);
+                let _ = value.setattr("file_counter", file_counter);
+                let _ = value.setattr("min_counter", min_counter);
+            });
+            e
+        }
         _ => Error::new_err(msg),
     }
 }
@@ -355,7 +376,8 @@ fn blob_key_id<'py>(py: Python<'py>, blob: &[u8]) -> PyResult<Bound<'py, PyBytes
 // --------------------------------------------------------------------------- //
 
 /// `krypto::SecretStore`. In Rust it borrows the `MasterKey`; here it keeps
-/// the `MasterKey` object alive instead. `rotate` consumes it, as in Rust.
+/// the `MasterKey` object alive instead. `rotate` and `upgrade` consume it,
+/// as in Rust.
 #[pyclass(frozen, module = "krypto_py", name = "SecretStore")]
 struct SecretStore {
     // Field order matters: the store is dropped before the master key it
@@ -399,6 +421,35 @@ impl SecretStore {
         })
     }
 
+    /// Opens the store, and creates it as format `version` (1 or 2) when the
+    /// file is new, as in Rust (0.9.0).
+    #[staticmethod]
+    fn open_with_version(path: PathBuf, master: Py<MasterKey>, version: u8) -> PyResult<Self> {
+        let store = krypto::SecretStore::open_with_version(path, master_ref(&master), version)
+            .map_err(err)?;
+        Ok(Self {
+            store: Mutex::new(Some(store)),
+            _master: master,
+        })
+    }
+
+    /// Opens the store, and fails with `RollbackError` when its counter is
+    /// below `min_counter` — a v1 file counts as counter 0 (0.9.0).
+    #[staticmethod]
+    fn open_with_min_counter(
+        path: PathBuf,
+        master: Py<MasterKey>,
+        min_counter: u64,
+    ) -> PyResult<Self> {
+        let store =
+            krypto::SecretStore::open_with_min_counter(path, master_ref(&master), min_counter)
+                .map_err(err)?;
+        Ok(Self {
+            store: Mutex::new(Some(store)),
+            _master: master,
+        })
+    }
+
     fn put(&self, name: &str, secret: &SecretBuf) -> PyResult<()> {
         self.with(|s| secret.with(|b| s.put(name, b).map_err(err)))
     }
@@ -429,6 +480,30 @@ impl SecretStore {
         Ok(SecretStore {
             store: Mutex::new(Some(store)),
             _master: new_master,
+        })
+    }
+
+    /// The store file's format version: 1 or 2 (0.9.0).
+    fn version(&self) -> PyResult<u8> {
+        self.with(|s| Ok(s.version()))
+    }
+
+    /// The store file's write counter; a v1 file counts as 0 (0.9.0).
+    fn counter(&self) -> PyResult<u64> {
+        self.with(|s| Ok(s.counter()))
+    }
+
+    /// Upgrades a v1 store to v2 in one atomic write and returns the new
+    /// handle under the same master key; this one is consumed, as in Rust
+    /// (0.9.0).
+    fn upgrade(&self, py: Python<'_>) -> PyResult<SecretStore> {
+        let old = lock(&self.store)
+            .take()
+            .ok_or_else(|| PyValueError::new_err("this SecretStore was upgraded away"))?;
+        let store = old.upgrade().map_err(err)?;
+        Ok(SecretStore {
+            store: Mutex::new(Some(store)),
+            _master: self._master.clone_ref(py),
         })
     }
 
@@ -701,6 +776,7 @@ fn add_errors(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("AuthError", py.get_type::<AuthError>())?;
     m.add("KeyNotFoundError", py.get_type::<KeyNotFoundError>())?;
     m.add("WrongKeyError", py.get_type::<WrongKeyError>())?;
+    m.add("RollbackError", py.get_type::<RollbackError>())?;
     Ok(())
 }
 

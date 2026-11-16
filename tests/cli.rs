@@ -100,7 +100,7 @@ fn seal_and_open_with_their_exit_codes() {
 }
 
 /// `inspect` tells what krypto made without a key, and never shows a hash
-/// value; random bytes are only a length (FS-0056).
+/// value; random bytes are only a length.
 #[test]
 fn inspect_tells_what_krypto_made() {
     let report = |input: &[u8]| {
@@ -172,6 +172,127 @@ fn inspect_tells_what_krypto_made() {
     }
     let (code, r) = report(b"hello world");
     assert_eq!((code, r.starts_with("not recognized")), (0, true), "{r}");
+}
+
+/// One entry of a store file, in the encoding v1 and v2 share: the name and a
+/// FAFN blob sealed as the store seals it (the entry context is frozen at v1).
+fn store_entry(
+    m: &MasterKey,
+    salt: &[u8; 16],
+    key_id: &[u8; 16],
+    name: &str,
+    value: &[u8],
+) -> Vec<u8> {
+    let mut info = b"krypto/store/v1|".to_vec();
+    info.extend_from_slice(name.as_bytes());
+    let dek = m.derive(&info, salt).unwrap();
+    let secret = SecretBuf::from_vec(value.to_vec()).unwrap();
+    let blob = krypto::seal(&dek, key_id, &secret, krypto::Alg::Aegis256).unwrap();
+    let mut entry = (name.len() as u16).to_le_bytes().to_vec();
+    entry.extend_from_slice(name.as_bytes());
+    entry.extend_from_slice(&(blob.len() as u32).to_le_bytes());
+    entry.extend_from_slice(&blob);
+    entry
+}
+
+/// A store file built byte for byte as spec/SPEC-secretstore.md writes it:
+/// version 1 (37-byte header) or 2 (109-byte header with key check, `counter`
+/// and container MAC), holding one entry per name.
+fn store_file(m: &MasterKey, ver: u8, counter: u64, names: &[&str]) -> Vec<u8> {
+    let salt = [7u8; 16];
+    let key_id = m.key_id().unwrap();
+    let mut entries = Vec::new();
+    for (i, name) in names.iter().enumerate() {
+        entries.extend_from_slice(&store_entry(m, &salt, &key_id, name, &[i as u8]));
+    }
+    let mut head = b"FST1".to_vec();
+    head.push(ver);
+    head.extend_from_slice(&salt);
+    head.extend_from_slice(&key_id);
+    if ver == 2 {
+        let k_check = m.derive(b"krypto/store/v2|key-check", &salt).unwrap();
+        let k_mac = m.derive(b"krypto/store/v2|container-mac", &salt).unwrap();
+        let mut key_check_in = b"FST1".to_vec();
+        key_check_in.push(ver);
+        key_check_in.extend_from_slice(&salt);
+        head.extend_from_slice(&krypto::hmac_sha256(&k_check, &key_check_in).unwrap());
+        head.extend_from_slice(&counter.to_le_bytes());
+        let mut mac_in = head.clone();
+        mac_in.extend_from_slice(&entries);
+        head.extend_from_slice(&krypto::hmac_sha256(&k_mac, &mac_in).unwrap());
+    }
+    head.extend_from_slice(&entries);
+    head
+}
+
+/// `inspect` reads a store file of either format version: v1 as before, and
+/// v2's 109-byte header with its counter and the entries after it, the MACs
+/// labeled present but not verified, since `inspect` runs without a key
+/// (spec/SPEC-secretstore.md).
+#[test]
+fn inspect_reads_store_files_of_both_versions() {
+    let report = |input: &[u8]| {
+        let out = run(&["inspect"], input);
+        (out.code, text(&out))
+    };
+    let m = master(3);
+    let id = hex::encode(&m.key_id().unwrap());
+    // The line of a report that starts with `name`, or the empty string.
+    let line = |r: &str, name: &str| {
+        r.lines()
+            .find(|l| l.trim_start().starts_with(name))
+            .unwrap_or("")
+            .to_string()
+    };
+
+    // v1: the 37-byte header, unchanged.
+    let v1 = store_file(&m, 1, 0, &["db/password"]);
+    let (code, r) = report(&v1);
+    assert_eq!(code, 0, "{r}");
+    assert!(r.starts_with("krypto store file"), "{r}");
+    assert!(line(&r, "format").ends_with("1"), "{r}");
+    assert!(
+        r.contains(&id) && r.contains("db/password") && line(&r, "entries").ends_with("1"),
+        "{r}"
+    );
+    assert!(!r.contains("counter") && !r.contains("mac"), "{r}");
+
+    // v2: format 2, key id, counter, the MAC labeled, and the entries.
+    let v2 = store_file(&m, 2, 7, &["api-key", "db/password"]);
+    let (code, r) = report(&v2);
+    assert_eq!(code, 0, "{r}");
+    assert!(r.starts_with("krypto store file"), "{r}");
+    assert!(line(&r, "format").ends_with("2"), "{r}");
+    assert!(r.contains(&id), "{r}");
+    assert!(line(&r, "counter").ends_with("7"), "{r}");
+    assert!(line(&r, "mac").contains("present, not verified"), "{r}");
+    assert!(line(&r, "entries").ends_with("2"), "{r}");
+    assert!(r.contains("api-key, db/password"), "{r}");
+    assert!(line(&r, "algorithm").contains("AEGIS-256"), "{r}");
+
+    // More names than shown: the first 20, then how many more there are.
+    let many: Vec<String> = (0..25).map(|i| format!("k{i:02}")).collect();
+    let refs: Vec<&str> = many.iter().map(String::as_str).collect();
+    let (_, r) = report(&store_file(&m, 2, 0, &refs));
+    assert!(line(&r, "entries").ends_with("25") && r.contains("and 5 more"), "{r}");
+
+    // Cut short: a header that is not whole is "cut short", in both versions.
+    for cut in [&v2[..100], &v1[..30]] {
+        let (code, r) = report(cut);
+        assert_eq!(code, 0, "{r}");
+        assert!(r.contains("cut short"), "{r}");
+    }
+
+    // A version this krypto does not know is said so, and nothing past the
+    // version byte is read.
+    let mut unknown = v1.clone();
+    unknown[4] = 3;
+    let (code, r) = report(&unknown);
+    assert_eq!(code, 0, "{r}");
+    assert!(
+        line(&r, "format").ends_with("3") && r.contains("unsupported store version 3"),
+        "{r}"
+    );
 }
 
 /// `inspect` recognizes the files the common tools made (`openssl`, `gpg`,
@@ -250,7 +371,7 @@ fn inspect_tells_what_others_made() {
 /// `inspect` shows only printable ASCII (0.8.2): control characters a file
 /// puts in a PGP armor label, a PHC version, an OpenSSH key's cipher and KDF,
 /// the key type in an SSH key blob or an SSH signature's hash are left out and
-/// counted, and cannot add a line to the report (FS-0105).
+/// counted, and cannot add a line to the report.
 #[test]
 fn inspect_shows_no_control_characters() {
     let string = |b: &[u8]| [&(b.len() as u32).to_be_bytes()[..], b].concat();
@@ -351,7 +472,7 @@ fn inspect_shows_no_control_characters() {
 /// part too long for 64 bits is `OID too long to show`, PEM inside PEM is
 /// unwrapped at most two levels deep as hex is, and the report notes where
 /// that limit stops it, an S2K count is read from its own byte when a session
-/// key follows, and a WinZip AES strength from the AES extra field (FS-0106).
+/// key follows, and a WinZip AES strength from the AES extra field.
 #[test]
 fn inspect_reads_crafted_files_right_or_says_invalid() {
     let der = |h: &str| hex::decode(h).unwrap();

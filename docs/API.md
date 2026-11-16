@@ -252,12 +252,17 @@ magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciph
 pub struct SecretStore<'a>;   // borrows &MasterKey for its lifetime
 
 impl<'a> SecretStore<'a> {
-    pub fn open(path: impl AsRef<Path>, master: &'a MasterKey) -> Result<Self, Error>;
+    pub fn open(path: impl AsRef<Path>, master: &'a MasterKey) -> Result<Self, Error>;   // reads v1 and v2; a new store is v2 (0.9.0)
+    pub fn open_with_version(path: impl AsRef<Path>, master: &'a MasterKey, version: u8) -> Result<Self, Error>;   // 0.9.0
+    pub fn open_with_min_counter(path: impl AsRef<Path>, master: &'a MasterKey, min_counter: u64) -> Result<Self, Error>;   // 0.9.0
     pub fn put(&mut self, name: &str, secret: &SecretBuf) -> Result<(), Error>;
     pub fn get(&self, name: &str) -> Result<SecretBuf, Error>;   // Auth if the key id does not match the store's (0.7.3)
     pub fn delete(&mut self, name: &str) -> Result<(), Error>;
     pub fn contains(&self, name: &str) -> bool;
     pub fn list(&self, prefix: &str) -> Vec<String>;
+    pub fn version(&self) -> u8;    // 0.9.0: the file's format version, 1 or 2
+    pub fn counter(&self) -> u64;   // 0.9.0: the write counter, 0 on a v1 store
+    pub fn upgrade(self) -> Result<SecretStore<'a>, Error>;   // 0.9.0: v1 → v2, one-way
     pub fn rotate(self, new_master: &MasterKey) -> Result<SecretStore<'_>, Error>;  // 0.6.0
 }
 ```
@@ -276,10 +281,70 @@ path does not make `open` wait. A symbolic link at the store path is followed, s
 file is read through; the first write replaces the link with a regular file, and the file the link
 pointed to keeps its old contents.
 File reads are capped at `MAX_STORE_BYTES` (16 MiB), and *(0.7.2)* so are writes: a `put` that would
-grow the file past it fails with `Format`, so the store always opens again.
+grow the file past it fails with `Format`, so the store always opens again. *(0.9.0)* The cap
+counts the whole file, header included — 37 bytes in v1, 109 in v2.
 Name rules: non-empty, ≤ 512 bytes, printable ASCII only (`[\x20-\x7e]`) — names are
 addresses, not secrets, and get listed out. Checked on read as well as on write
 *(0.7.0)*: a store file need not have come from `put`.
+
+*(0.9.0)* **The store file: format versions 1 and 2.** The normative description is
+`spec/SPEC-secretstore.md`; what follows is the contract in brief. The 4 bytes at offset 0 are
+the magic `FST1` in every version, and the byte at offset 4 is the format version. An entry is
+`name_len (u16 LE) | name | blob_len (u32 LE) | blob`, where `blob` is a FAFN blob — identical
+in both versions, as are the per-name key context `krypto/store/v1|` + name and the AAD rule (the
+store's `key_id`).
+
+| Offset | Size | Version 1 (frozen) | Version 2 *(0.9.0)* |
+|---|---|---|---|
+| 0 | 4 | magic `FST1` | magic `FST1` |
+| 4 | 1 | version = 1 | version = 2 |
+| 5 | 16 | salt | salt |
+| 21 | 16 | key_id | key_id |
+| 37 | 32 | — | `key_check` = HMAC-SHA256(K_check, `"FST1" \|\| ver \|\| salt`) |
+| 69 | 8 | — | `counter`, u64 LE: starts at 0, +1 on every write, reset to 0 on `rotate` |
+| 77 | 32 | — | `container_mac` = HMAC-SHA256(K_mac, `header[0..77] \|\| entries`) |
+| 37 / 109 | … | entries | entries |
+
+`K_check` = HKDF-SHA256(master, salt, info = `krypto/store/v2|key-check`) and `K_mac` =
+HKDF-SHA256(master, salt, info = `krypto/store/v2|container-mac`); both context strings are
+frozen. MACs are compared in constant time. The v2 header is 109 bytes.
+
+*(0.9.0)* **What `open` verifies.** The checks run in this order: the path exists, opens and is a
+regular file; the size is within `MAX_STORE_BYTES` (the whole file, header included, on read and
+on write); the magic is `FST1`, else `Format`; the version byte is 1 or 2, anything else is
+`Format` with `unsupported store version N`; the structure parses — checked length arithmetic, no
+panic on any input, valid UTF-8, legal names, no duplicate names, else `Format`. On a **v2**
+file two more checks then run: `key_check` first, then `container_mac`; a mismatch of either is
+`Auth`. So on a v2 file `open` itself proves the master key and the file as a whole — a wrong key,
+a changed header, a removed, swapped or injected entry all fail at `open` with `Auth`. On a
+**v1** file nothing extra is verified: `open` still does not check the master key, and a wrong
+key shows as `Auth` from `get`.
+
+*(0.9.0)* **Sticky versioning; new stores are v2.** A store is always written in the version it
+was loaded in: every `put`, `delete`, `rotate` and `upgrade` writes that same version. A store
+created new by `open` is **version 2** by default; `open_with_version(path, master, version)`
+chooses explicitly at creation and accepts only 1 or 2 — anything else is `Format`. Version 1
+files remain readable and, once opened as v1, stay v1 until upgraded. A v2 file read by a
+pre-0.9.0 krypto is `Format` (`unsupported store version 2`).
+
+*(0.9.0)* **`upgrade`: v1 → v2, one-way.** `upgrade(self)` consumes the handle and turns a
+version 1 store into a version 2 one. All entries are decrypted and verified FIRST — any `Auth`
+aborts with the file untouched and the error. The file is then written as version 2 in a single
+atomic write. Salt, `key_id` and the per-name key context are unchanged, so the existing blobs
+are re-wrapped, not re-encrypted. There is no way back: after an upgrade, binaries that accept
+only version 1 report `unsupported store version 2`. On a store already at version 2 there is
+nothing to upgrade.
+
+*(0.9.0)* **Rollback detection, anchored by the caller.** krypto is stateless — it stores nothing
+outside the store file, so the anchor is yours. The v2 `counter` is covered by `container_mac`,
+so it cannot be lowered without breaking the MAC; what remains is putting back an older,
+still-valid copy of the whole file, and that is what the counter detects:
+`open_with_min_counter(path, master, min_counter)` loads the store as `open` does and then fails
+with `Error::Rollback { file_counter, min_counter }` when a v2 file's `counter` is below
+`min_counter` (a v1 file counts as counter 0, so any `min_counter > 0` fails on it). Without an
+anchor, no freshness check is performed — on a v2 file, `key_check` and `container_mac` are
+verified either way. `version()` and `counter()` are there for an anchor of your own: remember
+the highest counter you have seen, outside the file, and pass it on the next open.
 
 *(0.8.2)* **A write that fails.** The directory is opened before the rename, so a directory that
 cannot be opened fails the write while the old file still stands. A write that fails before the
@@ -295,11 +360,18 @@ as a whole: whoever can write to it can remove an entry, or put back an older co
 of the file, and `get` then answers `KeyNotFound` or returns the older value (a copy from before
 a `rotate` gives `Auth`). Who may write to the file is the caller's to decide.
 
+*(0.9.0)* On a **v2** file the file as a whole IS authenticated: `container_mac` covers the header
+and every entry, and `key_check` proves the master key — both at `open`. Removing, swapping or
+injecting an entry, or changing any header field, fails with `Auth` there. What remains is
+putting back an older, still-valid copy of the whole file; that is what the `counter` and
+`open_with_min_counter` answer (above). On a **v1** file the rule above stands unchanged.
+
 `open` does not check the master key: it reads the file and decrypts nothing, and neither do
 `contains` and `list`. A wrong master key shows as `Auth` from `get`. A `put` under a wrong master
 key stores that entry under that key (and replaces an entry of the same name, as `put` always
 does): each key then reads only its own entries, and `rotate` fails with `Auth` and leaves the
-file untouched.
+file untouched. *(0.9.0)* Except on a v2 file: there `key_check` makes `open` itself fail with
+`Auth` on a wrong master key.
 
 *(0.7.2)* **One handle per file.** A `SecretStore` reads the whole file into memory and writes the
 whole file back, so two handles on one file would overwrite each other's writes. Keeping to one
@@ -330,6 +402,10 @@ new one back, bound to the new key. When it fails, the handle is consumed all th
 is no new one. Open the file again; it is unchanged, except in one case *(0.8.2)*: if only the
 sync of the directory after the rename failed, the file is under the new master key, and the
 `Error::Io` says so; reopen it with the new master key then.
+
+*(0.9.0)* `rotate` keeps the file's version — a v2 store stays v2, a v1 store stays v1 — with a
+fresh salt and a fresh key id, all entries re-sealed, and on a v2 file the `counter` reset to 0
+with `key_check` and `container_mac` recomputed.
 
 ---
 
@@ -527,7 +603,7 @@ Hardening is process-local: it protects the process that calls it. *(0.8.0)* Fro
 ## `error` — `Error`
 
 ```rust
-pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotFound, WrongKey }
+pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotFound, WrongKey, Rollback { file_counter: u64, min_counter: u64 } }   // Rollback: 0.9.0
 ```
 `#[non_exhaustive]`. Implements `Display`, `std::error::Error` and `From<std::io::Error>`.
 
@@ -539,6 +615,7 @@ pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotF
 | `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, and a key id in a `SecretStore` that does not match |
 | `KeyNotFound` | the name does not exist in the store |
 | `WrongKey` | the blob belongs to another key generation — routing, not tampering *(new in 0.5.0)*. *(0.7.3)* No library function returns it: a `SecretStore` holds one generation, so a different key id there is `Auth`. It is the answer for a caller that routes between generations |
+| `Rollback { file_counter, min_counter }` | *(0.9.0)* only from `SecretStore::open_with_min_counter`: a v2 store file whose `counter` (`file_counter`) is below the caller's minimum (`min_counter`) — an older copy of the file may have been put back. Distinct from `Auth`, which means the content itself does not verify |
 
 No variant carries key material or plaintext.
 
@@ -583,7 +660,7 @@ How the Rust forms read in Python:
 | `&str`, `String` | `str` |
 | `impl AsRef<Path>` | `str` or a path object |
 | `Result<T, Error>` | `T`, or an exception |
-| `Error::Io`, `Hardening`, `Format`, `Auth`, `KeyNotFound`, `WrongKey` | `IoError`, `HardeningError`, `FormatError`, `AuthError`, `KeyNotFoundError`, `WrongKeyError`, all subclasses of `Error` |
+| `Error::Io`, `Hardening`, `Format`, `Auth`, `KeyNotFound`, `WrongKey`, `Rollback` *(0.9.0)* | `IoError`, `HardeningError`, `FormatError`, `AuthError`, `KeyNotFoundError`, `WrongKeyError`, `RollbackError`, all subclasses of `Error` |
 | `VERSION` | `VERSION`, and the same value as `__version__` |
 | `SecretBuf::len`, `SecretString::len` | `len()`, and also Python's `len(secret)` |
 | `Alg::Aegis256`, `Preset::High`, … | `Alg.Aegis256`, `password.Preset.High`, …; both compare with `==`, though Rust's `Preset` has no `PartialEq` |

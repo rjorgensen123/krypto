@@ -13,7 +13,7 @@ same sections with the Python code, and each section here links to it.
 
 ```toml
 [dependencies]
-krypto = "0.8"
+krypto = "0.9"
 ```
 
 And first of all in `main`, before anything else:
@@ -192,7 +192,7 @@ If you need to keep a handful of secrets under names:
 ```rust
 use krypto::SecretStore;
 
-let mut store = SecretStore::open("/data/secrets", &master)?;
+let mut store = SecretStore::open("/data/secrets", &master)?;   // reads v1 and v2; a NEW store is v2 (0.9.0)
 
 store.put("api-token", &token)?;
 let token = store.get("api-token")?;
@@ -200,6 +200,9 @@ let token = store.get("api-token")?;
 store.contains("api-token");        // does it exist?
 store.list("api-");                 // all names with this prefix
 store.delete("api-token")?;
+
+store.version();                    // 1 or 2 — the file's format version (0.9.0)
+store.counter();                    // the write counter (v2); 0 on a v1 store (0.9.0)
 ```
 
 The store file is never read more than one byte past `MAX_STORE_BYTES` (16 MiB) — the same guard
@@ -223,12 +226,57 @@ return `Io` although the change is in the file, and the error says so; `put` and
 change in the handle too. After `rotate` the file is then under the new master key, so reopen it
 with that key.
 
+*(0.9.0)* **Store file version 2: the file as a whole is sealed.** Version 1 authenticated each
+entry but not the file: someone who could write it could remove an entry or put back an older
+copy, and `open` noticed neither, nor did it check the master key. Version 2 adds three fields to
+the header — a `key_check` (the master key, proven at `open`), a write `counter`, and a
+`container_mac` over the header and all entries — so on a v2 file `open` fails with `Auth` on a
+wrong key, a changed header, or a removed, swapped or injected entry. The normative format is
+`spec/SPEC-secretstore.md`.
+
+Writes keep the version the file was opened in (sticky): a v1 file stays v1, a v2 file stays v2.
+To choose the version explicitly when a new store is created:
+
+```rust
+let store = SecretStore::open_with_version("/data/secrets", &master, 1)?;   // 1 or 2; anything else is Format (0.9.0)
+```
+
+**Upgrading a v1 store** is explicit, one-way and safe: every entry is decrypted and verified
+first (any failure leaves the file untouched), then the file is rewritten as v2 in one atomic
+write — the values are re-wrapped, not re-encrypted, because the per-name keys do not change.
+Afterwards pre-0.9.0 binaries report `unsupported store version 2`.
+
+```rust
+let store = SecretStore::open("/data/secrets", &master)?;   // a v1 file
+let store = store.upgrade()?;                                // v1 → v2, one-way; consumes the handle (0.9.0)
+```
+
+**Rollback detection** needs an anchor of your own — krypto is stateless and stores nothing
+outside the file. The v2 `counter` rises by 1 on every write and is covered by the MAC, so it
+cannot be lowered without breaking it; putting back an older copy of the whole file is what
+remains, and that is what the counter catches. Keep the highest counter you have seen (a file, a
+database row, your own state) and open with it:
+
+```rust
+let store = SecretStore::open_with_min_counter("/data/secrets", &master, min_counter)?;
+// Err(Error::Rollback { file_counter, min_counter }) when the file's counter is lower:
+// an older copy of the file may have been put back (0.9.0)
+```
+
+Without an anchor, no freshness check runs — the key check and the MAC always do on a v2 file.
+`rotate` keeps the file's version, and on a v2 file resets the counter to 0 with a fresh salt and
+key id.
+
 **What the store protects.** The store protects what is in it, not the file. Without the master
 key nobody can read a value, or make one that `get` accepts. The file is not sealed as a whole:
 someone who can write to it can remove an entry or put back an older copy, so who may write there
 is yours to decide. `open` does not check the master key — it decrypts nothing. Open with the
 wrong key and `get` fails with `Auth`; a `put` with the wrong key stores that value under that
 key, where only that key reads it, and `rotate` then fails with `Auth` until that entry is deleted.
+*(0.9.0)* On a **v2** file this changes: the file as a whole is sealed (`container_mac`) and
+`open` checks the master key (`key_check`), so a wrong key fails at `open` with `Auth`, and so
+does removing or swapping an entry. What remains is putting back an older copy of the whole file —
+see the counter above. On a **v1** file the old rules stand unchanged.
 
 **One handle per file.** The store reads the whole file into memory and writes the whole file
 back, so two handles on the same file would overwrite each other's writes. Making sure you open a
@@ -421,7 +469,7 @@ things out. **[krypto-cli](Cli.md)** describes it.
 
 ## Errors you can get
 
-Six kinds, and they mean different things:
+Seven kinds, and they mean different things:
 
 | Error | When | What it means for you |
 |---|---|---|
@@ -429,6 +477,7 @@ Six kinds, and they mean different things:
 | `WrongKey` | the blob belongs to another key generation, for a caller that routes between them | find the right key — routing, not tampering *(new in 0.5.0)* |
 | `Format` | input that is not what krypto takes: not a krypto blob, a malformed key, signature or PHC string, a wrong parameter | the data is wrong, not the key — a changed blob is `Auth` |
 | `KeyNotFound` | the name does not exist in the store | normal, not an error condition |
+| `Rollback` | *(0.9.0)* `open_with_min_counter`: the store file's counter is below the minimum you passed | an older copy of the file may have been put back — alarm |
 | `Io` | file/disk trouble | the environment, not the crypto |
 | `Hardening` | a protection step failed: locked memory, randomness, process hardening | the environment, never your data |
 
@@ -442,6 +491,7 @@ None of them carry key material or plaintext. You can log them as they are.
 
 | Version | What arrived |
 |---|---|
+| **0.9.0** | **Store file format v2** (`spec/SPEC-secretstore.md`): the whole file is authenticated (`container_mac`), the master key is checked at `open` (`key_check`), and a write counter enables rollback detection (`open_with_min_counter`, `Error::Rollback`) · new stores are v2, an opened file keeps its version · `upgrade()` (v1 → v2, one-way), `open_with_version`, `version()`, `counter()` · `rotate` keeps the version and resets the counter on v2 |
 | **0.8.1** | No functional change: the documentation is corrected where it said more than the code does, a test file no longer names the machine it was made on, and the Python packages carry no paths from the machine that built them |
 | **0.8.0** | **Python: `krypto-py`.** The same API from Python, built from the same code: what one seals, the other opens; one API reference, with the guarantees that differ set apart · `MasterKey::key_id` in the library, the value `krypto-cli` has always used · the repository is a workspace of `krypto` and `krypto-py` · `krypto-cli` is a small helper with nine commands |
 | **0.7.3** | `drop_filesystem` changes the root only as its last step, on the directory it checked; when it fails, the root is as it was, and so is the working directory unless stepping back fails too · every change to a blob past its `FAFN` magic gives `Auth` (`krypto-cli` exit 3, though `krypto-cli open` gives 4 for a changed key id), and `SecretStore::get` gives `Auth` for a key id that does not match · an empty `info` for `derive` is `Format` · random bytes are capped at 1 MiB per call, with your own cap as an option |

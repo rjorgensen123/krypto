@@ -38,6 +38,17 @@ pub enum Error {
     /// generation — it is the answer for a caller that holds several and routes
     /// between them, as `krypto-cli open` does.
     WrongKey,
+    /// An anchored open of a store file found an older copy than the caller
+    /// has seen: the file's v2 `counter` is below the minimum the caller
+    /// supplied (0.9.0). krypto is stateless, so the anchor lives outside the
+    /// file; the counter itself is covered by the store's container MAC and
+    /// cannot be lowered without breaking it.
+    Rollback {
+        /// The counter in the store file that was opened.
+        file_counter: u64,
+        /// The minimum counter the caller anchored to.
+        min_counter: u64,
+    },
 }
 
 impl fmt::Display for Error {
@@ -51,6 +62,15 @@ impl fmt::Display for Error {
             Error::WrongKey => write!(
                 f,
                 "blob was sealed under a different key generation (not tampering)"
+            ),
+            Error::Rollback {
+                file_counter,
+                min_counter,
+            } => write!(
+                f,
+                "rollback detected: the store file's counter is {file_counter}, below the \
+                 required minimum {min_counter} — the file is an older copy than the caller \
+                 has seen"
             ),
         }
     }

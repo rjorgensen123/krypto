@@ -442,8 +442,8 @@ fn bench() -> Result<(), Fail> {
 /// The most stdin may hold, so an endless stream is not buffered without end.
 const MAX_STDIN: usize = 64 * 1024 * 1024;
 
-/// The plaintext for `seal`, from stdin, without leaving copies of it behind
-/// (FS-0014). It is read in chunks bigger than stdin's own buffer, which is then
+/// The plaintext for `seal`, from stdin, without leaving copies of it behind.
+/// It is read in chunks bigger than stdin's own buffer, which is then
 /// passed by, into a buffer that is wiped whenever it grows (a `Vec` that grows
 /// by itself frees the old buffer unwiped), and handed to locked memory at the
 /// end, which wipes the last buffer too.

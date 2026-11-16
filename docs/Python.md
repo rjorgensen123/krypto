@@ -146,10 +146,34 @@ store = store.rotate(new_master)
 When the rotation itself fails, the old handle is consumed all the same: using it is a `ValueError`.
 Open the file again; it is unchanged, still under the old master key, except in one case
 *(0.8.2)*: if only the sync of the directory after the rename failed, the `IoError` says the file
-is under the new master key; reopen it with that key.
+is under the new master key; reopen it with that key. *(0.9.0)* `rotate` keeps the file's version,
+and on a v2 file resets the write counter to 0 with a fresh salt and key id.
+
+*(0.9.0)* **Store file version 2.** The store file has a format version, 1 or 2. `open` reads both
+and creates a **v2** store when the file is new. On a v2 file the whole file is sealed (a
+container MAC over the header and all entries) and the master key is checked at `open`, so a
+wrong key raises `AuthError` from `open` itself, and so does a removed, swapped or injected entry.
+On a v1 file the old rule stands: `open` checks nothing, and a wrong key raises `AuthError` from
+`get`.
+
+```python
+store.version()    # 1 or 2 — the file's format version
+store.counter()    # the write counter (v2); 0 on a v1 store
+
+store = krypto.SecretStore.open_with_version("/data/secrets", master, 1)        # choose v1 at creation; 1 or 2, else FormatError
+store = krypto.SecretStore.open_with_min_counter("/data/secrets", master, seen)  # RollbackError if the file is older
+store = store.upgrade()                                                          # v1 → v2, one-way; consumes the handle
+```
+
+Writes keep the file's version. `upgrade` verifies every entry first (any failure leaves the
+file untouched, and the handle is consumed all the same) and rewrites the file as v2 in one
+atomic write — the values are re-wrapped, not re-encrypted. For rollback detection, keep the
+highest counter you have seen outside the file and pass it to `open_with_min_counter`:
+`RollbackError` means an older copy of the file may have been put back. Without an anchor, no
+freshness check runs — the key check and the MAC always do on a v2 file.
 
 As in Rust, the store protects its contents, not the file, and `open` does not check the master
-key: a wrong one raises `AuthError` from `get`.
+key on a v1 file: a wrong one raises `AuthError` from `get`.
 
 The rest of the rules: [A small encrypted store on disk](Usage.md#a-small-encrypted-store-on-disk).
 
@@ -259,6 +283,7 @@ Each kind is an exception, all under `krypto.Error`:
 | `Error::WrongKey` | `WrongKeyError` | another key generation: find the right key |
 | `Error::Format` | `FormatError` | the input has the wrong shape |
 | `Error::KeyNotFound` | `KeyNotFoundError` | the name does not exist in the store |
+| `Error::Rollback` *(0.9.0)* | `RollbackError` | `SecretStore.open_with_min_counter`: the file's counter is below your minimum — an older copy may be back |
 | `Error::Io` | `IoError` | file or disk trouble |
 | `Error::Hardening` | `HardeningError` | a protection step or the environment failed |
 

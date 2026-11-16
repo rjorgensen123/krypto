@@ -4,6 +4,39 @@ Every notable change to this crate is recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.0]
+
+### Added — store file format version 2, with whole-file authentication and rollback detection *(2026-11-16)*
+
+`SecretStore` files come in two format versions; the normative description is
+`spec/SPEC-secretstore.md`. Version 2 keeps the `FST1` magic and the v1 entry encoding and adds
+to the header: `key_check` (HMAC-SHA256 under the key derived for `krypto/store/v2|key-check`),
+a write `counter`, and `container_mac` (HMAC-SHA256 under `krypto/store/v2|container-mac`) over
+the header and all entries, compared in constant time. The per-name entry keys
+(`krypto/store/v1|` + name) are unchanged, so an upgrade re-wraps the blobs without
+re-encrypting them. New stores are version 2 by default; an opened file is always written back
+in its own version (sticky), and `open` reads both versions. `MAX_STORE_BYTES` caps the whole
+file, the 109-byte v2 header included, on read and on write.
+
+New API on `SecretStore`: `open_with_version` (choose 1 or 2 explicitly for a new store;
+anything else is `Format`), `upgrade` (v1 → v2, one-way: every entry is decrypted and verified
+first, any `Auth` leaves the file untouched, then one atomic write as v2), `open_with_min_counter`
+(fails with the new `Error::Rollback { file_counter, min_counter }` — `RollbackError` in
+krypto-py — when a v2 file's counter is below the caller's minimum; a v1 file counts as counter
+0, so any `min_counter > 0` fails on it), and `version()` / `counter()`. krypto stays stateless:
+the rollback anchor is kept by the caller, outside the file. `rotate` keeps the file's version
+and, on a v2 file, resets the counter to 0 with a fresh salt and key id, `key_check` and
+`container_mac` recomputed.
+
+### Changed — `open` on a version 2 file fails closed *(2026-11-16)*
+
+On a v2 file, `open` verifies `key_check` and then `container_mac`, both `Auth` on mismatch: a
+wrong master key now fails at `open`, not first at `get`, and a removed, swapped or injected
+entry or a changed header fails there too. An unknown version byte is `Format`
+(`unsupported store version N`), so a v2 file read by a pre-0.9.0 krypto is refused, and after
+an `upgrade` older binaries can no longer read the store. Version 1 files are unchanged: still
+readable, no key check at `open`, no container MAC, a wrong key still shows as `Auth` from `get`.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*

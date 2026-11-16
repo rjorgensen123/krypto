@@ -258,21 +258,70 @@ fn blob(input: &[u8]) -> Option<Finding> {
     })
 }
 
-/// E2: a store file, from `SecretStore`.
+/// E2: a store file, from `SecretStore`. The version byte at offset 4 picks
+/// the header's size: 37 bytes for v1, 109 for v2 (key check, counter and
+/// container MAC, spec/SPEC-secretstore.md). A v2 header's counter is shown
+/// and its MACs are labeled present but not verified — `inspect` has no key.
 fn store(input: &[u8]) -> Option<Finding> {
-    const HEADER: usize = 4 + 1 + 16 + 16;
+    const V1_HEADER: usize = 4 + 1 + 16 + 16;
+    const V2_HEADER: usize = V1_HEADER + 32 + 8 + 32;
     const NAMES_SHOWN: usize = 20;
     if !input.starts_with(b"FST1") {
         return None;
     }
     let found = Finding::new("krypto store file (krypto::SecretStore)");
-    if input.len() < HEADER {
+    if input.len() < 5 {
+        return Some(found.fact("header", "cut short"));
+    }
+    let ver = input[4];
+    let header = match ver {
+        1 => V1_HEADER,
+        2 => V2_HEADER,
+        // A version this krypto does not know: its header's size is not known
+        // either, so nothing past the version byte is read.
+        _ => {
+            return Some(
+                found
+                    .fact("format", ver.to_string())
+                    .fact("header", format!("unsupported store version {ver}")),
+            )
+        }
+    };
+    if input.len() < header {
         return Some(found.fact("header", "cut short"));
     }
     let mut found = found
-        .fact("format", input[4].to_string())
+        .fact("format", ver.to_string())
         .fact("key id", hex::encode(&input[21..37]));
-    let (mut names, mut algs, mut at) = (Vec::new(), Vec::new(), HEADER);
+    if ver == 2 {
+        let counter = u64::from_le_bytes(input[69..77].try_into().unwrap());
+        found = found
+            .fact("counter", counter.to_string())
+            .fact("mac", "present, not verified");
+    }
+    let (names, algs, damaged) = entries_of(input, header);
+    found = found.fact("entries", names.len().to_string());
+    if !names.is_empty() {
+        let mut shown = names[..names.len().min(NAMES_SHOWN)].join(", ");
+        if names.len() > NAMES_SHOWN {
+            shown += &format!(", and {} more", names.len() - NAMES_SHOWN);
+        }
+        found = found
+            .fact("names", shown)
+            .fact("algorithm", algs.join(", "));
+    }
+    if let Some(at) = damaged {
+        found = found.fact("damaged", format!("at byte {at}"));
+    }
+    Some(found)
+}
+
+/// The entries of a store file from `at` on, in the encoding v1 and v2 share
+/// (`name_len u16LE | name | blob_len u32LE | blob`): the names, the
+/// algorithms of the blobs, and where the file is cut short, if it is.
+fn entries_of(input: &[u8], mut at: usize) -> (Vec<String>, Vec<&'static str>, Option<usize>) {
+    let mut names = Vec::new();
+    let mut algs = Vec::new();
     let mut damaged = None;
     while at < input.len() {
         let entry = (|| {
@@ -298,20 +347,7 @@ fn store(input: &[u8]) -> Option<Finding> {
         }
         at = next;
     }
-    found = found.fact("entries", names.len().to_string());
-    if !names.is_empty() {
-        let mut shown = names[..names.len().min(NAMES_SHOWN)].join(", ");
-        if names.len() > NAMES_SHOWN {
-            shown += &format!(", and {} more", names.len() - NAMES_SHOWN);
-        }
-        found = found
-            .fact("names", shown)
-            .fact("algorithm", algs.join(", "));
-    }
-    if let Some(at) = damaged {
-        found = found.fact("damaged", format!("at byte {at}"));
-    }
-    Some(found)
+    (names, algs, damaged)
 }
 
 const OID_EC_PUBLIC_KEY: &[u8] = &[0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];

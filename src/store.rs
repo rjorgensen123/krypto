@@ -8,12 +8,16 @@
 //! Writes are atomic (tmp + fsync + rename), file mode 0600. One handle per
 //! file at a time, held by a lock (0.7.2).
 //!
-//! What is protected is the contents, not the file. Without the master key
-//! no value can be read, and none can be made or changed that `get` accepts.
-//! The file as a whole is not authenticated: whoever can write to it can
-//! remove an entry or put back an older copy, so who may write to it is the
-//! caller's to decide. `open` does not check the master key: a wrong one
-//! shows as [`Error::Auth`] from `get`.
+//! File format version 1 (frozen) authenticates each entry on its own, but not
+//! the file as a whole, and `open` does not check the master key. Version 2
+//! (0.9.0) adds a `key_check` (which master key the file is under, verified at
+//! `open`), a `container_mac` over the whole header-plus-entries, and a write
+//! `counter` for rollback detection, so an entry cannot be removed, swapped,
+//! injected or reordered, and an older copy of the file is detected against a
+//! caller-supplied minimum counter. New stores are written as version 2; a
+//! store keeps the version it was opened with (sticky), and `upgrade` moves a
+//! v1 file to v2 one-way. What is protected is the contents and the file as a
+//! whole; who may write to it is still the caller's to decide.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -25,10 +29,30 @@ use crate::kdf::{DerivedKey, MasterKey};
 use crate::secret::SecretBuf;
 
 const STORE_MAGIC: &[u8; 4] = b"FST1";
-const STORE_VER: u8 = 1;
+/// File format version 1 (frozen): 37-byte header, no container MAC.
+const STORE_VER_V1: u8 = 1;
+/// File format version 2 (0.9.0): 109-byte header with key-check, counter and
+/// container MAC.
+const STORE_VER_V2: u8 = 2;
+/// The version a new store is created with, unless the caller asks for v1.
+const STORE_VER_NEW: u8 = STORE_VER_V2;
 const SALT_LEN: usize = 16;
 const KEY_ID_LEN: usize = 16;
-const HEADER_LEN: usize = 4 + 1 + SALT_LEN + KEY_ID_LEN;
+const KEY_CHECK_LEN: usize = 32;
+const COUNTER_LEN: usize = 8;
+const MAC_LEN: usize = 32;
+/// v1 header: magic | ver | salt | key_id.
+const HEADER_LEN_V1: usize = 4 + 1 + SALT_LEN + KEY_ID_LEN; // 37
+/// v2 header: v1 fields | key_check | counter (u64 LE) | container_mac.
+const V2_HEADER_LEN: usize = HEADER_LEN_V1 + KEY_CHECK_LEN + COUNTER_LEN + MAC_LEN; // 109
+/// Offset of the v2 counter within the header (right after key_check).
+const V2_COUNTER_OFF: usize = HEADER_LEN_V1 + KEY_CHECK_LEN; // 69
+/// Offset of the v2 container_mac within the header (right after the counter).
+const V2_MAC_OFF: usize = V2_COUNTER_OFF + COUNTER_LEN; // 77
+/// HKDF context of the v2 key-check key (frozen: stored key_checks depend on it).
+const CTX_V2_KEY_CHECK: &[u8] = b"krypto/store/v2|key-check";
+/// HKDF context of the v2 container-MAC key (frozen: stored MACs depend on it).
+const CTX_V2_CONTAINER_MAC: &[u8] = b"krypto/store/v2|container-mac";
 
 /// Upper bound on a store file. The store holds small secrets (keys/tokens);
 /// 16 MiB is very generous and prevents OOM on a tampered/bloated file
@@ -73,6 +97,13 @@ pub struct SecretStore<'a> {
     master: &'a MasterKey,
     salt: [u8; SALT_LEN],
     key_id: [u8; KEY_ID_LEN],
+    /// The file format version of the opened file (1 or 2). Writes keep it:
+    /// versioning is sticky, so a v1 file stays v1 and a v2 file stays v2
+    /// until an explicit [`SecretStore::upgrade`] (0.9.0).
+    version: u8,
+    /// The v2 write counter: 0 for a new store, +1 on every write, reset to 0
+    /// on rotation. 0 for a v1 file, which has no counter (0.9.0).
+    counter: u64,
     entries: HashMap<String, Vec<u8>>, // name -> FAFN blob
     /// The lock that keeps this file to this handle, held while it lives
     /// (0.7.2). `None` only when the file system is read-only, or when there
@@ -83,6 +114,11 @@ pub struct SecretStore<'a> {
 
 impl<'a> SecretStore<'a> {
     /// Open an existing store, or create a new one if the file is missing.
+    ///
+    /// A new store is created as **file format version 2** (0.9.0); use
+    /// [`SecretStore::open_with_version`] to create a v1 file explicitly. An
+    /// existing file keeps its own version (sticky): this function reads both
+    /// v1 and v2.
     ///
     /// Distinguishes `ErrorKind::NotFound` — any other I/O error (permission,
     /// ELOOP, …) is propagated instead of being treated as "empty store", so we
@@ -111,16 +147,93 @@ impl<'a> SecretStore<'a> {
     /// directory after the rename fails, it returns [`Error::Io`] although the
     /// new, empty store file is in place.
     ///
-    /// The master key is not checked here: `open` reads the file and decrypts
-    /// nothing. A wrong master key shows as [`Error::Auth`] from `get`, and a
+    /// (0.9.0) On a **v2** file the master key is checked here: the header's
+    /// `key_check` and `container_mac` are verified before the handle is
+    /// returned, so a wrong master key or any tampering with the header or
+    /// the entry table is [`Error::Auth`] from `open` itself. On a **v1** file
+    /// the master key is not checked: `open` reads the file and decrypts
+    /// nothing, a wrong master key shows as [`Error::Auth`] from `get`, and a
     /// `put` under it stores that entry under the wrong key, beside the others.
     pub fn open(path: impl AsRef<Path>, master: &'a MasterKey) -> Result<Self, Error> {
+        Self::open_impl(path, master, STORE_VER_NEW, None)
+    }
+
+    /// Like [`SecretStore::open`], but a store file that does not exist yet is
+    /// created with the given file format `version`: 1 or 2 (0.9.0). Anything
+    /// else is [`Error::Format`]. The version only chooses what a NEW file is
+    /// written as — an existing file keeps its own version (sticky), so this
+    /// never rewrites or upgrades a file that is already there.
+    pub fn open_with_version(
+        path: impl AsRef<Path>,
+        master: &'a MasterKey,
+        version: u8,
+    ) -> Result<Self, Error> {
+        match version {
+            STORE_VER_V1 | STORE_VER_V2 => {}
+            n => {
+                return Err(Error::Format(format!("unsupported store version {n}")));
+            }
+        }
+        Self::open_impl(path, master, version, None)
+    }
+
+    /// Like [`SecretStore::open`], but anchored against rollback (0.9.0): after
+    /// the file is loaded, its v2 `counter` is compared with `min_counter`,
+    /// which the caller keeps outside the file (krypto is stateless). If the
+    /// file's counter is lower, the file is an older copy than the caller has
+    /// seen, and `open` fails with [`Error::Rollback`] instead of returning a
+    /// handle. A v1 file counts as counter 0, so any `min_counter > 0` on a v1
+    /// file is [`Error::Rollback`] too. With no anchor (`open`), no freshness
+    /// check is performed; on a v2 file `key_check` and `container_mac` are
+    /// always verified regardless.
+    pub fn open_with_min_counter(
+        path: impl AsRef<Path>,
+        master: &'a MasterKey,
+        min_counter: u64,
+    ) -> Result<Self, Error> {
+        Self::open_impl(path, master, STORE_VER_NEW, Some(min_counter))
+    }
+
+    /// The file format version of the opened store: 1 or 2 (0.9.0).
+    pub fn version(&self) -> u8 {
+        self.version
+    }
+
+    /// The v2 write counter of the opened store (0.9.0): 0 for a new store,
+    /// +1 on every write, reset to 0 on rotation. A v1 file has no counter and
+    /// reports 0. The counter is covered by the v2 container MAC, so it cannot
+    /// be lowered without breaking the MAC; compare it (or anchor it with
+    /// [`SecretStore::open_with_min_counter`]) against a value kept outside the
+    /// file to detect a rolled-back copy.
+    pub fn counter(&self) -> u64 {
+        self.counter
+    }
+
+    /// The shared body of the `open` family: `new_version` is the version a
+    /// missing file is created with, `min_counter` the optional rollback
+    /// anchor checked after load (0.9.0).
+    fn open_impl(
+        path: impl AsRef<Path>,
+        master: &'a MasterKey,
+        new_version: u8,
+        min_counter: Option<u64>,
+    ) -> Result<Self, Error> {
         let path = path.as_ref().to_path_buf();
         let lock = take_lock(&path)?;
         match open_store_file(&path)? {
             Some(file) => {
                 let data = read_capped(&file, MAX_STORE_BYTES)?;
                 let store = Self::load(path, master, &data, lock)?;
+                // (0.9.0) Rollback anchor: only meaningful for a file that was
+                // actually loaded. v1 counts as counter 0.
+                if let Some(min) = min_counter {
+                    if store.counter < min {
+                        return Err(Error::Rollback {
+                            file_counter: store.counter,
+                            min_counter: min,
+                        });
+                    }
+                }
                 // 0600 only once the file is known to be a store (0.8.2).
                 make_private(&file)?;
                 Ok(store)
@@ -138,6 +251,8 @@ impl<'a> SecretStore<'a> {
                     master,
                     salt,
                     key_id,
+                    version: new_version,
+                    counter: 0,
                     entries: HashMap::new(),
                     lock,
                 };
@@ -162,19 +277,28 @@ impl<'a> SecretStore<'a> {
     /// (0.8.2) If only the sync of the directory after the rename fails, `put`
     /// returns [`Error::Io`] although the new value is in the file, and the
     /// handle keeps it too.
+    ///
+    /// (0.9.0) On a v2 store the write counter is bumped by 1, so the file's
+    /// counter increases on every write (it is covered by the container MAC).
     pub fn put(&mut self, name: &str, secret: &SecretBuf) -> Result<(), Error> {
         validate_name(name)?;
         let dek = self.dek_for(name)?;
         let blob = aead::seal(&dek, &self.key_id, secret, Alg::Aegis256)?;
+        // The counter the coming write carries (v2 only). Computed before
+        // anything is changed, so an overflow leaves the handle as it was.
+        let prev_counter = self.counter;
+        let new_counter = self.next_counter()?;
         // Memory follows the file. If the write fails before the new file
         // replaces the old one, roll back the insert, so a later `get` cannot
         // return a value that was never stored. If only the directory sync
         // after the rename fails, the file holds the new value, so memory
         // keeps it (0.8.2).
         let previous = self.entries.insert(name.to_string(), blob);
+        self.counter = new_counter;
         match self.persist() {
             Ok(()) => Ok(()),
             Err(WriteError::NotReplaced(e)) => {
+                self.counter = prev_counter;
                 match previous {
                     Some(old) => {
                         self.entries.insert(name.to_string(), old);
@@ -213,19 +337,33 @@ impl<'a> SecretStore<'a> {
     /// (0.8.2) If only the sync of the directory after the rename fails,
     /// `delete` returns [`Error::Io`] although the entry is gone from the file,
     /// and from the handle too.
+    ///
+    /// (0.9.0) On a v2 store the write counter is bumped by 1, like on `put`.
     pub fn delete(&mut self, name: &str) -> Result<(), Error> {
-        if let Some(old) = self.entries.remove(name) {
-            match self.persist() {
-                Ok(()) => {}
-                // Nothing was replaced: put the entry back.
-                Err(WriteError::NotReplaced(e)) => {
-                    self.entries.insert(name.to_string(), old);
-                    return Err(e);
-                }
-                // The file no longer holds the entry, so memory does not either.
-                Err(e @ WriteError::ReplacedUnsynced(_)) => {
-                    return Err(e.into_error(CHANGE_UNSYNCED))
-                }
+        let Some(old) = self.entries.remove(name) else {
+            return Ok(());
+        };
+        let prev_counter = self.counter;
+        let new_counter = match self.next_counter() {
+            Ok(c) => c,
+            Err(e) => {
+                // Nothing was written: put the entry back.
+                self.entries.insert(name.to_string(), old);
+                return Err(e);
+            }
+        };
+        self.counter = new_counter;
+        match self.persist() {
+            Ok(()) => {}
+            // Nothing was replaced: put the entry back.
+            Err(WriteError::NotReplaced(e)) => {
+                self.counter = prev_counter;
+                self.entries.insert(name.to_string(), old);
+                return Err(e);
+            }
+            // The file no longer holds the entry, so memory does not either.
+            Err(e @ WriteError::ReplacedUnsynced(_)) => {
+                return Err(e.into_error(CHANGE_UNSYNCED))
             }
         }
         Ok(())
@@ -270,6 +408,11 @@ impl<'a> SecretStore<'a> {
     /// [`Error::Auth`] under that master (the per-name DEKs no longer match).
     /// A blob from another generation inside a store is [`Error::Auth`] too
     /// (0.7.3): it can only get there by tampering.
+    ///
+    /// (0.9.0) The file's format version is preserved (sticky): rotating a v2
+    /// store writes a v2 file with a fresh salt, a fresh key id, `counter`
+    /// reset to 0, and `key_check` + `container_mac` recomputed; rotating a v1
+    /// store writes a v1 file.
     pub fn rotate<'b>(self, new_master: &'b MasterKey) -> Result<SecretStore<'b>, Error> {
         // 1. Decrypt everything with the old master before anything is written.
         let mut names: Vec<String> = self.entries.keys().cloned().collect();
@@ -290,6 +433,8 @@ impl<'a> SecretStore<'a> {
             master: new_master,
             salt,
             key_id,
+            version: self.version, // the file's version is preserved (sticky)
+            counter: 0,            // a new generation starts at 0 (v2)
             entries: HashMap::new(),
             lock: self.lock, // the new handle keeps the file's lock (0.7.2)
         };
@@ -310,6 +455,63 @@ impl<'a> SecretStore<'a> {
         }
     }
 
+    /// Upgrade a **v1** store file to file format **version 2** (0.9.0).
+    ///
+    /// This is explicit and one-way: after it, the file is v2 and stays v2
+    /// (versioning is sticky — not even [`SecretStore::open_with_version`] with
+    /// 1 writes a v1 file over it), and binaries that accept only version 1
+    /// report `unsupported store version 2`. A store that is already v2 is
+    /// returned unchanged.
+    ///
+    /// All entries are decrypted and verified with the master FIRST — if any
+    /// fails ([`Error::Auth`]: wrong master, or tampering), nothing is written
+    /// and the file is untouched. The file is then written as v2 in a single
+    /// atomic rename. Because the salt, the `key_id` and the per-name key
+    /// context (`krypto/store/v1|` + name) are unchanged, the upgrade re-wraps
+    /// the existing blobs — it does not re-encrypt them — and the v2 counter
+    /// starts at 0.
+    ///
+    /// The handle is consumed even on failure (a stale handle over a replaced
+    /// file could persist old-generation data back over the new one) — on
+    /// error, reopen the file. It is unchanged, except in one case (0.8.2): if
+    /// only the sync of the directory after the rename fails, the file is
+    /// already v2, and the [`Error::Io`] says so; reopen it.
+    pub fn upgrade(mut self) -> Result<Self, Error> {
+        if self.version == STORE_VER_V2 {
+            // Already v2; the upgrade is one-way, so there is nothing to do.
+            return Ok(self);
+        }
+        // 1. Decrypt and verify every entry before anything is written. Any
+        //    Auth aborts here, with the file untouched.
+        let mut names: Vec<String> = self.entries.keys().cloned().collect();
+        names.sort();
+        for name in &names {
+            self.get(name)?;
+        }
+
+        // 2. The same generation, now as a v2 container: same salt and key id,
+        //    the blobs re-wrapped as they are, a fresh counter and MACs.
+        let upgraded = SecretStore {
+            path: self.path.clone(),
+            master: self.master,
+            salt: self.salt,
+            key_id: self.key_id,
+            version: STORE_VER_V2,
+            counter: 0,
+            entries: std::mem::take(&mut self.entries),
+            lock: self.lock,
+        };
+
+        // 3. One atomic write replaces the file.
+        match upgraded.persist() {
+            Ok(()) => Ok(upgraded),
+            Err(e) => Err(e.into_error(
+                "the store file is upgraded to version 2, but syncing its directory failed, so \
+                 it is not confirmed to survive a crash",
+            )),
+        }
+    }
+
     // --- internal ---
 
     fn dek_for(&self, name: &str) -> Result<DerivedKey, Error> {
@@ -319,31 +521,65 @@ impl<'a> SecretStore<'a> {
         self.master.derive(&info, &self.salt)
     }
 
+    /// The counter the next v2 write must carry: the current one + 1 (0.9.0).
+    /// A v1 file has no counter and always reports 0. An overflow of u64 is
+    /// `Hardening`, never a wrap.
+    fn next_counter(&self) -> Result<u64, Error> {
+        if self.version == STORE_VER_V2 {
+            self.counter
+                .checked_add(1)
+                .ok_or_else(|| Error::Hardening("the store's v2 counter overflowed".into()))
+        } else {
+            Ok(self.counter)
+        }
+    }
+
+    /// Parse a store file (both versions, 0.9.0). Check order per the spec:
+    /// magic, version, header length, entry structure — then, for v2, the
+    /// `key_check` and the `container_mac`, both compared in constant time;
+    /// a mismatch of either is [`Error::Auth`].
     fn load(
         path: PathBuf,
         master: &'a MasterKey,
         data: &[u8],
         lock: Option<std::fs::File>,
     ) -> Result<Self, Error> {
-        if data.len() < HEADER_LEN {
+        if data.len() < 5 {
             return Err(Error::Format("store header truncated".into()));
         }
         if &data[0..4] != STORE_MAGIC {
             return Err(Error::Format("wrong store magic".into()));
         }
-        if data[4] != STORE_VER {
-            return Err(Error::Format(format!(
-                "unsupported store version {}",
-                data[4]
-            )));
+        let version = data[4];
+        let header_len = match version {
+            STORE_VER_V1 => HEADER_LEN_V1,
+            STORE_VER_V2 => V2_HEADER_LEN,
+            n => {
+                return Err(Error::Format(format!("unsupported store version {n}")));
+            }
+        };
+        if data.len() < header_len {
+            return Err(Error::Format("store header truncated".into()));
         }
         let mut salt = [0u8; SALT_LEN];
         salt.copy_from_slice(&data[5..5 + SALT_LEN]);
         let mut key_id = [0u8; KEY_ID_LEN];
-        key_id.copy_from_slice(&data[5 + SALT_LEN..HEADER_LEN]);
+        key_id.copy_from_slice(&data[5 + SALT_LEN..5 + SALT_LEN + KEY_ID_LEN]);
+        // v2-only header fields (v1 has none).
+        let mut key_check = [0u8; KEY_CHECK_LEN];
+        let mut container_mac = [0u8; MAC_LEN];
+        let mut counter = 0u64;
+        if version == STORE_VER_V2 {
+            key_check.copy_from_slice(&data[HEADER_LEN_V1..V2_COUNTER_OFF]);
+            let cbytes: [u8; COUNTER_LEN] = data[V2_COUNTER_OFF..V2_MAC_OFF]
+                .try_into()
+                .map_err(|_| Error::Format("store header truncated".into()))?;
+            counter = u64::from_le_bytes(cbytes);
+            container_mac.copy_from_slice(&data[V2_MAC_OFF..V2_HEADER_LEN]);
+        }
 
         let mut entries = HashMap::new();
-        let mut off = HEADER_LEN;
+        let mut off = header_len;
         while off < data.len() {
             if off + 2 > data.len() {
                 return Err(Error::Format("store truncated (name length)".into()));
@@ -382,22 +618,101 @@ impl<'a> SecretStore<'a> {
             }
             off += blen;
         }
+
+        // v2: authenticate the container. First the key_check — which master
+        // key the file is under, so a wrong master is caught here at `open` —
+        // then the container_mac over header[0..77] || entries, which makes
+        // the file as a whole one authenticated unit.
+        if version == STORE_VER_V2 {
+            let k_check = master.derive(CTX_V2_KEY_CHECK, &salt)?;
+            // key_check = HMAC-SHA256(K_check, "FST1" || ver || salt) = data[0..21]
+            let expected_check = crate::hmac_sha256(&k_check, &data[0..5 + SALT_LEN])?;
+            if !crate::ct_eq(&expected_check, &key_check) {
+                return Err(Error::Auth);
+            }
+            let k_mac = master.derive(CTX_V2_CONTAINER_MAC, &salt)?;
+            let mut mac_input =
+                Vec::with_capacity(V2_MAC_OFF + (data.len() - V2_HEADER_LEN));
+            mac_input.extend_from_slice(&data[..V2_MAC_OFF]); // header[0..77]
+            mac_input.extend_from_slice(&data[V2_HEADER_LEN..]); // entries
+            let expected_mac = crate::hmac_sha256(&k_mac, &mac_input)?;
+            if !crate::ct_eq(&expected_mac, &container_mac) {
+                return Err(Error::Auth);
+            }
+        }
+
         Ok(SecretStore {
             path,
             master,
             salt,
             key_id,
+            version,
+            counter,
             entries,
             lock,
         })
     }
 
+    /// Write the whole store to disk, in the version it was loaded with
+    /// (sticky, 0.9.0): a v1 file is written byte-for-byte as before, a v2 file
+    /// with its key_check, counter and container_mac.
     fn persist(&self) -> Result<(), WriteError> {
         let mut buf = Vec::new();
         buf.extend_from_slice(STORE_MAGIC);
-        buf.push(STORE_VER);
+        buf.push(self.version);
         buf.extend_from_slice(&self.salt);
         buf.extend_from_slice(&self.key_id);
+        if self.version == STORE_VER_V2 {
+            // key_check = HMAC-SHA256(K_check, "FST1" || ver || salt), the part
+            // of the header that proves at `open` which master key the file is
+            // under, before any entry is touched.
+            let k_check = self
+                .master
+                .derive(CTX_V2_KEY_CHECK, &self.salt)
+                .map_err(WriteError::NotReplaced)?;
+            // The MAC input is "FST1" || ver || salt — the first 21 bytes of the
+            // header, key_id excluded.
+            debug_assert_eq!(5 + SALT_LEN, 21);
+            let key_check = crate::hmac_sha256(&k_check, &buf[..5 + SALT_LEN])
+                .map_err(WriteError::NotReplaced)?;
+            buf.extend_from_slice(&key_check);
+            buf.extend_from_slice(&self.counter.to_le_bytes());
+            debug_assert_eq!(buf.len(), V2_MAC_OFF); // 77
+            // container_mac = HMAC-SHA256(K_mac, header[0..77] || entries): the
+            // whole file as one authenticated unit, so no entry can be removed,
+            // swapped, injected or reordered, and the counter cannot be lowered,
+            // without breaking the MAC.
+            let mut entries = Vec::new();
+            self.encode_entries(&mut entries)?;
+            let k_mac = self
+                .master
+                .derive(CTX_V2_CONTAINER_MAC, &self.salt)
+                .map_err(WriteError::NotReplaced)?;
+            let mut mac_input = Vec::with_capacity(buf.len() + entries.len());
+            mac_input.extend_from_slice(&buf);
+            mac_input.extend_from_slice(&entries);
+            let mac = crate::hmac_sha256(&k_mac, &mac_input).map_err(WriteError::NotReplaced)?;
+            buf.extend_from_slice(&mac);
+            buf.extend_from_slice(&entries);
+        } else {
+            self.encode_entries(&mut buf)?;
+        }
+        // `open` refuses a file past MAX_STORE_BYTES, so writing one would lock
+        // every secret in it out (0.7.2). `put` rolls back on this error. The
+        // cap covers the whole file, header included — for v2 the 109-byte
+        // header is part of `buf` (0.9.0).
+        if buf.len() > MAX_STORE_BYTES {
+            return Err(WriteError::NotReplaced(Error::Format(format!(
+                "the store would grow past {MAX_STORE_BYTES} bytes, which `open` refuses"
+            ))));
+        }
+        atomic_write(&self.path, &buf)
+    }
+
+    /// Append the entry table (`name_len u16LE | name | blob_len u32LE | blob`)
+    /// to `buf`, sorted by name so the file is deterministic (and the v2 MAC
+    /// over it stable). The encoding is identical in versions 1 and 2.
+    fn encode_entries(&self, buf: &mut Vec<u8>) -> Result<(), WriteError> {
         let mut names: Vec<&String> = self.entries.keys().collect();
         names.sort(); // deterministic file
         for name in names {
@@ -410,14 +725,7 @@ impl<'a> SecretStore<'a> {
             buf.extend_from_slice(&blen.to_le_bytes());
             buf.extend_from_slice(blob);
         }
-        // `open` refuses a file past MAX_STORE_BYTES, so writing one would lock
-        // every secret in it out (0.7.2). `put` rolls back on this error.
-        if buf.len() > MAX_STORE_BYTES {
-            return Err(WriteError::NotReplaced(Error::Format(format!(
-                "the store would grow past {MAX_STORE_BYTES} bytes, which `open` refuses"
-            ))));
-        }
-        atomic_write(&self.path, &buf)
+        Ok(())
     }
 }
 

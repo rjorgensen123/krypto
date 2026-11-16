@@ -37,9 +37,9 @@ def plain(buf):
 
 def test_one_version_and_one_error_tree():
     assert k.VERSION == k.__version__ == version("krypto-py"), "the module and the package have one version"
-    for e in [k.IoError, k.HardeningError, k.FormatError, k.AuthError, k.KeyNotFoundError, k.WrongKeyError]:
+    for e in [k.IoError, k.HardeningError, k.FormatError, k.AuthError, k.KeyNotFoundError, k.WrongKeyError, k.RollbackError]:
         assert issubclass(e, k.Error)
-    assert k.error.AuthError is k.AuthError
+    assert k.error.AuthError is k.AuthError and k.error.RollbackError is k.RollbackError
     # The message is the Rust one, so both languages say the same.
     m = master()
     blob = k.seal(m.derive(b"c", b"s"), m.key_id(), k.SecretBuf.from_vec(b"x"), k.Alg.Aegis256)
@@ -192,6 +192,50 @@ def test_failed_rotate_consumes_the_handle_and_keeps_the_file(tmp_path):
         s.get("x")
     assert path.read_bytes() == before
     assert plain(k.SecretStore.open(str(path), master()).get("x")) == b"y"
+
+
+def test_secretstore_version_counter_upgrade_and_rollback(tmp_path):
+    """The store's format version and counter, the one-way upgrade and the
+    rollback anchor (0.9.0): a new store is v2, a v1 file counts as counter
+    0, and an anchored open fails with RollbackError below the anchor."""
+    path = str(tmp_path / "s.store")
+    s = k.SecretStore.open(path, master())  # a new store is v2
+    assert s.version() == 2 and s.counter() == 0
+    s.put("a", k.SecretBuf.from_vec(b"1"))
+    assert s.version() == 2 and s.counter() == 1
+    del s  # the lock goes with the handle
+    # The counter anchors the file: below the caller's minimum, no handle.
+    with pytest.raises(k.RollbackError) as e:
+        k.SecretStore.open_with_min_counter(path, master(), 2)
+    assert e.value.file_counter == 1 and e.value.min_counter == 2
+    assert str(e.value).startswith("rollback detected")
+    ok = k.SecretStore.open_with_min_counter(path, master(), 1)
+    assert ok.version() == 2 and ok.counter() == 1
+    del ok
+    # An explicit v1 store is created as v1 and stays v1 (sticky).
+    v1 = str(tmp_path / "v1.store")
+    s1 = k.SecretStore.open_with_version(v1, master(), 1)
+    assert s1.version() == 1 and s1.counter() == 0
+    s1.put("x", k.SecretBuf.from_vec(b"y"))
+    with pytest.raises(k.FormatError):
+        k.SecretStore.open_with_version(str(tmp_path / "other.store"), master(), 3)
+    # A v1 file counts as counter 0, so any anchor above 0 fails on it.
+    v1b = str(tmp_path / "v1b.store")
+    sb = k.SecretStore.open_with_version(v1b, master(), 1)
+    sb.put("x", k.SecretBuf.from_vec(b"y"))
+    del sb
+    with pytest.raises(k.RollbackError) as e:
+        k.SecretStore.open_with_min_counter(v1b, master(), 1)
+    assert e.value.file_counter == 0 and e.value.min_counter == 1
+    # Upgrade is one-way: v1 -> v2, the entries readable, the old handle gone.
+    s2 = s1.upgrade()
+    assert s2.version() == 2 and s2.counter() == 0
+    assert plain(s2.get("x")) == b"y"
+    with pytest.raises(ValueError):
+        s1.get("x")  # upgrade consumed the old handle
+    del s2
+    reopened = k.SecretStore.open(v1, master())
+    assert reopened.version() == 2 and plain(reopened.get("x")) == b"y"
 
 
 # --------------------------------------------------------------------------- #
