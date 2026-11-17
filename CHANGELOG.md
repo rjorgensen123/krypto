@@ -147,6 +147,13 @@ A version 2 store file that is cut short of its 109-byte header is a changed fil
 `SecretStore::open` answers `Auth`. `inspect` now says "header cut short" with exit 3 for it,
 where it gave exit 0. A version 1 file cut short of its header is still exit 0.
 
+### Added — `DEVELOPMENT.md`: how the code is laid out, and the rules a change follows *(2026-11-17)*
+
+A file in the repository root for whoever changes the code: where things are, the fixed design
+constraints, and the rules, each with the test that guards it where there is one. Among them:
+everything that comes in has an upper bound, each failure has its own answer, what is stored is
+frozen, and the specification comes before the code. The README links to it.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*

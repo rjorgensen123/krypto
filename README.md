@@ -35,7 +35,8 @@ own is implemented**.
   and the methods of `SecretStore` (names only) · the test tool `krypto-cli`
   [`docs/Cli.md`](docs/Cli.md), where the same test checks that every command is named, and what
   its `inspect` recognizes [`docs/Inspect.md`](docs/Inspect.md) · the `SecretStore` file format
-  [`spec/SPEC-secretstore.md`](spec/SPEC-secretstore.md)
+  [`spec/SPEC-secretstore.md`](spec/SPEC-secretstore.md) · how the code is laid out and the rules a
+  change follows [`DEVELOPMENT.md`](DEVELOPMENT.md)
 - **Changes:** [`CHANGELOG.md`](CHANGELOG.md) · **Version:** see [`VERSION`](VERSION)
   (kept in lockstep with `Cargo.toml` by `tests/version.rs`)
 
