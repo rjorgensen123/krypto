@@ -135,6 +135,12 @@ and notes on how things were in earlier versions, are removed. `docs/Usage.md` h
 0.8.2 and a complete row for 0.9.0. The README install line says `krypto = "0.9"`, and
 `SECURITY.md` lists 0.9.x as the supported version.
 
+### Fixed — `SecretStore::open` reads a store file on a read-only file system whatever its mode *(2026-11-17)*
+
+`open` sets mode 0600 on a store file that has another mode. Where it may not change the mode,
+it leaves the file as it is and goes on. That held for a file the process does not own; on a
+read-only file system `open` failed with `Io` instead. It now leaves the file as it is there too.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*

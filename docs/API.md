@@ -305,10 +305,10 @@ Each entry gets its own key derived from its name (`info = "krypto/store/v1|" + 
 therefore cannot be moved to another name — the open fails. Writes are atomic (tmp + fsync +
 rename), and the file is private (0600). *(0.7.2)* The tmp file is new, with an unpredictable name,
 so nothing planted at that name is followed or reused, and the directory is synced after the
-rename. *(0.7.2)* An existing file with any other mode gets 0600 when opened. If the process is
-not permitted to change it, it is left as it is; any other failure to change it, such as a
-read-only file system, makes `open` fail with `Io`. *(0.8.2)* The mode is changed only once `open`
-has read the file as a store, so a file that is not a store keeps its mode.
+rename. *(0.7.2)* An existing file with any other mode gets 0600 when opened. If the process may
+not change it — it does not own the file, or *(0.9.0)* the file system is read-only — the file is
+left as it is and `open` goes on. *(0.8.2)* The mode is changed only once `open` has read the file
+as a store, so a file that is not a store keeps its mode.
 *(0.8.2)* If what is at the store path can be opened but is not a regular file, such as a FIFO, a
 device or a directory, `open` fails with `Format`; what cannot be opened, for example for lack of
 permission or because it is a socket, gives the `Error::Io` from opening it. A FIFO at the store

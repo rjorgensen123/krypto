@@ -1121,9 +1121,9 @@ fn is_same_file(_f: &std::fs::File, _path: &Path) -> Result<bool, Error> {
 
 /// Give the opened store file mode 0600, as every write does (0.7.2). `open`
 /// calls it only after the file has been read as a store, and it works on the
-/// opened file, not on the path (0.8.2). A file this process does not own is
-/// left as it is: changing it is not its right, and reading it must still
-/// work.
+/// opened file, not on the path (0.8.2). A file this process may not change
+/// is left as it is, and reading it must still work: one it does not own,
+/// or one on a read-only file system (0.9.0).
 #[cfg(unix)]
 fn make_private(file: &std::fs::File) -> Result<(), Error> {
     use std::os::unix::fs::PermissionsExt;
@@ -1133,7 +1133,14 @@ fn make_private(file: &std::fs::File) -> Result<(), Error> {
     }
     match file.set_permissions(std::fs::Permissions::from_mode(0o600)) {
         Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Ok(()),
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
+            ) =>
+        {
+            Ok(())
+        }
         Err(e) => Err(Error::Io(e)),
     }
 }

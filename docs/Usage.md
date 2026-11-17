@@ -229,13 +229,14 @@ against bloated files — and never written past it either: a `put` that would c
 value to another name in the file, `get` fails with `Auth`, and on a v2 file `open` already does.
 Writes are atomic — either the old file is there, or the new one, never half of one. The file gets
 mode 0600, and an existing one with any other mode is set to 0600 when you open it, unless the
-process may not change it; then it is left as it is. *(0.8.2)* That happens only once `open` has
-read the file as a store, so a file that is not a store keeps its mode. If what is at the store path
-can be opened but is not a regular file — a FIFO, a device, a directory — `open` fails with
-`Format`; what cannot be opened, for example for lack of permission or because it is a socket, gives
-the `Io` error from opening it. A FIFO at the store path does not make `open` wait. A symbolic link
-at the store path is followed, so a link to a store file is read through; the first write replaces
-the link with a regular file, and the file the link pointed to keeps its old contents.
+process may not change it — it does not own the file, or *(0.9.0)* the file system is read-only;
+then it is left as it is. *(0.8.2)* That happens only once `open` has read the file as a store, so a
+file that is not a store keeps its mode. If what is at the store path can be opened but is not a
+regular file — a FIFO, a device, a directory — `open` fails with `Format`; what cannot be opened,
+for example for lack of permission or because it is a socket, gives the `Io` error from opening it.
+A FIFO at the store path does not make `open` wait. A symbolic link at the store path is followed,
+so a link to a store file is read through; the first write replaces the link with a regular file,
+and the file the link pointed to keeps its old contents.
 
 *(0.8.2)* **A write that fails.** A write that fails before the new file is in place leaves the
 file as it was, and `put` and `delete` leave the handle as it was. If only the sync of the
