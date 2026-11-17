@@ -261,7 +261,14 @@ fn blob(input: &[u8]) -> Option<Finding> {
             found.changed = true;
             found
         }
-        Err(_) => found.fact("header", "cut short"),
+        // Not reached: with the magic and the length checked above,
+        // `blob_key_id` gives `Ok` or `Auth`. Should it ever give something
+        // else, the header does not read as `open` reads it: changed.
+        Err(_) => {
+            let mut found = found.fact("header", "changed");
+            found.changed = true;
+            found
+        }
     })
 }
 
