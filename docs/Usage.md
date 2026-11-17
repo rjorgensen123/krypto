@@ -161,7 +161,9 @@ let blob = seal_with_aad(&log_key, &key_id, &secret, Alg::Aegis256, b"record/42"
 let back = open_with_aad(&log_key, &blob, b"record/42")?;   // wrong AAD: Error::Auth
 ```
 
-The blob format is unchanged — an empty AAD is exactly what `seal`/`open` have always used.
+The blob format is unchanged — an empty AAD is exactly what `seal`/`open` have always used. The
+AAD is at most `MAX_AAD_BYTES` (1024) bytes; a longer one is `Error::Format`. It is public data to
+krypto — held in ordinary memory, not locked and not wiped — so nothing secret belongs in it.
 
 `key_id` is 16 bytes you choose yourself, carried in the blob in plaintext. It exists so you can
 see **which key generation** a blob belongs to, without opening it:
@@ -189,8 +191,8 @@ The blob says for itself which one was used, so the reader does not need to know
 
 The whole blob header — version, algorithm, key id and nonce — is **authenticated**. If anyone
 changes a single byte of it, or of what follows, you get `Error::Auth`. Only data that is not a
-krypto blob at all — shorter than the 4-byte magic, or not starting with `FAFN` — gives
-`Error::Format`. *(0.9.0)* A blob that starts with `FAFN` but is cut short of the 54-byte header
+krypto blob at all gives `Error::Format`. *(0.9.0)* That is data shorter than the 4-byte magic, or
+not starting with `FAFN`; a blob that starts with `FAFN` but is cut short of the 54-byte header
 gives `Auth` too. You **never** get wrong plaintext back instead.
 
 That includes someone swapping the key id to trick you into the wrong key. That case has its own

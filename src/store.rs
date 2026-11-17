@@ -1115,8 +1115,8 @@ mod tests {
 
     /// `put` refuses a value that would take the file past the cap before it
     /// seals anything. With the v2 counter at its maximum, a write that gets
-    /// past sealing fails on the counter instead, so only a refusal before
-    /// sealing gives the cap's `Format`.
+    /// as far as the counter fails on it instead, so the cap's `Format` shows
+    /// that the refusal came before that step.
     #[test]
     fn put_refuses_over_the_cap_before_sealing() {
         let mut s = test_store(STORE_VER_V2);

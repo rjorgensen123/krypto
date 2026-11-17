@@ -95,8 +95,9 @@ pub fn decode_nopad(s: &str) -> Result<Vec<u8>, Error> {
 /// Decode the alphabet body (no padding chars). Rejects invalid characters
 /// and non-zero discarded bits in the final quantum (canonical: one spelling).
 fn decode_body(s: &str) -> Result<Vec<u8>, Error> {
-    // The output buffer is reserved with `try_reserve_exact`: memory that
-    // cannot be had is `Error::Hardening`, never a crash (0.9.0).
+    // The output buffer is reserved with `try_reserve_exact`: a failed
+    // reservation is `Error::Hardening` instead of an abort (0.9.0); a length
+    // the system promises but cannot back still fills the memory.
     let cap = s.len() / 4 * 3 + 2;
     let mut out = Vec::new();
     out.try_reserve_exact(cap)

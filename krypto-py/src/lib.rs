@@ -369,7 +369,7 @@ fn seal_with_aad<'py>(
     Ok(PyBytes::new(py, &blob))
 }
 
-/// `krypto::open_with_aad` — a wrong or missing `aad` raises `AuthError`.
+/// `krypto::open_with_aad` (0.9.0) — a wrong or missing `aad` raises `AuthError`.
 #[pyfunction]
 fn open_with_aad(key: &DerivedKey, blob: &[u8], aad: &[u8]) -> PyResult<SecretBuf> {
     krypto::open_with_aad(&key.inner, blob, aad)
@@ -390,8 +390,8 @@ fn reseal<'py>(
     Ok(PyBytes::new(py, &out))
 }
 
-/// `krypto::reseal_with_aad` — `old_aad` must match the blob, `new_aad` is
-/// bound into the rotated blob.
+/// `krypto::reseal_with_aad` (0.9.0) — `old_aad` must match the blob, `new_aad`
+/// is bound into the rotated blob.
 #[pyfunction]
 fn reseal_with_aad<'py>(
     py: Python<'py>,
@@ -833,6 +833,7 @@ fn krypto_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("MAX_DERIVE_INPUT_BYTES", krypto::MAX_DERIVE_INPUT_BYTES)?;
     m.add("MAX_STORE_BYTES", krypto::MAX_STORE_BYTES)?;
     m.add("MAX_RANDOM_BYTES", krypto::MAX_RANDOM_BYTES)?;
+    m.add("MAX_AAD_BYTES", krypto::MAX_AAD_BYTES)?;
     add_errors(m)?;
     m.add_class::<SecretBuf>()?;
     m.add_class::<SecretString>()?;

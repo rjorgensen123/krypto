@@ -69,6 +69,24 @@ The decoders reserve the output buffer with `try_reserve_exact`: a failed reserv
 `Error::Hardening` (krypto-py `HardeningError`) where it was a process abort. A length the system
 promises but cannot back still fills the memory.
 
+### Added — `MAX_AAD_BYTES`: the caller's AAD is capped at 1024 bytes *(2026-11-17)*
+
+The `aad` of `seal_with_aad` and `open_with_aad`, and both AADs of `reseal_with_aad`, are at most
+`MAX_AAD_BYTES` (1024) bytes, the same size as the cap on `info` and salt. A longer one is `Format`
+(krypto-py `FormatError`), refused before a nonce is drawn, the blob is read or a key is used. To
+bind a blob to something larger, pass a hash of it as the AAD. The constant is in krypto-py too.
+
+### Changed — tests and documentation for the changes above *(2026-11-17)*
+
+- Tests: `krypto-cli open` and `inspect` on a blob cut short in its header; that `put` refuses an
+  over-cap value before it seals; a wrong AAD for all three algorithms; and the order of header
+  and AAD, checked against an AES-256-GCM implementation krypto did not write.
+- The test that compares the Rust and the Python API reads a `pub use` that spans several lines;
+  it had stopped before comparing anything.
+- Documentation: `docs/Inspect.md`, `docs/Cli.md` and the `inspect` help say that a header cut
+  short is exit 3; `docs/API.md` lists the AAD functions in its root block, says that the AAD is
+  public data held in ordinary memory, and states what `blob_key_id` does and does not detect.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*

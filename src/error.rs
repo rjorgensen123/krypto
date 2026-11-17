@@ -20,7 +20,7 @@ pub enum Error {
     /// The input has the wrong shape: not a krypto blob, or a malformed key,
     /// signature, PHC string, encoding or parameter, such as an empty `info`
     /// (0.7.3). Not a krypto blob means shorter than its 4-byte magic, or not
-    /// starting with `FAFN` (0.9.0; up to 0.8.x, shorter than the 54-byte
+    /// starting with `FAFN` (0.9.0; before that, shorter than the 54-byte
     /// header, or not starting with `FAFN`).
     Format(String),
     /// Authentication failed: a blob, signature or password that does not hold —

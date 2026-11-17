@@ -64,30 +64,49 @@ fn rust_surface() -> BTreeSet<String> {
     };
     let mut names = BTreeSet::new();
 
-    // The root: public modules, constants, and re-exports.
+    // The root: public modules, constants, and re-exports. A `pub use` is read
+    // up to its `;`, over as many lines as it takes. The `;` must end its line
+    // and every name must be a plain identifier; anything else fails here, so a
+    // name is never left out silently.
     let mut modules = Vec::new();
     let mut root = BTreeSet::new();
-    for line in read("lib.rs").lines() {
+    let lib = read("lib.rs");
+    let mut lines = lib.lines();
+    while let Some(line) = lines.next() {
         if let Some(rest) = line.strip_prefix("pub mod ") {
             modules.push(ident(rest));
         } else if let Some(rest) = line.strip_prefix("pub const ") {
             root.insert(ident(rest));
         } else if let Some(rest) = line.strip_prefix("pub use ") {
-            assert!(
-                rest.ends_with(';'),
-                "a `pub use` over several lines: teach this test to read it"
-            );
-            match (rest.find('{'), rest.find('}')) {
-                (Some(open), Some(close)) => root.extend(
-                    rest[open + 1..close]
-                        .split(',')
-                        .map(str::trim)
-                        .filter(|n| !n.is_empty())
-                        .map(String::from),
-                ),
-                _ => {
-                    root.insert(ident(rest.rsplit("::").next().unwrap()));
+            let mut stmt = rest.trim_end().to_string();
+            loop {
+                if let Some(at) = stmt.find(';') {
+                    assert!(
+                        at + 1 == stmt.len(),
+                        "a `pub use` with something after its `;`: teach this test to read {stmt:?}"
+                    );
+                    break;
                 }
+                let next = lines
+                    .next()
+                    .unwrap_or_else(|| panic!("a `pub use` that never ends with `;`: {stmt}"));
+                stmt.push(' ');
+                stmt.push_str(next.trim());
+            }
+            let names: Vec<&str> = match (stmt.find('{'), stmt.find('}')) {
+                (Some(open), Some(close)) => stmt[open + 1..close]
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|n| !n.is_empty())
+                    .collect(),
+                _ => vec![stmt.trim_end_matches(';').rsplit("::").next().unwrap()],
+            };
+            for name in names {
+                assert!(
+                    !name.is_empty() && ident(name) == name,
+                    "a `pub use` this test cannot read ({name:?}): teach it to read {stmt:?}"
+                );
+                root.insert(name.to_string());
             }
         }
     }

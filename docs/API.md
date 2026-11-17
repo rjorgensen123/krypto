@@ -35,7 +35,7 @@ pub const VERSION: &str;  // new in 0.6.0 — the crate version (mirrors Cargo.t
 
 pub use secret::{SecretBuf, SecretString};
 pub use kdf::{MasterKey, DerivedKey, hmac_sha256, MAX_MASTER_KEY_BYTES, MAX_DERIVE_INPUT_BYTES};
-pub use aead::{seal, open, reseal, blob_key_id, Alg};  // reseal: 0.6.0
+pub use aead::{seal, open, reseal, blob_key_id, Alg, seal_with_aad, open_with_aad, reseal_with_aad, MAX_AAD_BYTES};  // reseal: 0.6.0; seal_with_aad, open_with_aad, reseal_with_aad and MAX_AAD_BYTES: 0.9.0
 pub use store::{SecretStore, MAX_STORE_BYTES};
 pub use error::Error;
 pub use harden::{close_inherited_fds, drop_filesystem, harden_process, no_new_privs};
@@ -57,7 +57,8 @@ wrong.
 0.5.0 — they were named in the contract but lived in private modules. `MAX_DERIVE_INPUT_BYTES`
 (1 KiB) joined them in 0.7.0: `derive` took unbounded `info` and `salt`; from 0.8.2 the same cap
 holds for the salt of `password::derive_key`. `MAX_RANDOM_BYTES` (1 MiB) joined them in 0.7.3:
-`random_bytes` and `SecretBuf::random` took any length.)*
+`random_bytes` and `SecretBuf::random` took any length. `MAX_AAD_BYTES` (1 KiB) arrived in 0.9.0
+with the AAD functions it caps.)*
 
 ---
 
@@ -125,9 +126,9 @@ The absences are part of the contract:
 ### What is left on the stack *(0.8.2)*
 
 The libraries krypto uses for encryption, HMAC, HKDF and Argon2 leave copies of the key, and of
-their own state, in the stack memory they used. After `seal`, `open` and `reseal`,
-`MasterKey::derive` and `key_id`, `hmac_sha256`, and `password::hash`, `verify` and `derive_key`,
-krypto overwrites that stack with zeros.
+their own state, in the stack memory they used. After `seal`, `open` and `reseal` (and their
+`_with_aad` variants), `MasterKey::derive` and `key_id`, `hmac_sha256`, and `password::hash`,
+`verify` and `derive_key`, krypto overwrites that stack with zeros.
 
 Where a library has a `zeroize` feature, krypto turns it on, so its types wipe what they hold when
 they are dropped: AES-256-GCM, XChaCha20-Poly1305 (except the Poly1305 state it makes for each
@@ -191,6 +192,7 @@ pub fn hmac_sha256(key: &DerivedKey, data: &[u8]) -> Result<[u8; 32], Error>;
 
 ```rust
 pub enum Alg { Aegis256, XChaCha20Poly1305, Aes256Gcm }   // #[non_exhaustive]
+pub const MAX_AAD_BYTES: usize = 1024;                    // 0.9.0
 
 pub fn seal(key: &DerivedKey, key_id: &[u8; 16], plaintext: &SecretBuf, alg: Alg)
     -> Result<Vec<u8>, Error>;
@@ -199,11 +201,11 @@ pub fn blob_key_id(blob: &[u8]) -> Result<[u8; 16], Error>;   // unknown version
 pub fn reseal(old: &DerivedKey, new: &DerivedKey, new_key_id: &[u8; 16], blob: &[u8])
     -> Result<Vec<u8>, Error>;   // 0.6.0 — key rotation; reads the header as open (0.7.3)
 pub fn seal_with_aad(key: &DerivedKey, key_id: &[u8; 16], plaintext: &SecretBuf, alg: Alg, aad: &[u8])
-    -> Result<Vec<u8>, Error>;   // 0.9.0 — caller AAD appended after the 54-byte header
+    -> Result<Vec<u8>, Error>;   // 0.9.0 — caller AAD appended after the 54-byte header; aad over MAX_AAD_BYTES (1024): Format
 pub fn open_with_aad(key: &DerivedKey, blob: &[u8], aad: &[u8])
-    -> Result<SecretBuf, Error>;   // 0.9.0 — wrong or missing aad: Auth
+    -> Result<SecretBuf, Error>;   // 0.9.0 — wrong or missing aad: Auth; aad over MAX_AAD_BYTES (1024): Format
 pub fn reseal_with_aad(old: &DerivedKey, new: &DerivedKey, new_key_id: &[u8; 16], blob: &[u8],
-    old_aad: &[u8], new_aad: &[u8]) -> Result<Vec<u8>, Error>;   // 0.9.0 — rotation with AAD
+    old_aad: &[u8], new_aad: &[u8]) -> Result<Vec<u8>, Error>;   // 0.9.0 — rotation with AAD; either aad over MAX_AAD_BYTES (1024): Format
 ```
 
 `Alg::Aegis256` is the default. The other two exist for compatibility with systems that require
@@ -230,12 +232,20 @@ like any other tampering. Use it to bind a blob to a context the plaintext shoul
 record id, a channel, a timestamp. `reseal_with_aad` takes the old AAD (to open) and the new AAD
 (to seal under); the algorithm is preserved as in `reseal`.
 
+*(0.9.0)* Each AAD is at most `MAX_AAD_BYTES` (1024) bytes; a longer one is `Format`, refused
+before a nonce is drawn, the blob is read or a key is used. The AAD is public data to krypto: it is
+held in ordinary memory, not locked and not wiped, so nothing secret belongs in it. The blob does
+not record whether an AAD was used, so a blob sealed with an AAD and opened without it, by `open`
+or by a krypto older than 0.9.0, fails with `Auth`. AAD binds one blob to a context you give at
+each call, under one key; `derive(info, …)` gives a key per context, as `SecretStore` does per
+name.
+
 > **Tampering gives `Auth`, never wrong plaintext.** The whole blob header is part of the
 > authentication, so changing the algorithm id, key id or version makes the open fail with `Auth`
 > — *(0.7.3)* a version or algorithm krypto does not know included. Only data that is not a krypto
-> blob at all — shorter than its 4-byte magic, or not starting with `FAFN` — gives `Format`.
-> *(0.9.0)* A blob starting with `FAFN` but cut short of the 54-byte header is a changed blob and
-> gives `Auth` too, so the alarm class is no longer the tamperer's choice. Never wrong
+> blob at all gives `Format`. *(0.9.0)* That is data shorter than its 4-byte magic, or not starting
+> with `FAFN`; a blob starting with `FAFN` but cut short of the 54-byte header is a changed blob
+> and gives `Auth` too, so the alarm class is no longer the tamperer's choice. Never wrong
 > plaintext is an absolute guarantee, not a detail.
 
 ### The blob format (`FAFN`, format_ver 1 — unchanged since 0.2)
@@ -249,12 +259,14 @@ magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciph
   is associated data — the "key-id swap test": a changed header never yields a mis-decrypt.
   *(0.9.0)* `seal_with_aad` appends caller-supplied AAD after that fixed-length header; an empty
   caller AAD is identical to before, so the format does not change.
-  *(0.7.3)* A changed version, alg_id, key_id or nonce, or a body cut short, yields `Auth`, in
-  `open`, `reseal` and `blob_key_id` alike. *(0.7.3 up to 0.8.x)* Data shorter than the 54-byte
-  header, or without the `FAFN` magic, yielded `Format`. *(0.9.0)* The magic is checked before the
-  length: data shorter than the 4-byte magic, or not starting with `FAFN`, yields `Format`; a blob
-  that starts with `FAFN` but is cut short of the 54-byte header yields `Auth`, in `blob_key_id`
-  too.
+  *(0.7.3)* A changed version, alg_id, key_id or nonce, or a body cut short, yields `Auth` when
+  the blob is opened, in `open` and `reseal` (and, from 0.9.0, their `_with_aad` variants).
+  `blob_key_id` authenticates nothing: a version or alg_id krypto does not know yields `Auth`
+  there too; a changed key_id or nonce, an alg_id changed to another one krypto knows, or a body
+  cut short does not. *(0.7.3, before 0.9.0)* Data shorter than the 54-byte header, or without the
+  `FAFN` magic, yielded `Format`. *(0.9.0)* The magic is checked before the length: data shorter
+  than the 4-byte magic, or not starting with `FAFN`, yields `Format`; a blob that starts with
+  `FAFN` but is cut short of the 54-byte header yields `Auth`, in `blob_key_id` too.
 - The nonce is random per blob from the OS CSPRNG. The 32-byte field is used partially:
   AEGIS-256 all 32, XChaCha 24, AES-GCM 12 — the rest zero.
 - *(0.7.2)* **AES-256-GCM: at most 2³² blobs per key.** With a 12-byte random nonce, NIST SP 800-38D
@@ -641,7 +653,7 @@ pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotF
 |---|---|
 | `Io` | file or directory |
 | `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening — never a verdict on the data; treated fail-closed *(0.7.3: described as what it covers)* |
-| `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob, or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info`. *(0.9.0)* Not a krypto blob means shorter than its 4-byte magic, or not starting with `FAFN`; up to 0.8.x it meant shorter than the 54-byte header, or not starting with `FAFN` |
+| `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob, or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info`. *(0.9.0)* Not a krypto blob means shorter than its 4-byte magic, or not starting with `FAFN`; before 0.9.0 it meant shorter than the 54-byte header, or not starting with `FAFN` |
 | `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, a header cut short past the magic included *(0.9.0)*, and a key id in a `SecretStore` that does not match |
 | `KeyNotFound` | the name does not exist in the store |
 | `WrongKey` | the blob belongs to another key generation — routing, not tampering *(new in 0.5.0)*. *(0.7.3)* No library function returns it: a `SecretStore` holds one generation, so a different key id there is `Auth`. It is the answer for a caller that routes between generations |

@@ -17,6 +17,7 @@ import secrets
 import pytest
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, x25519
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -92,6 +93,19 @@ def test_krypto_seals_python_decrypts(master):
     assert AESGCM(hkdf_derive(raw, b"ctx/v1", b"s")).decrypt(header[22:34], body, header) == plaintext
 
 
+def test_krypto_seals_with_aad_python_decrypts(master):
+    raw, m = master
+    plaintext, aad = b"cross-language payload", b"record/42"
+    blob = k.seal_with_aad(m.derive(b"ctx/v1", b"s"), m.key_id(), k.SecretBuf.from_vec(plaintext),
+                           k.Alg.Aes256Gcm, aad)
+    header, body = blob[:HEADER_LEN], blob[HEADER_LEN:]
+    aesgcm = AESGCM(hkdf_derive(raw, b"ctx/v1", b"s"))
+    assert aesgcm.decrypt(header[22:34], body, header + aad) == plaintext, "the header, then the AAD"
+    for wrong in (aad + header, header):
+        with pytest.raises(InvalidTag):
+            aesgcm.decrypt(header[22:34], body, wrong)
+
+
 def test_python_seals_krypto_opens(master):
     raw, m = master
     plaintext = b"built by python"
@@ -99,6 +113,15 @@ def test_python_seals_krypto_opens(master):
     header = FAFN_MAGIC + bytes([FORMAT_VER, ALG_AES256GCM]) + key_id(raw) + nonce + bytes(20)
     body = AESGCM(hkdf_derive(raw, b"ctx/v1", b"s")).encrypt(nonce, plaintext, header)
     assert plain(k.open(m.derive(b"ctx/v1", b"s"), header + body)) == plaintext
+
+
+def test_python_seals_with_aad_krypto_opens(master):
+    raw, m = master
+    plaintext, aad = b"built by python", b"record/42"
+    nonce = secrets.token_bytes(12)
+    header = FAFN_MAGIC + bytes([FORMAT_VER, ALG_AES256GCM]) + key_id(raw) + nonce + bytes(20)
+    body = AESGCM(hkdf_derive(raw, b"ctx/v1", b"s")).encrypt(nonce, plaintext, header + aad)
+    assert plain(k.open_with_aad(m.derive(b"ctx/v1", b"s"), header + body, aad)) == plaintext
 
 
 def test_blob_key_id_is_the_header_field(master):

@@ -44,6 +44,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub use aead::{
     blob_key_id, open, open_with_aad, reseal, reseal_with_aad, seal, seal_with_aad, Alg,
+    MAX_AAD_BYTES,
 };
 pub use error::Error;
 pub use harden::{close_inherited_fds, drop_filesystem, harden_process, no_new_privs};

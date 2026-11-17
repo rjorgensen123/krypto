@@ -3,7 +3,7 @@
 
 use krypto::{
     blob_key_id, open, open_with_aad, reseal_with_aad, seal, seal_with_aad, Alg, Error, MasterKey,
-    SecretBuf,
+    SecretBuf, MAX_AAD_BYTES,
 };
 
 // Write a 32-byte master key to a temporary file and load it.
@@ -166,9 +166,9 @@ fn truncated_blob_fails() {
     assert!(open(&dk, &blob[..10]).is_err());
 }
 
-/// Past the magic, every change to a blob is `Auth` (0.7.3) — a version or an
-/// algorithm krypto does not know included — in `open`, `reseal` and
-/// `blob_key_id` alike, so the change raises the alarm wherever it is read.
+/// A version or an algorithm krypto does not know is `Auth` (0.7.3) in `open`,
+/// `reseal` and `blob_key_id` alike, so that change raises the alarm wherever
+/// the header is read.
 #[test]
 fn unknown_version_or_alg_id_gives_auth() {
     let mk = test_master("alg");
@@ -377,20 +377,80 @@ fn aad_roundtrip_every_alg() {
     }
 }
 
-/// A wrong, missing or empty AAD is tampering: `Auth`, never wrong plaintext.
+/// A wrong, missing or empty AAD is tampering: `Auth`, never wrong plaintext,
+/// for every algorithm.
 #[test]
 fn wrong_or_missing_aad_gives_auth() {
     let mk = test_master("aad-wrong");
     let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
     let secret = SecretBuf::from_vec(b"aad-secret".to_vec()).unwrap();
-    let blob = seal_with_aad(&dk, &[1u8; 16], &secret, Alg::Aegis256, b"context-A").unwrap();
+    for alg in [Alg::Aegis256, Alg::XChaCha20Poly1305, Alg::Aes256Gcm] {
+        let blob = seal_with_aad(&dk, &[1u8; 16], &secret, alg, b"context-A").unwrap();
+        assert!(
+            matches!(open_with_aad(&dk, &blob, b"context-B"), Err(Error::Auth)),
+            "{alg:?}"
+        );
+        assert!(
+            matches!(open_with_aad(&dk, &blob, b""), Err(Error::Auth)),
+            "{alg:?}"
+        );
+        // The plain `open` (empty AAD) must not open an AAD-bound blob either.
+        assert!(matches!(open(&dk, &blob), Err(Error::Auth)), "{alg:?}");
+    }
+}
+
+/// A blob sealed without an AAD does not open with one: the blob does not
+/// record whether an AAD was used, so a non-empty AAD at open is `Auth`.
+#[test]
+fn aad_at_open_of_a_blob_sealed_without_one_gives_auth() {
+    let mk = test_master("aad-none");
+    let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
+    let secret = SecretBuf::from_vec(b"data".to_vec()).unwrap();
+    let blob = seal(&dk, &[1u8; 16], &secret, Alg::Aegis256).unwrap();
     assert!(matches!(
-        open_with_aad(&dk, &blob, b"context-B"),
+        open_with_aad(&dk, &blob, b"context-A"),
         Err(Error::Auth)
     ));
-    assert!(matches!(open_with_aad(&dk, &blob, b""), Err(Error::Auth)));
-    // The plain `open` (empty AAD) must not open an AAD-bound blob either.
-    assert!(matches!(open(&dk, &blob), Err(Error::Auth)));
+}
+
+/// The AAD is bounded (0.9.0): `MAX_AAD_BYTES` is accepted, one byte more is
+/// `Format`, in `seal_with_aad`, `open_with_aad` and for each of the two AADs
+/// of `reseal_with_aad`.
+#[test]
+fn aad_over_max_aad_bytes_gives_format() {
+    let mk = test_master("aad-cap");
+    let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
+    let secret = SecretBuf::from_vec(b"data".to_vec()).unwrap();
+    let at_cap = vec![b'a'; MAX_AAD_BYTES];
+    let over = vec![b'a'; MAX_AAD_BYTES + 1];
+
+    let blob = seal_with_aad(&dk, &[1u8; 16], &secret, Alg::Aegis256, &at_cap).unwrap();
+    open_with_aad(&dk, &blob, &at_cap).unwrap();
+    reseal_with_aad(&dk, &dk, &[2u8; 16], &blob, &at_cap, &at_cap).unwrap();
+
+    assert!(matches!(
+        seal_with_aad(&dk, &[1u8; 16], &secret, Alg::Aegis256, &over),
+        Err(Error::Format(_))
+    ));
+    assert!(matches!(
+        open_with_aad(&dk, &blob, &over),
+        Err(Error::Format(_))
+    ));
+    assert!(
+        matches!(
+            reseal_with_aad(&dk, &dk, &[2u8; 16], &blob, &over, &at_cap),
+            Err(Error::Format(_))
+        ),
+        "old_aad"
+    );
+    // Refused before the blob is opened: the wrong old AAD would be `Auth`.
+    assert!(
+        matches!(
+            reseal_with_aad(&dk, &dk, &[2u8; 16], &blob, b"wrong", &over),
+            Err(Error::Format(_))
+        ),
+        "new_aad"
+    );
 }
 
 /// Empty caller AAD is exactly the old behaviour: `seal_with_aad(.., &[])`

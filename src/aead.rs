@@ -28,6 +28,26 @@ const KEY_ID_LEN: usize = 16;
 const NONCE_FIELD: usize = 32;
 const HEADER_LEN: usize = 4 + 1 + 1 + KEY_ID_LEN + NONCE_FIELD; // 54
 
+/// Upper bound on the caller-supplied associated data of [`seal_with_aad`],
+/// [`open_with_aad`] and [`reseal_with_aad`] (0.9.0).
+///
+/// It is the same size as the cap on `info` and salt,
+/// [`crate::MAX_DERIVE_INPUT_BYTES`]. To bind a blob to something larger, pass
+/// a hash of it as the AAD, for example one made with [`crate::sha256`].
+pub const MAX_AAD_BYTES: usize = 1024;
+
+/// Refuses an AAD longer than [`MAX_AAD_BYTES`] with `Error::Format`. `what`
+/// is the parameter's name; the message carries only the lengths.
+fn check_aad_len(what: &str, aad: &[u8]) -> Result<(), Error> {
+    if aad.len() > MAX_AAD_BYTES {
+        return Err(Error::Format(format!(
+            "`{what}` is {} bytes — max {MAX_AAD_BYTES}",
+            aad.len()
+        )));
+    }
+    Ok(())
+}
+
 /// How much of the stack below `seal` and `open` is overwritten after the
 /// cipher has run (0.8.2). The ciphers leave copies of the key in the stack
 /// frames they used. Measured below the caller of `seal` and `open`, the
@@ -104,6 +124,9 @@ pub fn seal(
 /// `aad` fails with [`Error::Auth`] like any other tampering. Use it to bind a
 /// blob to a context the plaintext should not carry — a record id, a channel,
 /// a timestamp.
+///
+/// `aad` is at most [`MAX_AAD_BYTES`] bytes; a longer one is
+/// [`Error::Format`], refused before a nonce is drawn or the key is used.
 pub fn seal_with_aad(
     key: &DerivedKey,
     key_id: &[u8; KEY_ID_LEN],
@@ -111,6 +134,7 @@ pub fn seal_with_aad(
     alg: Alg,
     aad: &[u8],
 ) -> Result<Vec<u8>, Error> {
+    check_aad_len("aad", aad)?;
     let mut nonce = [0u8; NONCE_FIELD];
     getrandom::fill(&mut nonce[..alg.nonce_len()])
         .map_err(|e| Error::Hardening(format!("getrandom failed: {e}")))?;
@@ -173,7 +197,11 @@ pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error> {
 /// in the blob, so a missing or different `aad` fails with [`Error::Auth`]
 /// like any other tampering. An empty `aad` opens exactly the blobs `seal`
 /// produces.
+///
+/// `aad` is at most [`MAX_AAD_BYTES`] bytes; a longer one is
+/// [`Error::Format`], refused before the blob is read or the key is used.
 pub fn open_with_aad(key: &DerivedKey, blob: &[u8], aad: &[u8]) -> Result<SecretBuf, Error> {
+    check_aad_len("aad", aad)?;
     let (alg, header, body) = read_header(blob)?;
     let nonce_start = 6 + KEY_ID_LEN;
     // `key_id` is covered by the AAD, so it cannot be tampered with silently —
@@ -220,6 +248,9 @@ pub fn reseal(
 /// [`reseal`] with caller-supplied associated data (0.9.0): `old_aad` must
 /// match the blob (as in [`open_with_aad`]), `new_aad` is bound into the new
 /// blob (as in [`seal_with_aad`]). The algorithm is preserved, as in `reseal`.
+///
+/// `old_aad` and `new_aad` are each at most [`MAX_AAD_BYTES`] bytes; a longer
+/// one is [`Error::Format`], refused before the blob is read or a key is used.
 pub fn reseal_with_aad(
     old: &DerivedKey,
     new: &DerivedKey,
@@ -228,6 +259,8 @@ pub fn reseal_with_aad(
     old_aad: &[u8],
     new_aad: &[u8],
 ) -> Result<Vec<u8>, Error> {
+    check_aad_len("old_aad", old_aad)?;
+    check_aad_len("new_aad", new_aad)?;
     let (alg, _, _) = read_header(blob)?;
     let pt = open_with_aad(old, blob, old_aad)?;
     seal_with_aad(new, new_key_id, &pt, alg, new_aad)
