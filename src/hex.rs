@@ -23,8 +23,9 @@ pub fn encode(bytes: &[u8]) -> String {
 
 /// Decode canonical (lowercase) hex. Fail-closed: odd length, uppercase or
 /// any non-hex character is `Error::Format` — never a guess. The output buffer
-/// is reserved with `try_reserve_exact`: memory that cannot be had is
-/// `Error::Hardening`, never a crash (0.9.0).
+/// is reserved with `try_reserve_exact`: a failed reservation is
+/// `Error::Hardening` instead of an abort (0.9.0); a length the system
+/// promises but cannot back still fills the memory.
 pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
     if !s.len().is_multiple_of(2) {
         return Err(Error::Format(format!(

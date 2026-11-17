@@ -52,8 +52,10 @@ pub fn encode_nopad(bytes: &[u8]) -> String {
 
 /// Decode canonical padded base64. Fail-closed: whitespace, invalid
 /// characters, missing/misplaced padding or non-zero discarded trailing bits
-/// are `Error::Format` — never a guess. Memory that cannot be had for the
-/// output buffer is `Error::Hardening`, never a crash (0.9.0).
+/// are `Error::Format` — never a guess. The output buffer is reserved with
+/// `try_reserve_exact`: a failed reservation is `Error::Hardening` instead of
+/// an abort (0.9.0); a length the system promises but cannot back still fills
+/// the memory.
 pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
     if !s.len().is_multiple_of(4) {
         return Err(Error::Format(format!(
@@ -70,9 +72,11 @@ pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
 }
 
 /// Decode canonical unpadded base64 (ssh fingerprint form). Fail-closed:
-/// padding characters are rejected — the unpadded form has ONE spelling.
-/// Memory that cannot be had for the output buffer is `Error::Hardening`,
-/// never a crash (0.9.0).
+/// padding characters are rejected — the unpadded form has ONE spelling — and,
+/// as in [`decode`], what is rejected is `Error::Format`. The output buffer is
+/// reserved with `try_reserve_exact`: a failed reservation is
+/// `Error::Hardening` instead of an abort (0.9.0); a length the system
+/// promises but cannot back still fills the memory.
 pub fn decode_nopad(s: &str) -> Result<Vec<u8>, Error> {
     if s.contains('=') {
         return Err(Error::Format(

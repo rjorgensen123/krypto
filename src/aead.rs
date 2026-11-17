@@ -247,6 +247,8 @@ pub fn reseal_with_aad(
 ///
 /// It reads the header as `open` does (0.7.3): `Format` if `blob` is not a
 /// krypto blob, `Auth` for a version or an algorithm this krypto does not know.
+/// A blob that starts with `FAFN` but is cut short of the 54-byte header is
+/// `Auth` here too (0.9.0).
 pub fn blob_key_id(blob: &[u8]) -> Result<[u8; KEY_ID_LEN], Error> {
     let (_, header, _) = read_header(blob)?;
     let mut out = [0u8; KEY_ID_LEN];

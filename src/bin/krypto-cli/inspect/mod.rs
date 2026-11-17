@@ -20,9 +20,9 @@ mod text;
 
 /// What `inspect` found: a name and the facts about it. `changed` is set for a
 /// krypto blob whose header names a format version or an algorithm krypto does
-/// not know, which is exit 3, as for `open`. `too_deep` is set where the depth
-/// limit kept `inspect` from unwrapping further, and the report says so
-/// (0.8.2).
+/// not know, or is cut short (0.9.0), which is exit 3, as for `open`. `too_deep`
+/// is set where the depth limit kept `inspect` from unwrapping further, and the
+/// report says so (0.8.2).
 pub struct Finding {
     pub what: String,
     pub facts: Vec<(&'static str, String)>,

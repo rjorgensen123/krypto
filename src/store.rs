@@ -59,6 +59,9 @@ const CTX_V2_CONTAINER_MAC: &[u8] = b"krypto/store/v2|container-mac";
 /// (bounded input).
 pub const MAX_STORE_BYTES: usize = 16 * 1024 * 1024;
 
+/// What an `Alg::Aegis256` blob adds to its value: the 54-byte FAFN header and the 32-byte tag.
+const AEGIS256_BLOB_OVERHEAD: usize = 54 + 32;
+
 /// Maximum length of a key name in the store.
 const MAX_NAME_LEN: usize = 512;
 
@@ -287,7 +290,7 @@ impl<'a> SecretStore<'a> {
         // 54-byte FAFN header + 32-byte tag). Over the cap: the same `Format`
         // persist would give, but no sealing, no blob allocation and no file
         // build happen first. The check in `persist` stays as the guard.
-        let new_blob_len = 86usize.saturating_add(secret.len());
+        let new_blob_len = AEGIS256_BLOB_OVERHEAD.saturating_add(secret.len());
         if self.prospective_file_len(name, new_blob_len) > MAX_STORE_BYTES {
             return Err(Error::Format(format!(
                 "the store would grow past {MAX_STORE_BYTES} bytes, which `open` refuses"
@@ -736,7 +739,8 @@ impl<'a> SecretStore<'a> {
         // `open` refuses a file past MAX_STORE_BYTES, so writing one would lock
         // every secret in it out (0.7.2). `put` rolls back on this error. The
         // cap covers the whole file, header included — for v2 the 109-byte
-        // header is part of `buf` (0.9.0).
+        // header is part of `buf` (0.9.0). `put` checks the same size before
+        // sealing; this check is the guard behind it.
         if buf.len() > MAX_STORE_BYTES {
             return Err(WriteError::NotReplaced(Error::Format(format!(
                 "the store would grow past {MAX_STORE_BYTES} bytes, which `open` refuses"
@@ -1107,5 +1111,39 @@ mod tests {
         let mut s1 = test_store(STORE_VER_V1);
         s1.entries.insert("a".to_string(), vec![0u8; 10]);
         assert_eq!(s1.prospective_file_len("a", 10), 37 + 17, "v1 header is 37");
+    }
+
+    /// `put` refuses a value that would take the file past the cap before it
+    /// seals anything. With the v2 counter at its maximum, a write that gets
+    /// past sealing fails on the counter instead, so only a refusal before
+    /// sealing gives the cap's `Format`.
+    #[test]
+    fn put_refuses_over_the_cap_before_sealing() {
+        let mut s = test_store(STORE_VER_V2);
+        // A file exactly at the cap: the v2 header and one entry named "big".
+        let fill = MAX_STORE_BYTES - V2_HEADER_LEN - (2 + 3 + 4);
+        s.entries.insert("big".to_string(), vec![0u8; fill]);
+        assert_eq!(s.prospective_file_len("big", fill), MAX_STORE_BYTES);
+        s.counter = u64::MAX;
+        let value = SecretBuf::from_vec(vec![1u8]).unwrap();
+        match s.put("a", &value) {
+            Err(Error::Format(m)) => assert!(m.contains("would grow past"), "{m}"),
+            other => panic!("expected the cap's Format before sealing, got {other:?}"),
+        }
+        assert!(!s.contains("a"), "the refused value is not in the handle");
+        assert_eq!(s.counter, u64::MAX, "the counter is unchanged");
+    }
+
+    /// The blob size `put` counts with is what `aead::seal` makes for
+    /// `Alg::Aegis256`: the value's length plus the overhead.
+    #[test]
+    fn aegis256_blob_overhead_matches_seal() {
+        let s = test_store(STORE_VER_V2);
+        let dek = s.dek_for("a").unwrap();
+        for len in [0, 1, 32, 1000] {
+            let value = SecretBuf::from_vec(vec![5u8; len]).unwrap();
+            let blob = aead::seal(&dek, &s.key_id, &value, Alg::Aegis256).unwrap();
+            assert_eq!(blob.len(), len + AEGIS256_BLOB_OVERHEAD, "{len} bytes");
+        }
     }
 }

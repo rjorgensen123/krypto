@@ -17,10 +17,11 @@ pub enum Error {
     /// locked or protected memory, randomness, process hardening, or an internal
     /// step no input can cause. Never a verdict on the data. Treated fail-closed.
     Hardening(String),
-    /// The input has the wrong shape: not a krypto blob (shorter than its
-    /// 4-byte magic, or not starting with `FAFN`), or a malformed key,
+    /// The input has the wrong shape: not a krypto blob, or a malformed key,
     /// signature, PHC string, encoding or parameter, such as an empty `info`
-    /// (0.7.3).
+    /// (0.7.3). Not a krypto blob means shorter than its 4-byte magic, or not
+    /// starting with `FAFN` (0.9.0; up to 0.8.x, shorter than the 54-byte
+    /// header, or not starting with `FAFN`).
     Format(String),
     /// Authentication failed: a blob, signature or password that does not hold —
     /// tampering, or the wrong key or password. Any change to a blob past its

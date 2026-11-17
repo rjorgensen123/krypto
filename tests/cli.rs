@@ -99,6 +99,27 @@ fn seal_and_open_with_their_exit_codes() {
     }
 }
 
+/// A blob that starts with `FAFN` but is cut short of its 54-byte header is a
+/// changed blob: `open` gives exit 3 (0.9.0).
+#[test]
+fn open_of_a_blob_cut_short_in_its_header_is_exit_3() {
+    let key = key_file("cut-open", 3);
+    let k = key.to_str().unwrap();
+    let m = master(3);
+    let secret = SecretBuf::from_vec(b"x".to_vec()).unwrap();
+    let blob = krypto::seal(
+        &m.derive(b"c", b"s").unwrap(),
+        &m.key_id().unwrap(),
+        &secret,
+        krypto::Alg::Aegis256,
+    )
+    .unwrap();
+    for keep in [10, 53] {
+        let out = run(&[&["open"][..], &flags(k)].concat(), &blob[..keep]);
+        assert_eq!(out.code, 3, "{keep} bytes: {}", out.stderr);
+    }
+}
+
 /// `inspect` tells what krypto made without a key, and never shows a hash
 /// value; random bytes are only a length.
 #[test]
@@ -172,6 +193,30 @@ fn inspect_tells_what_krypto_made() {
     }
     let (code, r) = report(b"hello world");
     assert_eq!((code, r.starts_with("not recognized")), (0, true), "{r}");
+}
+
+/// `inspect` reports a blob that starts with `FAFN` but is cut short of its
+/// 54-byte header as cut short, with exit 3, as for `open` (0.9.0).
+#[test]
+fn inspect_of_a_blob_cut_short_in_its_header_is_exit_3() {
+    let m = master(3);
+    let secret = SecretBuf::from_vec(b"x".to_vec()).unwrap();
+    let blob = krypto::seal(
+        &m.derive(b"c", b"s").unwrap(),
+        &m.key_id().unwrap(),
+        &secret,
+        krypto::Alg::Aegis256,
+    )
+    .unwrap();
+    for keep in [10, 53] {
+        let out = run(&["inspect"], &blob[..keep]);
+        let r = text(&out);
+        assert_eq!(out.code, 3, "{keep} bytes: {r}");
+        assert!(
+            r.starts_with("krypto blob") && r.contains("header      cut short"),
+            "{keep} bytes: {r}"
+        );
+    }
 }
 
 /// One entry of a store file, in the encoding v1 and v2 share: the name and a

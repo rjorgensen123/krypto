@@ -194,8 +194,8 @@ pub enum Alg { Aegis256, XChaCha20Poly1305, Aes256Gcm }   // #[non_exhaustive]
 
 pub fn seal(key: &DerivedKey, key_id: &[u8; 16], plaintext: &SecretBuf, alg: Alg)
     -> Result<Vec<u8>, Error>;
-pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error>;   // any change past FAFN: Auth (0.7.3)
-pub fn blob_key_id(blob: &[u8]) -> Result<[u8; 16], Error>;   // unknown version or alg: Auth (0.7.3)
+pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error>;   // any change past FAFN: Auth (0.7.3); header cut short: Auth (0.9.0)
+pub fn blob_key_id(blob: &[u8]) -> Result<[u8; 16], Error>;   // unknown version or alg: Auth (0.7.3); header cut short: Auth (0.9.0)
 pub fn reseal(old: &DerivedKey, new: &DerivedKey, new_key_id: &[u8; 16], blob: &[u8])
     -> Result<Vec<u8>, Error>;   // 0.6.0 — key rotation; reads the header as open (0.7.3)
 pub fn seal_with_aad(key: &DerivedKey, key_id: &[u8; 16], plaintext: &SecretBuf, alg: Alg, aad: &[u8])
@@ -213,7 +213,8 @@ them.
 several keys and must find the right one first. Note that the value is a *hint about where to
 look*, not proof: tampering is discovered when `open` is called, as `Error::Auth`. *(0.7.3)*
 `blob_key_id` reads the header as `open` does: a version or algorithm krypto does not know is
-`Auth` already there, and data that is not a krypto blob is `Format`.
+`Auth` already there, and data that is not a krypto blob is `Format`. *(0.9.0)* A blob that starts
+with `FAFN` but is cut short of the 54-byte header is `Auth` there too.
 
 `reseal` *(0.6.0)* is the rotation **action**: open with the old key, seal with the new one
 under a new generation id — the blob's algorithm is preserved. Both keys come from you (krypto
@@ -249,10 +250,11 @@ magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciph
   *(0.9.0)* `seal_with_aad` appends caller-supplied AAD after that fixed-length header; an empty
   caller AAD is identical to before, so the format does not change.
   *(0.7.3)* A changed version, alg_id, key_id or nonce, or a body cut short, yields `Auth`, in
-  `open`, `reseal` and `blob_key_id` alike; data too short for a header or without the `FAFN`
-  magic yields `Format`. *(0.9.0)* The magic is checked before the length: a blob that starts
-  with `FAFN` but is cut short of the 54-byte header yields `Auth` (in `blob_key_id` too), not
-  `Format`.
+  `open`, `reseal` and `blob_key_id` alike. *(0.7.3 up to 0.8.x)* Data shorter than the 54-byte
+  header, or without the `FAFN` magic, yielded `Format`. *(0.9.0)* The magic is checked before the
+  length: data shorter than the 4-byte magic, or not starting with `FAFN`, yields `Format`; a blob
+  that starts with `FAFN` but is cut short of the 54-byte header yields `Auth`, in `blob_key_id`
+  too.
 - The nonce is random per blob from the OS CSPRNG. The 32-byte field is used partially:
   AEGIS-256 all 32, XChaCha 24, AES-GCM 12 — the rest zero.
 - *(0.7.2)* **AES-256-GCM: at most 2³² blobs per key.** With a 12-byte random nonce, NIST SP 800-38D
@@ -550,8 +552,10 @@ pub fn decode(s: &str) -> Result<Vec<u8>, Error>;      // fail-closed: [0-9a-f] 
 ```
 
 One canonical form: `decode` rejects UPPERCASE on purpose — two spellings of the same bytes must
-not be able to exist in signed forms and fingerprint comparisons. *(0.9.0)* The output buffer is
-reserved with `try_reserve_exact`: memory that cannot be had is `Error::Hardening`, never a crash.
+not be able to exist in signed forms and fingerprint comparisons. What `decode` rejects is
+`Error::Format`. *(0.9.0)* The output buffer is reserved with `try_reserve_exact`: a failed
+reservation is `Error::Hardening` instead of an abort; a length the system promises but cannot back
+still fills the memory.
 
 ---
 
@@ -565,10 +569,11 @@ pub fn decode_nopad(s: &str) -> Result<Vec<u8>, Error>;    // fail-closed, rejec
 ```
 
 Same philosophy as `hex`: one spelling — whitespace, wrong padding and non-canonical trailing
-bits are rejected. Keys and signatures on the wire are still HEX; base64 exists only for formats
-that ARE base64 by nature (`SHA256:<base64-no-pad>` fingerprints, PEM). *(0.9.0)* `decode` and
-`decode_nopad` reserve the output buffer with `try_reserve_exact`: memory that cannot be had is
-`Error::Hardening`, never a crash.
+bits are rejected, as `Error::Format`. Keys and signatures on the wire are still HEX; base64 exists
+only for formats that ARE base64 by nature (`SHA256:<base64-no-pad>` fingerprints, PEM).
+*(0.9.0)* `decode` and `decode_nopad` reserve the output buffer with `try_reserve_exact`: a failed
+reservation is `Error::Hardening` instead of an abort; a length the system promises but cannot back
+still fills the memory.
 
 ---
 
@@ -636,7 +641,7 @@ pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotF
 |---|---|
 | `Io` | file or directory |
 | `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening — never a verdict on the data; treated fail-closed *(0.7.3: described as what it covers)* |
-| `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob (shorter than its 4-byte magic, or not starting with `FAFN`), or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info` |
+| `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob, or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info`. *(0.9.0)* Not a krypto blob means shorter than its 4-byte magic, or not starting with `FAFN`; up to 0.8.x it meant shorter than the 54-byte header, or not starting with `FAFN` |
 | `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, a header cut short past the magic included *(0.9.0)*, and a key id in a `SecretStore` that does not match |
 | `KeyNotFound` | the name does not exist in the store |
 | `WrongKey` | the blob belongs to another key generation — routing, not tampering *(new in 0.5.0)*. *(0.7.3)* No library function returns it: a `SecretStore` holds one generation, so a different key id there is `Auth`. It is the answer for a caller that routes between generations |

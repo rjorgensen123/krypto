@@ -49,21 +49,25 @@ entry or a changed header fails there too. An unknown version byte is `Format`
 an `upgrade` older binaries can no longer read the store. Version 1 files are unchanged: still
 readable, no key check at `open`, no container MAC, a wrong key still shows as `Auth` from `get`.
 
-### Changed — a blob cut short past its `FAFN` magic is `Auth`, not `Format` *(2026-11-16)*
+### ⚠ Changed — a blob cut short past its `FAFN` magic is `Auth`, not `Format` *(2026-11-16)*
 
-The magic is now checked before the length, so a blob with intact `FAFN` magic but a header cut
-short of 54 bytes is tampering: `Auth` (CLI exit 3, krypto-py `AuthError`). Only data that cannot
-carry the magic is still `Format`.
+The magic is now checked before the length, so data that starts with `FAFN` but is shorter than
+the 54-byte header is a changed blob: `Auth`, where it was `Format`, in `open`, `reseal`,
+`blob_key_id` and `SecretStore::get` (krypto-py `AuthError` instead of `FormatError`). Data shorter
+than the 4-byte magic, or not starting with `FAFN`, is still `Format`. In `krypto-cli`, `open`
+gives exit 3 for such a blob (it was 1), and `inspect` reports the header as cut short with exit 3
+(it was 0).
 
 ### Fixed — `SecretStore::put` checks the 16 MiB cap before sealing *(2026-11-16)*
 
 The prospective file size (header included) is computed before the value is encrypted; over the
 cap fails with the same `Format` as before, just without sealing or building the file first.
 
-### Fixed — `hex::decode` and `base64::decode` fail with `Hardening` instead of aborting *(2026-11-16)*
+### Fixed — `hex::decode`, `base64::decode` and `base64::decode_nopad` fail with `Hardening` when the output buffer cannot be reserved *(2026-11-16)*
 
-Both decoders reserve the output buffer with `try_reserve_exact`: if the memory cannot be had,
-the error is `Error::Hardening` (krypto-py `HardeningError`), never a process abort.
+The decoders reserve the output buffer with `try_reserve_exact`: a failed reservation is
+`Error::Hardening` (krypto-py `HardeningError`) where it was a process abort. A length the system
+promises but cannot back still fills the memory.
 
 ## [0.8.2]
 

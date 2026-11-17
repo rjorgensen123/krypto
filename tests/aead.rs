@@ -204,9 +204,17 @@ fn not_a_blob_gives_format() {
     let dk = mk.derive(b"krypto/test/v1", b"saltsalt").unwrap();
     let secret = SecretBuf::from_vec(b"data".to_vec()).unwrap();
     let mut blob = seal(&dk, &[1u8; 16], &secret, Alg::Aegis256).unwrap();
+    assert!(matches!(open(&dk, &[]), Err(Error::Format(_))), "empty");
     assert!(matches!(open(&dk, &blob[..3]), Err(Error::Format(_))));
     blob[0] = b'X';
     assert!(matches!(open(&dk, &blob), Err(Error::Format(_))));
+    // Shorter than the 54-byte header and not starting with `FAFN`: `Format`.
+    for keep in [4, 10, 53] {
+        assert!(
+            matches!(open(&dk, &blob[..keep]), Err(Error::Format(_))),
+            "{keep} bytes"
+        );
+    }
 }
 
 /// A blob cut short is a changed blob: `Auth` for every algorithm — including

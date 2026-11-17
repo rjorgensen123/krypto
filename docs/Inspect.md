@@ -19,9 +19,10 @@ data. Random bytes cannot be told apart: encrypted data, compressed data and key
 the same.
 
 The exit code is `0` when it has said what something is, also `not recognized`; `3` for a krypto
-blob whose header names a format version or an algorithm krypto does not know, as for `open`; `1`
-when stdin cannot be read; and `2` when stdin is more than 64 MiB. Other changes to a blob still
-give a report and exit `0`; it takes `open`, with the key, to find them.
+blob whose header names a format version or an algorithm krypto does not know, and *(0.9.0)* for
+one that starts with `FAFN` but is cut short of its 54-byte header, as for `open`; `1` when stdin
+cannot be read; and `2` when stdin is more than 64 MiB. Other changes to a blob still give a report
+and exit `0`; it takes `open`, with the key, to find them.
 
 The report shows only printable ASCII. Any other character, such as a control character or a letter
 outside ASCII in a label or a name taken from the input, is left out, and the line ends with how
