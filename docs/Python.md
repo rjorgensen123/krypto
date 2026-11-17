@@ -132,7 +132,7 @@ The algorithms and the tampering rules: [Encrypt and decrypt](Usage.md#encrypt-a
 ## A small encrypted store on disk
 
 ```python
-store = krypto.SecretStore.open("/data/secrets", master)
+store = krypto.SecretStore.open("/data/secrets", master)   # reads v1 and v2; a new store is v2
 
 store.put("api-token", krypto.SecretBuf.from_vec(bytearray(b"token")))
 token = store.get("api-token")
@@ -140,6 +140,7 @@ token = store.get("api-token")
 store.contains("api-token")   # does it exist?
 store.list("api-")            # all names with this prefix
 store.delete("api-token")
+store.key_id()                # the store's key_id, 16 bytes, not secret
 ```
 
 In Rust the store borrows the master key; here it keeps the `MasterKey` object alive for as long as
@@ -168,25 +169,36 @@ and on a v2 file resets the write counter to 0 with a fresh salt and key id.
 *(0.9.0)* **Store file version 2.** The store file has a format version, 1 or 2. `open` reads both
 and creates a **v2** store when the file is new. On a v2 file the whole file is sealed (a
 container MAC over the header and all entries) and the master key is checked at `open`, so a
-wrong key raises `AuthError` from `open` itself, and so does a removed, swapped or injected entry.
-On a v1 file the old rule stands: `open` checks nothing, and a wrong key raises `AuthError` from
-`get`.
+master key that does not fit raises `WrongKeyError` from `open` itself, and a file that is not
+what was written, such as one with a removed, swapped or injected entry, raises `AuthError`. A
+changed salt or key check raises `WrongKeyError` too, so if you know your key is the right one,
+treat it as a changed file. On a v1 file the old rule stands: `open` checks nothing, and a wrong
+key raises `AuthError` from `get`.
 
 ```python
 store.version()    # 1 or 2 — the file's format version
 store.counter()    # the write counter (v2); 0 on a v1 store
 
-store = krypto.SecretStore.open_with_version("/data/secrets", master, 1)        # choose v1 at creation; 1 or 2, else FormatError
-store = krypto.SecretStore.open_with_min_counter("/data/secrets", master, seen)  # RollbackError if the file is older
+store = krypto.SecretStore.open_with_version("/data/secrets", master, 1)        # v1 only, created as v1 when new; a v2 file is FormatError
+store = krypto.SecretStore.open_with_min_counter("/data/secrets", master, seen)  # v2 only; RollbackError if the file is older
 store = store.upgrade()                                                          # v1 → v2, one-way; consumes the handle
+krypto.SecretStore.key_id_from_file("/data/secrets")                             # the key_id the file says it has, not authenticated
 ```
 
-Writes keep the file's version. `upgrade` verifies every entry first (any failure leaves the
-file untouched, and the handle is consumed all the same) and rewrites the file as v2 in one
-atomic write — the values are re-wrapped, not re-encrypted. For rollback detection, keep the
-highest counter you have seen outside the file and pass it to `open_with_min_counter`:
-`RollbackError` means an older copy of the file may have been put back. Without an anchor, no
-freshness check runs — the key check and the MAC always do on a v2 file.
+Writes keep the file's version. An open that names a version accepts only a file of that version;
+`open` cannot tell a v1 file from a v2 file that has been made into one, so if you rely on what v2
+adds, name version 2. `upgrade` verifies every entry first (any failure leaves the file untouched,
+and the handle is consumed all the same) and rewrites the file as v2 in one atomic write — the
+values are re-wrapped, not re-encrypted. For rollback detection, keep the store's `key_id()` and
+`counter()` outside the file after each write; when you open it, pass that counter to
+`open_with_min_counter` and check that `key_id()` is the one you kept. `RollbackError` means an
+older copy of the file may have been put back. A rotation or an upgrade starts the counter at 0;
+start your anchor again from there. With an anchor above 0, a missing file raises `IoError` and
+nothing is created. Without an anchor, no freshness check runs — the key check and the MAC always
+do on a v2 file. At its maximum the counter does not wrap: `put` and `delete` raise
+`HardeningError` and write nothing, and the store must be rotated. `key_id_from_file` reads the
+header only, without the master key: `IoError` if the file cannot be opened, `FormatError` if it is
+not a store file.
 
 As in Rust, the store protects its contents, not the file, and `open` does not check the master
 key on a v1 file: a wrong one raises `AuthError` from `get`.
@@ -295,13 +307,13 @@ Each kind is an exception, all under `krypto.Error`:
 
 | Rust | Python | What it means for you |
 |---|---|---|
-| `Error::Auth` | `AuthError` | tampering, wrong key, wrong password — **the only one to alert on** |
-| `Error::WrongKey` | `WrongKeyError` | another key generation: find the right key |
-| `Error::Format` | `FormatError` | the input has the wrong shape |
+| `Error::Auth` | `AuthError` | tampering, wrong key, wrong password; at the open of a v2 store, a file that is not what was written — **alert on it** |
+| `Error::WrongKey` | `WrongKeyError` | the key does not fit: for a blob, another key generation, so find the right key; at the open of a v2 store, a master key that does not fit the file |
+| `Error::Format` | `FormatError` | the input has the wrong shape, such as a file that is not a store file or a store of another version than the open names |
 | `Error::KeyNotFound` | `KeyNotFoundError` | the name does not exist in the store |
-| `Error::Rollback` *(0.9.0)* | `RollbackError` | `SecretStore.open_with_min_counter`: the file's counter is below your minimum — an older copy may be back |
-| `Error::Io` | `IoError` | file or disk trouble |
-| `Error::Hardening` | `HardeningError` | a protection step or the environment failed |
+| `Error::Rollback` *(0.9.0)* | `RollbackError` | `SecretStore.open_with_min_counter`: the file's counter is below your minimum — an older copy may be back; the attributes `file_counter` and `min_counter` hold both |
+| `Error::Io` | `IoError` | file or disk trouble; a missing store file for `open_with_min_counter` above 0 |
+| `Error::Hardening` | `HardeningError` | a protection step or the environment failed; or a store whose counter is at its maximum, which must be rotated |
 
 ```python
 try:
@@ -312,8 +324,8 @@ except krypto.Error:
     ...   # everything else krypto raises
 ```
 
-Besides these, using a consumed object (after `MasterKey.from_bytes` or `rotate`, also when the
-operation itself failed) is a `ValueError`; an argument of the wrong type is rejected with
+Besides these, using a consumed object (after `MasterKey.from_bytes`, `rotate` or `upgrade`, also
+when the operation itself failed) is a `ValueError`; an argument of the wrong type is rejected with
 `TypeError` before anything is consumed. None of the messages carry key material or plaintext.
 
 A panic in the Rust code surfaces as `pyo3_runtime.PanicException`. It derives from

@@ -18,13 +18,16 @@ re-encrypting them. New stores are version 2 by default; an opened file is alway
 in its own version (sticky), and `open` reads both versions. `MAX_STORE_BYTES` caps the whole
 file, the 109-byte v2 header included, on read and on write.
 
-New API on `SecretStore`: `open_with_version` (choose 1 or 2 explicitly for a new store;
-anything else is `Format`), `upgrade` (v1 → v2, one-way: every entry is decrypted and verified
-first, any `Auth` leaves the file untouched, then one atomic write as v2), `open_with_min_counter`
-(fails with the new `Error::Rollback { file_counter, min_counter }` — `RollbackError` in
-krypto-py — when a v2 file's counter is below the caller's minimum; a v1 file counts as counter
-0, so any `min_counter > 0` fails on it), and `version()` / `counter()`. krypto stays stateless:
-the rollback anchor is kept by the caller, outside the file. `rotate` keeps the file's version
+New API on `SecretStore`: `open_with_version` (an open that names version 1 or 2: it accepts
+only a file of that version and creates one if there is none; a file of the other version is
+`Format`, and the error says which version the file is), `upgrade` (v1 → v2, one-way: every
+entry is decrypted and verified first, any `Auth` leaves the file untouched, then one atomic
+write as v2), `open_with_min_counter` (names version 2; fails with the new
+`Error::Rollback { file_counter, min_counter }` — `RollbackError` in krypto-py — when the
+file's counter is below the caller's minimum; with a minimum above 0 a missing file is `Io`
+and nothing is created), and `version()` / `counter()`. A write to a store whose counter is at
+its maximum fails with `Hardening`: the store must be rotated. krypto stays stateless: the
+rollback anchor is kept by the caller, outside the file. `rotate` keeps the file's version
 and, on a v2 file, resets the counter to 0 with a fresh salt and key id, `key_check` and
 `container_mac` recomputed.
 
@@ -40,11 +43,13 @@ missing or different `aad` fails with `Auth` like any other tampering. `reseal_w
 the old AAD (to open) and the new AAD (to seal under) and preserves the blob's algorithm, as
 `reseal` does. Mirrored in krypto-py (`seal_with_aad`, `open_with_aad`, `reseal_with_aad`).
 
-### Changed — `open` on a version 2 file fails closed *(2026-11-16)*
+### Changed — `open` on a version 2 file checks the key and the file first *(2026-11-16)*
 
-On a v2 file, `open` verifies `key_check` and then `container_mac`, both `Auth` on mismatch: a
-wrong master key now fails at `open`, not first at `get`, and a removed, swapped or injected
-entry or a changed header fails there too. An unknown version byte is `Format`
+On a v2 file, `open` checks three things before anything else in the file is read: the whole
+header is there (`Auth` if not), `key_check` (`WrongKey`: the master key does not fit the
+file), and `container_mac` (`Auth`: the file is not what was written, such as a removed,
+swapped or injected entry). Only then is the structure read (`Format`). A wrong master key now
+fails at `open`, not first at `get`. An unknown version byte is `Format`
 (`unsupported store version N`), so a v2 file read by a pre-0.9.0 krypto is refused, and after
 an `upgrade` older binaries can no longer read the store. Version 1 files are unchanged: still
 readable, no key check at `open`, no container MAC, a wrong key still shows as `Auth` from `get`.
@@ -90,6 +95,19 @@ bind a blob to something larger, pass a hash of it as the AAD. The constant is i
 ### Changed — the `SecretStore` spec is revised *(2026-11-17)*
 
 `spec/SPEC-secretstore.md` is now spec version 2.0. Its revision history says what changed.
+
+### Added — a store's `key_id` can be read *(2026-11-17)*
+
+`SecretStore::key_id()` gives the `key_id` of an open store. `SecretStore::key_id_from_file(path)`
+reads it from a file without the master key; the value is what the file says and is not
+authenticated. Both are in krypto-py too.
+
+### Changed — error texts and the README figure for locked memory *(2026-11-17)*
+
+The text of `WrongKey` covers a store file as well as a blob; `krypto-cli` prints it. In
+krypto-py, a `SecretStore` handle used after `rotate` or `upgrade` says that it was consumed by
+one of them. The README says that `cargo test` needs a locked-memory limit above 22 MiB; it
+said 6 MiB.
 
 ## [0.8.2]
 

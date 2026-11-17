@@ -20,8 +20,14 @@ fn every_error_says_what_went_wrong_and_nothing_secret() {
     let dir = std::env::temp_dir().join(format!("krypto-errors-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let store = SecretStore::open(dir.join("s.store"), &m).unwrap();
+    let anchored = dir.join("anchored.store");
+    drop(SecretStore::open(&anchored, &m).unwrap());
+    // `err()`: a SecretStore has no Debug either.
+    let rollback = SecretStore::open_with_min_counter(&anchored, &m, 1)
+        .err()
+        .unwrap();
 
-    let cases: [(Error, &str); 6] = [
+    let cases: [(Error, &str); 7] = [
         (
             krypto::open(&other, &blob).unwrap_err(),
             "authentication failure",
@@ -42,8 +48,10 @@ fn every_error_says_what_went_wrong_and_nothing_secret() {
             "hardening error",
         ),
         (store.get("no-such-name").unwrap_err(), "not found"),
-        // No library function returns it since 0.7.3, but it is still a variant.
-        (Error::WrongKey, "different key generation"),
+        // The opens of a v2 store file return it when the master key does not
+        // fit; built directly here.
+        (Error::WrongKey, "the key does not fit"),
+        (rollback, "rollback detected"),
     ];
     drop(store);
     std::fs::remove_dir_all(&dir).unwrap();

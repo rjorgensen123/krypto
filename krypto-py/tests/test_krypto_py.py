@@ -227,8 +227,9 @@ def test_failed_rotate_consumes_the_handle_and_keeps_the_file(tmp_path):
 
 def test_secretstore_version_counter_upgrade_and_rollback(tmp_path):
     """The store's format version and counter, the one-way upgrade and the
-    rollback anchor (0.9.0): a new store is v2, a v1 file counts as counter
-    0, and an anchored open fails with RollbackError below the anchor."""
+    rollback anchor (0.9.0): a new store is v2, an anchored open names v2 and
+    refuses a v1 file with FormatError, and it fails with RollbackError below
+    the anchor."""
     path = str(tmp_path / "s.store")
     s = k.SecretStore.open(path, master())  # a new store is v2
     assert s.version() == 2 and s.counter() == 0
@@ -250,14 +251,14 @@ def test_secretstore_version_counter_upgrade_and_rollback(tmp_path):
     s1.put("x", k.SecretBuf.from_vec(b"y"))
     with pytest.raises(k.FormatError):
         k.SecretStore.open_with_version(str(tmp_path / "other.store"), master(), 3)
-    # A v1 file counts as counter 0, so any anchor above 0 fails on it.
+    # An anchored open names v2, so it refuses a v1 file, whatever the anchor.
     v1b = str(tmp_path / "v1b.store")
     sb = k.SecretStore.open_with_version(v1b, master(), 1)
     sb.put("x", k.SecretBuf.from_vec(b"y"))
     del sb
-    with pytest.raises(k.RollbackError) as e:
-        k.SecretStore.open_with_min_counter(v1b, master(), 1)
-    assert e.value.file_counter == 0 and e.value.min_counter == 1
+    for anchor in (1, 0):
+        with pytest.raises(k.FormatError):
+            k.SecretStore.open_with_min_counter(v1b, master(), anchor)
     # Upgrade is one-way: v1 -> v2, the entries readable, the old handle gone.
     s2 = s1.upgrade()
     assert s2.version() == 2 and s2.counter() == 0
@@ -267,6 +268,24 @@ def test_secretstore_version_counter_upgrade_and_rollback(tmp_path):
     del s2
     reopened = k.SecretStore.open(v1, master())
     assert reopened.version() == 2 and plain(reopened.get("x")) == b"y"
+
+
+def test_secretstore_key_id_and_wrong_key(tmp_path):
+    """The store's key_id, from the open store and from the file without the
+    master key, and WrongKeyError from open when the master key does not fit
+    a v2 file."""
+    path = tmp_path / "s.store"
+    s = k.SecretStore.open(str(path), master())
+    key_id = s.key_id()
+    assert len(key_id) == 16 and k.SecretStore.key_id_from_file(str(path)) == key_id
+    del s  # the lock goes with the handle
+    with pytest.raises(k.WrongKeyError):
+        k.SecretStore.open(str(path), master(32))
+    with pytest.raises(k.IoError):
+        k.SecretStore.key_id_from_file(str(tmp_path / "missing.store"))
+    (tmp_path / "not-a-store").write_bytes(b"important = true\n")
+    with pytest.raises(k.FormatError):
+        k.SecretStore.key_id_from_file(str(tmp_path / "not-a-store"))
 
 
 # --------------------------------------------------------------------------- #

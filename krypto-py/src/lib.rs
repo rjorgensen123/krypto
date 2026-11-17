@@ -29,24 +29,33 @@ pyo3::create_exception!(
     PyException,
     "Every krypto error (`krypto::Error`)."
 );
-pyo3::create_exception!(krypto_py, IoError, Error, "`Error::Io`: file or directory.");
+pyo3::create_exception!(
+    krypto_py,
+    IoError,
+    Error,
+    "`Error::Io`: a file or directory could not be opened, read or written, or an open \
+     anchored above counter 0 found no store file."
+);
 pyo3::create_exception!(
     krypto_py,
     HardeningError,
     Error,
-    "`Error::Hardening`: a protection step or the environment failed; never a verdict on the data."
+    "`Error::Hardening`: a protection step or the environment failed; never a verdict on the data. \
+     Also a `SecretStore` write refused because the store's counter is at its maximum."
 );
 pyo3::create_exception!(
     krypto_py,
     FormatError,
     Error,
-    "`Error::Format`: the input had the wrong shape."
+    "`Error::Format`: the input had the wrong shape, such as a file that is not a store file, \
+     a store file of another version than the open names, or an invalid store structure."
 );
 pyo3::create_exception!(
     krypto_py,
     AuthError,
     Error,
-    "`Error::Auth`: tampering, or the wrong key or password. The one to alarm on."
+    "`Error::Auth`: tampering, or the wrong key or password; at the open of a v2 store \
+     file, a file that is not what was written. The one to alarm on."
 );
 pyo3::create_exception!(
     krypto_py,
@@ -58,14 +67,16 @@ pyo3::create_exception!(
     krypto_py,
     WrongKeyError,
     Error,
-    "`Error::WrongKey`: another key generation. Routing, not tampering."
+    "`Error::WrongKey`: the key does not fit. For a blob, another key generation: routing, \
+     not tampering. At the open of a v2 store file, a master key that does not fit the file, \
+     which a changed salt or key check cannot be told from."
 );
 pyo3::create_exception!(
     krypto_py,
     RollbackError,
     Error,
-    "`Error::Rollback`: the store file's counter is below the caller's minimum; \
-     `file_counter` and `min_counter` are its attributes."
+    "`Error::Rollback`: an anchored open found a v2 store file whose counter is below the \
+     caller's minimum; `file_counter` and `min_counter` are its attributes."
 );
 
 fn err(e: krypto::Error) -> PyErr {
@@ -448,13 +459,19 @@ impl SecretStore {
     ) -> PyResult<R> {
         match lock(&self.store).as_mut() {
             Some(s) => f(s),
-            None => Err(PyValueError::new_err("this SecretStore was rotated away")),
+            None => Err(PyValueError::new_err(
+                "this SecretStore was consumed by rotate or upgrade",
+            )),
         }
     }
 }
 
 #[pymethods]
 impl SecretStore {
+    /// Opens the store, and creates it as v2 when the file is new, as in
+    /// Rust. Reads both versions; on a v2 file a master key that does not fit
+    /// raises `WrongKeyError`, and a file that is not what was written raises
+    /// `AuthError`.
     #[staticmethod]
     fn open(path: PathBuf, master: Py<MasterKey>) -> PyResult<Self> {
         let store = krypto::SecretStore::open(path, master_ref(&master)).map_err(err)?;
@@ -464,8 +481,9 @@ impl SecretStore {
         })
     }
 
-    /// Opens the store, and creates it as format `version` (1 or 2) when the
-    /// file is new, as in Rust (0.9.0).
+    /// Opens the store only if its file is format `version` (1 or 2), and
+    /// creates it as that version when the file is new, as in Rust (0.9.0). A
+    /// file of the other version raises `FormatError`.
     #[staticmethod]
     fn open_with_version(path: PathBuf, master: Py<MasterKey>, version: u8) -> PyResult<Self> {
         let store = krypto::SecretStore::open_with_version(path, master_ref(&master), version)
@@ -476,8 +494,10 @@ impl SecretStore {
         })
     }
 
-    /// Opens the store, and fails with `RollbackError` when its counter is
-    /// below `min_counter` — a v1 file counts as counter 0 (0.9.0).
+    /// Opens a v2 store, and fails with `RollbackError` when its counter is
+    /// below `min_counter`, as in Rust (0.9.0). A v1 file raises
+    /// `FormatError`; with `min_counter` above 0, a missing file raises
+    /// `IoError` and nothing is created.
     #[staticmethod]
     fn open_with_min_counter(
         path: PathBuf,
@@ -516,9 +536,9 @@ impl SecretStore {
     /// Re-encrypts the store under `new_master` and returns the new handle;
     /// this one is consumed, as in Rust.
     fn rotate(&self, new_master: Py<MasterKey>) -> PyResult<SecretStore> {
-        let old = lock(&self.store)
-            .take()
-            .ok_or_else(|| PyValueError::new_err("this SecretStore was rotated away"))?;
+        let old = lock(&self.store).take().ok_or_else(|| {
+            PyValueError::new_err("this SecretStore was consumed by rotate or upgrade")
+        })?;
         let store = old.rotate(master_ref(&new_master)).map_err(err)?;
         Ok(SecretStore {
             store: Mutex::new(Some(store)),
@@ -531,18 +551,33 @@ impl SecretStore {
         self.with(|s| Ok(s.version()))
     }
 
-    /// The store file's write counter; a v1 file counts as 0 (0.9.0).
+    /// The store file's write counter; a v1 file has no counter and reports 0
+    /// (0.9.0).
     fn counter(&self) -> PyResult<u64> {
         self.with(|s| Ok(s.counter()))
+    }
+
+    /// The store's `key_id`, 16 bytes, as in Rust (0.9.0).
+    fn key_id<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        self.with(|s| Ok(PyBytes::new(py, &s.key_id())))
+    }
+
+    /// The `key_id` a store file says it has, read without the master key, as
+    /// in Rust (0.9.0). It is not authenticated. A file that cannot be opened
+    /// raises `IoError`, one that is not a store file `FormatError`.
+    #[staticmethod]
+    fn key_id_from_file<'py>(py: Python<'py>, path: PathBuf) -> PyResult<Bound<'py, PyBytes>> {
+        let id = krypto::SecretStore::key_id_from_file(path).map_err(err)?;
+        Ok(PyBytes::new(py, &id))
     }
 
     /// Upgrades a v1 store to v2 in one atomic write and returns the new
     /// handle under the same master key; this one is consumed, as in Rust
     /// (0.9.0).
     fn upgrade(&self, py: Python<'_>) -> PyResult<SecretStore> {
-        let old = lock(&self.store)
-            .take()
-            .ok_or_else(|| PyValueError::new_err("this SecretStore was upgraded away"))?;
+        let old = lock(&self.store).take().ok_or_else(|| {
+            PyValueError::new_err("this SecretStore was consumed by rotate or upgrade")
+        })?;
         let store = old.upgrade().map_err(err)?;
         Ok(SecretStore {
             store: Mutex::new(Some(store)),

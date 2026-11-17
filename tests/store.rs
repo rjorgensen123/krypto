@@ -321,7 +321,7 @@ fn rotate_reencrypts_everything_under_the_new_master() {
 
     // Reopening the FILE with the new master works; with the old master the
     // file no longer even opens (0.9.0): a v2 store checks the master key at
-    // `open` through its key_check, so the old master is Auth right there.
+    // `open` through its key_check, so the old master is WrongKey right there.
     let reopened = SecretStore::open(&path, &new_mk).unwrap();
     assert_eq!(reopened.version(), 2);
     reopened
@@ -331,7 +331,7 @@ fn rotate_reencrypts_everything_under_the_new_master() {
     drop(reopened);
     assert!(matches!(
         SecretStore::open(&path, &old_mk),
-        Err(Error::Auth)
+        Err(Error::WrongKey)
     ));
 
     let _ = std::fs::remove_file(&path);
@@ -581,11 +581,11 @@ fn files_made_once_still_open() {
         .unwrap()
         .expose(|b| assert_eq!(b, b"value from rust"));
     drop(store);
-    // A wrong master key is Auth at `open` on a v2 file, even with entries.
+    // A wrong master key is WrongKey at `open` on a v2 file, even with entries.
     let wrong = MasterKey::from_bytes(SecretBuf::from_vec(vec![7u8; 32]).unwrap()).unwrap();
     assert!(matches!(
         SecretStore::open(dir.join("rust-v2.store"), &wrong),
-        Err(Error::Auth)
+        Err(Error::WrongKey)
     ));
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -855,14 +855,14 @@ fn open_with_version_1_creates_a_v1_store_and_put_keeps_it_v1() {
         "put keeps the file v1 (sticky version)"
     );
     drop(s);
-    // Reopening the existing file keeps v1, however it is asked for.
+    // Reopening the existing file keeps v1; an open that names version 2
+    // refuses it, and says which version the file is.
     assert_eq!(SecretStore::open(&path, &mk).unwrap().version(), 1);
-    assert_eq!(
-        SecretStore::open_with_version(&path, &mk, 2)
-            .unwrap()
-            .version(),
-        1
-    );
+    match SecretStore::open_with_version(&path, &mk, 2) {
+        Err(Error::Format(m)) => assert!(m.contains("version 1"), "{m}"),
+        other => panic!("expected Format, got {:?}", other.map(|_| ())),
+    }
+    assert_eq!(std::fs::read(&path).unwrap()[4], 1);
     // Anything but 1 or 2 is Format, whether or not the file exists.
     assert!(matches!(
         SecretStore::open_with_version(&path, &mk, 3),
@@ -905,14 +905,16 @@ fn upgrade_v1_to_v2_keeps_everything_readable_and_is_one_way() {
     assert_eq!(v2_bytes.len(), v1_bytes.len() + 72);
     drop(s);
 
-    // One-way: reopening the file — even asking for v1 — keeps it v2.
-    let s = SecretStore::open_with_version(&path, &mk, 1).unwrap();
-    assert_eq!(s.version(), 2);
+    // One-way: an open that names v1 refuses the file, and it stays v2.
+    assert!(matches!(
+        SecretStore::open_with_version(&path, &mk, 1),
+        Err(Error::Format(_))
+    ));
     assert_eq!(std::fs::read(&path).unwrap()[4], 2);
-    s.get("a").unwrap().expose(|b| assert_eq!(b, b"first"));
-    drop(s);
     // Upgrading a store that is already v2 is a no-op.
     let s = SecretStore::open(&path, &mk).unwrap();
+    assert_eq!(s.version(), 2);
+    s.get("a").unwrap().expose(|b| assert_eq!(b, b"first"));
     let s = s.upgrade().unwrap();
     assert_eq!(s.version(), 2);
     let _ = std::fs::remove_file(&path);
@@ -1008,23 +1010,34 @@ fn an_injected_entry_in_a_v2_store_gives_auth_at_open() {
 fn a_truncated_v2_store_gives_auth_at_open() {
     // Cut the file back to just the 109-byte header: the entry table is then
     // empty but still well-formed, so it is the container MAC that fails.
-    // (A cut inside an entry is a structure error — Format — which the spec
-    // checks before the MACs.)
+    // (A cut inside an entry is Auth too: the MAC is checked before the
+    // entry structure is parsed.)
     let (path, mk, bytes) = v2_store_bytes("tamper-trunc", &["aa", "bb"]);
     std::fs::write(&path, &bytes[..109]).unwrap();
     assert!(matches!(SecretStore::open(&path, &mk), Err(Error::Auth)));
     let _ = std::fs::remove_file(&path);
 }
 
-/// Any flipped byte in the v2-only header fields is Auth at `open`: the
-/// key_check covers the salt, the container_mac covers the key_id, the
-/// counter and the entries, and the MAC field itself is compared.
+/// A flipped byte in a v2 header field fails at `open`. The salt and the
+/// key_check are what the key check is made of, so a change to either is
+/// WrongKey, the same answer as a wrong master key. The container_mac covers
+/// the key_id, the counter and the entries, and the MAC field itself is
+/// compared, so a change there is Auth.
 #[test]
-fn a_tampered_v2_header_gives_auth_at_open() {
+fn a_tampered_v2_header_gives_wrong_key_or_auth_at_open() {
     let (path, mk, bytes) = v2_store_bytes("tamper-hdr", &["aa"]);
     // salt(5..21), key_id(21..37), key_check(37..69), counter(69..77),
     // container_mac(77..109).
-    for offset in [5, 30, 50, 70, 90, 108] {
+    for offset in [5, 50] {
+        let mut tampered = bytes.clone();
+        tampered[offset] ^= 0xff;
+        std::fs::write(&path, &tampered).unwrap();
+        assert!(
+            matches!(SecretStore::open(&path, &mk), Err(Error::WrongKey)),
+            "offset {offset}"
+        );
+    }
+    for offset in [30, 70, 90, 108] {
         let mut tampered = bytes.clone();
         tampered[offset] ^= 0xff;
         std::fs::write(&path, &tampered).unwrap();
@@ -1037,18 +1050,24 @@ fn a_tampered_v2_header_gives_auth_at_open() {
 }
 
 #[test]
-fn a_wrong_master_key_on_a_v2_store_gives_auth_at_open() {
+fn a_wrong_master_key_on_a_v2_store_gives_wrong_key_at_open() {
     let mk = master("v2wrong");
     let wrong = master_with("v2wrong-wrong", 7);
     // An empty v2 store: the key_check alone already rejects the wrong master.
     let path = store_path("v2wrong-empty");
     drop(SecretStore::open(&path, &mk).unwrap());
-    assert!(matches!(SecretStore::open(&path, &wrong), Err(Error::Auth)));
+    assert!(matches!(
+        SecretStore::open(&path, &wrong),
+        Err(Error::WrongKey)
+    ));
     let _ = std::fs::remove_file(&path);
 
     // A v2 store with entries: same, and the right master still opens it.
     let (path, _mk, _bytes) = v2_store_bytes("v2wrong-full", &["aa"]);
-    assert!(matches!(SecretStore::open(&path, &wrong), Err(Error::Auth)));
+    assert!(matches!(
+        SecretStore::open(&path, &wrong),
+        Err(Error::WrongKey)
+    ));
     let s = SecretStore::open(&path, &mk).unwrap();
     s.get("aa").unwrap().expose(|b| assert_eq!(b, b"value-00"));
     let _ = std::fs::remove_file(&path);
@@ -1096,19 +1115,19 @@ fn open_with_min_counter_detects_a_rolled_back_file() {
     // The failed open did not touch the file.
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
 
-    // A v1 file counts as counter 0: any positive anchor is a rollback.
+    // An anchored open names version 2: a v1 file is Format, whatever the
+    // anchor, 0 included.
     let v1path = store_path("rollback-v1");
     drop(SecretStore::open_with_version(&v1path, &mk, 1).unwrap());
-    match SecretStore::open_with_min_counter(&v1path, &mk, 1) {
-        Err(Error::Rollback {
-            file_counter,
-            min_counter,
-        }) => {
-            assert_eq!((file_counter, min_counter), (0, 1));
-        }
-        other => panic!("expected Rollback, got {:?}", other.map(|_| ())),
+    for min in [1, 0] {
+        assert!(
+            matches!(
+                SecretStore::open_with_min_counter(&v1path, &mk, min),
+                Err(Error::Format(_))
+            ),
+            "anchor {min}"
+        );
     }
-    SecretStore::open_with_min_counter(&v1path, &mk, 0).unwrap();
 
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_file(&v1path);
@@ -1166,13 +1185,13 @@ fn rotate_on_a_v2_store_keeps_the_version_and_resets_the_counter() {
     drop(r);
 
     // Reopens as v2 under the new master, at counter 0; the old master is
-    // Auth at open (the key_check no longer matches).
+    // WrongKey at open (the key_check no longer matches).
     let s = SecretStore::open(&path, &new_mk).unwrap();
     assert_eq!((s.version(), s.counter()), (2, 0));
     drop(s);
     assert!(matches!(
         SecretStore::open(&path, &old_mk),
-        Err(Error::Auth)
+        Err(Error::WrongKey)
     ));
     let _ = std::fs::remove_file(&path);
 }
@@ -1254,4 +1273,231 @@ fn cut_entry_blob_gives_auth_not_format() {
     let s = SecretStore::open_with_version(&path, &mk, 1).unwrap();
     assert!(matches!(s.get("k"), Err(Error::Auth)));
     let _ = std::fs::remove_file(&path);
+}
+
+// --- the open of a v2 file, and key_id (spec/SPEC-secretstore.md §1, §4, §7) ---
+
+/// One entry as spec/SPEC-secretstore.md writes it: the name and a FAFN blob
+/// sealed under the per-name key, with the store's key id as its AAD.
+fn spec_entry(
+    m: &MasterKey,
+    salt: &[u8; 16],
+    key_id: &[u8; 16],
+    name: &str,
+    value: &[u8],
+) -> Vec<u8> {
+    let mut info = b"krypto/store/v1|".to_vec();
+    info.extend_from_slice(name.as_bytes());
+    let dek = m.derive(&info, salt).unwrap();
+    let secret = SecretBuf::from_vec(value.to_vec()).unwrap();
+    let blob = krypto::seal(&dek, key_id, &secret, krypto::Alg::Aegis256).unwrap();
+    let mut entry = (name.len() as u16).to_le_bytes().to_vec();
+    entry.extend_from_slice(name.as_bytes());
+    entry.extend_from_slice(&(blob.len() as u32).to_le_bytes());
+    entry.extend_from_slice(&blob);
+    entry
+}
+
+/// A v2 store file built byte for byte as spec/SPEC-secretstore.md §3.2
+/// writes it: the 109-byte header with its key check, `counter` and container
+/// MAC, then `entries` as they are given.
+fn spec_v2_file(
+    m: &MasterKey,
+    salt: &[u8; 16],
+    key_id: &[u8; 16],
+    counter: u64,
+    entries: &[u8],
+) -> Vec<u8> {
+    let mut file = b"FST1".to_vec();
+    file.push(2);
+    file.extend_from_slice(salt);
+    file.extend_from_slice(key_id);
+    let k_check = m.derive(b"krypto/store/v2|key-check", salt).unwrap();
+    let key_check = krypto::hmac_sha256(&k_check, &file[..21]).unwrap();
+    file.extend_from_slice(&key_check);
+    file.extend_from_slice(&counter.to_le_bytes());
+    let k_mac = m.derive(b"krypto/store/v2|container-mac", salt).unwrap();
+    let mut mac_input = file.clone();
+    mac_input.extend_from_slice(entries);
+    let mac = krypto::hmac_sha256(&k_mac, &mac_input).unwrap();
+    file.extend_from_slice(&mac);
+    file.extend_from_slice(entries);
+    file
+}
+
+/// A v2 file built from the spec, not by the code under test, opens and gives
+/// its value back.
+#[test]
+fn a_v2_file_built_from_the_spec_opens() {
+    let mk = master("spec-built");
+    let path = store_path("spec-built");
+    let (salt, key_id) = ([3u8; 16], [4u8; 16]);
+    let entries = spec_entry(&mk, &salt, &key_id, "db/password", b"from the spec");
+    std::fs::write(&path, spec_v2_file(&mk, &salt, &key_id, 5, &entries)).unwrap();
+    let s = SecretStore::open(&path, &mk).unwrap();
+    assert_eq!((s.version(), s.counter()), (2, 5));
+    assert_eq!(s.key_id(), key_id);
+    s.get("db/password")
+        .unwrap()
+        .expose(|b| assert_eq!(b, b"from the spec"));
+    drop(s);
+    let _ = std::fs::remove_file(&path);
+}
+
+/// A v2 header cut short of its 109 bytes is Auth at `open`: the file is not
+/// what was written. (A v1 header cut short stays Format.)
+#[test]
+fn a_v2_header_cut_short_gives_auth_at_open() {
+    let (path, mk, bytes) = v2_store_bytes("hdr-cut", &["aa"]);
+    for len in [5, 69, 108] {
+        std::fs::write(&path, &bytes[..len]).unwrap();
+        assert!(
+            matches!(SecretStore::open(&path, &mk), Err(Error::Auth)),
+            "{len} bytes"
+        );
+    }
+    let _ = std::fs::remove_file(&path);
+}
+
+/// The entry structure of a v2 file is parsed only once its MAC holds. A file
+/// whose MAC holds and whose structure is invalid was written that way:
+/// Format. A file cut inside an entry fails the MAC first: Auth.
+#[test]
+fn the_entries_of_a_v2_file_are_parsed_after_the_mac() {
+    let mk = master("v2-structure");
+    let path = store_path("v2-structure");
+    let (salt, key_id) = ([3u8; 16], [4u8; 16]);
+    // One entry whose name length runs past the end of the file.
+    let mut entries = 40u16.to_le_bytes().to_vec();
+    entries.extend_from_slice(b"short");
+    std::fs::write(&path, spec_v2_file(&mk, &salt, &key_id, 0, &entries)).unwrap();
+    assert!(matches!(
+        SecretStore::open(&path, &mk),
+        Err(Error::Format(_))
+    ));
+    let _ = std::fs::remove_file(&path);
+
+    let (path, mk, bytes) = v2_store_bytes("v2-cut-entry", &["aa", "bb"]);
+    let (start, end) = v2_entry_ranges(&bytes)[1];
+    std::fs::write(&path, &bytes[..(start + end) / 2]).unwrap();
+    assert!(matches!(SecretStore::open(&path, &mk), Err(Error::Auth)));
+    let _ = std::fs::remove_file(&path);
+}
+
+/// A v2 file made into a v1 file (the same salt, key id and entries under a
+/// v1 header) is read by `open` as v1, with what v1 protects and no more. An
+/// open that names version 2 refuses it with Format.
+#[test]
+fn a_v2_file_made_into_v1_is_refused_by_an_open_that_names_v2() {
+    let (path, mk, bytes) = v2_store_bytes("made-v1", &["aa"]);
+    let mut v1 = bytes[..37].to_vec();
+    v1[4] = 1;
+    v1.extend_from_slice(&bytes[109..]);
+    std::fs::write(&path, &v1).unwrap();
+
+    let s = SecretStore::open(&path, &mk).unwrap();
+    assert_eq!(s.version(), 1);
+    s.get("aa").unwrap().expose(|b| assert_eq!(b, b"value-00"));
+    drop(s);
+    match SecretStore::open_with_version(&path, &mk, 2) {
+        Err(Error::Format(m)) => assert!(m.contains("version 1"), "{m}"),
+        other => panic!("expected Format, got {:?}", other.map(|_| ())),
+    }
+    assert!(matches!(
+        SecretStore::open_with_min_counter(&path, &mk, 0),
+        Err(Error::Format(_))
+    ));
+    let _ = std::fs::remove_file(&path);
+}
+
+/// An older copy of a v2 file put back is a valid file: `open` accepts it,
+/// and an anchored open with the counter the caller kept gives Rollback.
+#[test]
+fn an_older_copy_of_a_v2_file_put_back_gives_rollback_from_an_anchored_open() {
+    let mk = master("put-back");
+    let path = store_path("put-back");
+    let mut s = SecretStore::open(&path, &mk).unwrap();
+    s.put("a", &SecretBuf::from_vec(b"old".to_vec()).unwrap())
+        .unwrap();
+    let older = std::fs::read(&path).unwrap();
+    s.put("a", &SecretBuf::from_vec(b"new".to_vec()).unwrap())
+        .unwrap();
+    let kept = s.counter();
+    drop(s);
+    std::fs::write(&path, &older).unwrap();
+
+    let s = SecretStore::open(&path, &mk).unwrap();
+    assert_eq!(s.counter(), 1);
+    s.get("a").unwrap().expose(|b| assert_eq!(b, b"old"));
+    drop(s);
+    match SecretStore::open_with_min_counter(&path, &mk, kept) {
+        Err(Error::Rollback {
+            file_counter,
+            min_counter,
+        }) => assert_eq!((file_counter, min_counter), (1, 2)),
+        other => panic!("expected Rollback, got {:?}", other.map(|_| ())),
+    }
+    let _ = std::fs::remove_file(&path);
+}
+
+/// An open anchored above counter 0 does not create a missing store: Io, and
+/// neither a store file nor a lock file is left behind. With anchor 0 the
+/// store is created.
+#[test]
+fn an_anchored_open_above_0_on_a_missing_file_gives_io_and_creates_nothing() {
+    let mk = master("anchor-missing");
+    let dir = store_dir("anchor-missing");
+    let path = dir.join("store");
+    match SecretStore::open_with_min_counter(&path, &mk, 1) {
+        Err(Error::Io(e)) => {
+            assert_eq!(e.kind(), std::io::ErrorKind::NotFound);
+            assert!(e.to_string().contains("missing"), "{e}");
+        }
+        other => panic!("expected Io, got {:?}", other.map(|_| ())),
+    }
+    assert!(
+        std::fs::symlink_metadata(&path).is_err(),
+        "a store file was made"
+    );
+    assert!(
+        std::fs::symlink_metadata(dir.join(".store.lock")).is_err(),
+        "a lock file was made"
+    );
+
+    let s = SecretStore::open_with_min_counter(&path, &mk, 0).unwrap();
+    assert_eq!((s.version(), s.counter()), (2, 0));
+    assert!(path.is_file());
+    drop(s);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// `key_id` from the open store and from the file, read without the master
+/// key, agree, and change at rotation. A missing file is Io, a file that is
+/// not a store file Format.
+#[test]
+fn key_id_from_the_store_and_from_the_file_agree() {
+    let old_mk = master_with("kid-old", 9);
+    let new_mk = master_with("kid-new", 10);
+    let dir = store_dir("key-id");
+    let path = dir.join("store");
+    let s = SecretStore::open(&path, &old_mk).unwrap();
+    let before = s.key_id();
+    assert_eq!(SecretStore::key_id_from_file(&path).unwrap(), before);
+    let s = s.rotate(&new_mk).unwrap();
+    assert_ne!(s.key_id(), before, "rotation draws a new key id");
+    assert_eq!(SecretStore::key_id_from_file(&path).unwrap(), s.key_id());
+    drop(s);
+
+    match SecretStore::key_id_from_file(dir.join("missing")) {
+        Err(Error::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::NotFound),
+        other => panic!("expected Io, got {other:?}"),
+    }
+    assert!(!dir.join("missing").exists(), "reading creates no file");
+    assert!(!dir.join(".missing.lock").exists(), "and no lock file");
+    std::fs::write(dir.join("not-a-store"), b"important = true\n").unwrap();
+    assert!(matches!(
+        SecretStore::key_id_from_file(dir.join("not-a-store")),
+        Err(Error::Format(_))
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
 }
