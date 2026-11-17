@@ -300,7 +300,9 @@ counter 0. Start your anchor again from there. The counter never wraps: at its m
 
 `SecretStore::key_id_from_file(path)` reads the `key_id` from the file without the master key. It
 takes no lock, creates nothing and reads only the header; the value is what the file says and is
-not authenticated. `Io` if the file cannot be opened, `Format` if it is not a store file.
+not authenticated. `Io` if the file cannot be opened, `Format` if it is not a store file. A store
+file is not tied to its path: which file belongs where is yours to know, and `key_id` is what
+tells two stores apart.
 
 **What the store protects.** The store protects what is in it, in both versions: without the
 master key nobody can read a value, or make one that `get` accepts. Who may write to the file is

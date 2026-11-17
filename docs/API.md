@@ -418,7 +418,8 @@ file says and is **not authenticated**. It fails with `Io` if the file cannot be
 file included, and with `Format` if it is not a store file: not a regular file, larger than
 `MAX_STORE_BYTES`, the wrong magic, an unknown version, or shorter than the header of its version.
 krypto keeps no record of which master key a store is under; a caller that wants that overview
-keeps it, and can use `key_id` as the store's id in it.
+keeps it, and can use `key_id` as the store's id in it. A store file is not tied to its path:
+which file belongs where is the caller's to know, and `key_id` is what tells two stores apart.
 
 *(0.8.2)* **A write that fails.** The directory is opened before the rename, so a directory that
 cannot be opened fails the write while the old file still stands. A write that fails before the

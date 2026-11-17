@@ -49,7 +49,8 @@ same names, running the same Rust code inside, so what one seals, the other open
 
 **[How to use krypto](Usage.md)** shows how each of them is done, with examples in Rust, and
 **[from Python](Python.md)** the same with Python code. **[API](API.md)** is the reference over
-every type and function, for both.
+every type and function, for both. The file format of `SecretStore` has its own specification,
+[`spec/SPEC-secretstore.md`](../spec/SPEC-secretstore.md).
 
 ## What it does not do
 

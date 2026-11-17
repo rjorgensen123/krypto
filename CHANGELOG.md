@@ -122,6 +122,9 @@ is upgraded.
 `docs/API.md`, `docs/Usage.md` and `docs/Python.md` say what a version 1 file and a version 2
 file protect, each for itself, and that a version 2 file made into a version 1 file is refused
 only by an open that names version 2.
+They also say that a store file is not tied to its path, and the README and `docs/Home.md`
+point to the spec. Tests: duplicate names in a version 2 file, and that the counter follows
+the file after a failed write.
 
 ## [0.8.2]
 

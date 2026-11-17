@@ -767,6 +767,7 @@ fn put_fails_before_the_rename_when_the_directory_cannot_be_opened() {
         other => panic!("expected Io(PermissionDenied), got {other:?}"),
     }
     assert_eq!(after, before, "the store file changed");
+    assert_eq!(s.counter(), 1, "the counter follows the file");
     s.get("alpha")
         .unwrap()
         .expose(|b| assert_eq!(b, b"first value"));
@@ -1370,6 +1371,14 @@ fn the_entries_of_a_v2_file_are_parsed_after_the_mac() {
     // One entry whose name length runs past the end of the file.
     let mut entries = 40u16.to_le_bytes().to_vec();
     entries.extend_from_slice(b"short");
+    std::fs::write(&path, spec_v2_file(&mk, &salt, &key_id, 0, &entries)).unwrap();
+    assert!(matches!(
+        SecretStore::open(&path, &mk),
+        Err(Error::Format(_))
+    ));
+    // The same name twice.
+    let mut entries = spec_entry(&mk, &salt, &key_id, "twice", b"one");
+    entries.extend_from_slice(&spec_entry(&mk, &salt, &key_id, "twice", b"two"));
     std::fs::write(&path, spec_v2_file(&mk, &salt, &key_id, 0, &entries)).unwrap();
     assert!(matches!(
         SecretStore::open(&path, &mk),
