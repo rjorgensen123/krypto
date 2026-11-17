@@ -49,11 +49,11 @@ pub enum Error {
     /// For a blob this is a routing outcome, not a security event: the caller
     /// should locate the right key (see `blob_key_id`), whereas [`Error::Auth`]
     /// is tampering or a wrong key and SHOULD be alarmed on. Added in 0.5.0 so
-    /// an old-generation blob no longer masquerades as tampering (finding N5;
-    /// contract: API-krypto-v0.6 §errors). Since 0.7.3 no blob function of the
-    /// library returns it — a `SecretStore` holds one generation — it is the
-    /// answer for a caller that holds several and routes between them, as
-    /// `krypto-cli open` does.
+    /// an old-generation blob no longer masquerades as tampering (the
+    /// contract is `docs/API.md`, section `error`). Since 0.7.3 no blob
+    /// function of the library returns it — a `SecretStore` holds one
+    /// generation — it is the answer for a caller that holds several and
+    /// routes between them, as `krypto-cli open` does.
     ///
     /// The `SecretStore` opens return it for a v2 file whose master key does
     /// not fit. A changed salt or `key_check` gives the same answer and cannot
