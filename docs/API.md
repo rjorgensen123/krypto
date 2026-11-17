@@ -329,8 +329,8 @@ addresses, not secrets, and get listed out. Checked on read as well as on write
 `spec/SPEC-secretstore.md`; what follows is the contract in brief. The 4 bytes at offset 0 are
 the magic `FST1` in every version, and the byte at offset 4 is the format version. An entry is
 `name_len (u16 LE) | name | blob_len (u32 LE) | blob`, where `blob` is a FAFN blob — identical
-in both versions, as are the per-name key context `krypto/store/v1|` + name and the AAD rule (the
-store's `key_id`).
+in both versions, as are the per-name key context `krypto/store/v1|` + name and the blob's AAD:
+its 54-byte header, which carries the store's `key_id`.
 
 | Offset | Size | Version 1 (frozen) | Version 2 *(0.9.0)* |
 |---|---|---|---|
@@ -366,17 +366,17 @@ gives `WrongKey` too and cannot be told from a wrong key, so a caller that knows
 right one treats `WrongKey` as a changed file. On a **v1** file nothing extra is verified: `open`
 still does not check the master key, and a wrong key shows as `Auth` from `get`.
 
-*(0.9.0)* **Sticky versioning; new stores are v2.** A store is always written in the version it
-was loaded in: every `put`, `delete`, `rotate` and `upgrade` writes that same version. A store
-created new by `open` is **version 2** by default. Version 1 files remain readable and, once
-opened as v1, stay v1 until upgraded. A v2 file read by a pre-0.9.0 krypto is `Format`
-(`unsupported store version 2`). `open` reads both versions and says which one it read
-(`version()`). An open that names a version accepts only a file of that version, and creates one
-of that version when there is none: `open_with_version(path, master, version)` names 1 or 2 —
+*(0.9.0)* **Sticky versioning; new stores are v2.** A store is always written in the version it was
+loaded in: every `put`, `delete` and `rotate` writes that same version, and `upgrade` is the one
+operation that changes it. A store created new by `open` is **version 2** by default. Version 1
+files remain readable and, once opened as v1, stay v1 until upgraded. A v2 file read by a pre-0.9.0
+krypto is `Format` (`unsupported store version 2`). `open` reads both versions and says which one it
+read (`version()`). An open that names a version accepts only a file of that version, and creates
+one of that version when there is none: `open_with_version(path, master, version)` names 1 or 2 —
 anything else is `Format` — and `open_with_min_counter` names 2. A file of another version is
 refused with `Format`, and the error says which version the file is. `open` cannot tell a v1 file
-from a v2 file that has been made into one: it reads it as v1, with what v1 protects and no more.
-A caller that relies on what v2 adds names version 2.
+from a v2 file that has been made into one: it reads it as v1, with what v1 protects and no more. A
+caller that relies on what v2 adds names version 2.
 
 *(0.9.0)* **`upgrade`: v1 → v2, one-way.** `upgrade(self)` consumes the handle and turns a
 version 1 store into a version 2 one. All entries are decrypted and verified FIRST — any `Auth`
@@ -428,24 +428,27 @@ a new store return `Error::Io` although the change is in the file, and the error
 `delete` keep the change in the handle too. After `rotate` the file is then under the new master
 key.
 
-**What the store protects.** krypto protects the contents, not the file. Without the master key
-nobody can read a value, or make or change one that `get` accepts. The file is not authenticated
-as a whole: whoever can write to it can remove an entry, or put back an older copy of an entry or
-of the file, and `get` then answers `KeyNotFound` or returns the older value (a copy from before
-a `rotate` gives `Auth`). Who may write to the file is the caller's to decide.
+**What the store protects.** krypto protects the contents, in both versions: without the master
+key nobody can read a value, or make or change one that `get` accepts. Who may write to the file
+is the caller's to decide.
 
-*(0.9.0)* On a **v2** file the file as a whole IS authenticated: `container_mac` covers the header
-and every entry, and `key_check` proves the master key — both at `open`. Removing, swapping or
-injecting an entry, or changing the key id or the counter, fails with `Auth` there; changing the
-salt or `key_check` fails with `WrongKey`, as a wrong master key does. What remains is
-putting back an older, still-valid copy of the whole file; that is what the `counter` and
-`open_with_min_counter` answer (above). On a **v1** file the rule above stands unchanged.
+A **v1** file is not authenticated as a whole: whoever can write to it can remove an entry, or put
+back an older copy of an entry or of the file, and `get` then answers `KeyNotFound` or returns the
+older value (a copy from before a `rotate` gives `Auth`).
 
-`open` does not check the master key: it reads the file and decrypts nothing, and neither do
-`contains` and `list`. A wrong master key shows as `Auth` from `get`. A `put` under a wrong master
-key stores that entry under that key (and replaces an entry of the same name, as `put` always
-does): each key then reads only its own entries, and `rotate` fails with `Auth` and leaves the
-file untouched. *(0.9.0)* Except on a v2 file: there `key_check` makes `open` itself fail with
+*(0.9.0)* A **v2** file is authenticated as a whole: `container_mac` covers the header and every
+entry, and `key_check` proves the master key — both at `open`. Removing, swapping or injecting an
+entry, or changing the key id or the counter, fails with `Auth` there; changing the salt or
+`key_check` fails with `WrongKey`, as a wrong master key does. Two things remain. Putting back an
+older, still-valid copy of the whole file is what the `counter` and `open_with_min_counter` answer
+(above). And a v2 file made into a v1 file is read by `open` as v1; only an open that names
+version 2 refuses it (above).
+
+On a **v1** file `open` does not check the master key: it reads the file and decrypts nothing, and
+neither do `contains` and `list`. A wrong master key shows as `Auth` from `get`. A `put` under a
+wrong master key stores that entry under that key (and replaces an entry of the same name, as
+`put` always does): each key then reads only its own entries, and `rotate` fails with `Auth` and
+leaves the file untouched. *(0.9.0)* On a v2 file `key_check` makes `open` itself fail with
 `WrongKey` on a wrong master key.
 
 *(0.7.2)* **One handle per file.** A `SecretStore` reads the whole file into memory and writes the

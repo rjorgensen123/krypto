@@ -167,12 +167,13 @@ is under the new master key; reopen it with that key. *(0.9.0)* `rotate` keeps t
 and on a v2 file resets the write counter to 0 with a fresh salt and key id.
 
 *(0.9.0)* **Store file version 2.** The store file has a format version, 1 or 2. `open` reads both
-and creates a **v2** store when the file is new. On a v2 file the whole file is sealed (a
-container MAC over the header and all entries) and the master key is checked at `open`, so a
-master key that does not fit raises `WrongKeyError` from `open` itself, and a file that is not
-what was written, such as one with a removed, swapped or injected entry, raises `AuthError`. A
-changed salt or key check raises `WrongKeyError` too, so if you know your key is the right one,
-treat it as a changed file. On a v1 file the old rule stands: `open` checks nothing, and a wrong
+and creates a **v2** store when the file is new; krypto before 0.9.0 cannot read a v2 file, so name
+version 1 (below) where such readers must keep working. On a v2 file the whole file is authenticated
+(a container MAC over the header and all entries) and the master key is checked at `open`, so a
+master key that does not fit raises `WrongKeyError` from `open` itself, and a file that is not what
+was written, such as one with a removed, swapped or injected entry, raises `AuthError`. A changed
+salt or key check raises `WrongKeyError` too, so if you know your key is the right one, treat it as
+a changed file. On a v1 file the old rule stands: `open` does not check the master key, and a wrong
 key raises `AuthError` from `get`.
 
 ```python
@@ -200,8 +201,8 @@ do on a v2 file. At its maximum the counter does not wrap: `put` and `delete` ra
 header only, without the master key: `IoError` if the file cannot be opened, `FormatError` if it is
 not a store file.
 
-As in Rust, the store protects its contents, not the file, and `open` does not check the master
-key on a v1 file: a wrong one raises `AuthError` from `get`.
+As in Rust, on a v1 file the store protects its contents and not the file as a whole, and `open`
+does not check the master key: a wrong one raises `AuthError` from `get`.
 
 The rest of the rules: [A small encrypted store on disk](Usage.md#a-small-encrypted-store-on-disk).
 

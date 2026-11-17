@@ -16,7 +16,8 @@ the header and all entries, compared in constant time. The per-name entry keys
 (`krypto/store/v1|` + name) are unchanged, so an upgrade re-wraps the blobs without
 re-encrypting them. New stores are version 2 by default; an opened file is always written back
 in its own version (sticky), and `open` reads both versions. `MAX_STORE_BYTES` caps the whole
-file, the 109-byte v2 header included, on read and on write.
+file, the 109-byte v2 header included, on read and on write. `krypto-cli inspect` reads store
+files of both versions.
 
 New API on `SecretStore`: `open_with_version` (an open that names version 1 or 2: it accepts
 only a file of that version and creates one if there is none; a file of the other version is
@@ -43,7 +44,7 @@ missing or different `aad` fails with `Auth` like any other tampering. `reseal_w
 the old AAD (to open) and the new AAD (to seal under) and preserves the blob's algorithm, as
 `reseal` does. Mirrored in krypto-py (`seal_with_aad`, `open_with_aad`, `reseal_with_aad`).
 
-### Changed — `open` on a version 2 file checks the key and the file first *(2026-11-16)*
+### ⚠ Changed — `open` on a version 2 file checks the key and the file first *(2026-11-16)*
 
 On a v2 file, `open` checks three things before anything else in the file is read: the whole
 header is there (`Auth` if not), `key_check` (`WrongKey`: the master key does not fit the
@@ -108,6 +109,19 @@ The text of `WrongKey` covers a store file as well as a blob; `krypto-cli` print
 krypto-py, a `SecretStore` handle used after `rotate` or `upgrade` says that it was consumed by
 one of them. The README says that `cargo test` needs a locked-memory limit above 22 MiB; it
 said 6 MiB.
+
+### ⚠ Changed — a new store is version 2, which krypto before 0.9.0 cannot read *(2026-11-17)*
+
+A store created by `open` is file format version 2. krypto before 0.9.0 refuses such a file
+with `Format` (`unsupported store version 2`). Where older readers must keep working, create
+the store with `open_with_version(path, master, 1)`. A version 1 file stays version 1 until it
+is upgraded.
+
+### Changed — the store documentation says what each file version protects *(2026-11-17)*
+
+`docs/API.md`, `docs/Usage.md` and `docs/Python.md` say what a version 1 file and a version 2
+file protect, each for itself, and that a version 2 file made into a version 1 file is refused
+only by an open that names version 2.
 
 ## [0.8.2]
 
