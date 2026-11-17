@@ -141,6 +141,12 @@ and notes on how things were in earlier versions, are removed. `docs/Usage.md` h
 it leaves the file as it is and goes on. That held for a file the process does not own; on a
 read-only file system `open` failed with `Io` instead. It now leaves the file as it is there too.
 
+### ⚠ Changed — `krypto-cli inspect` gives exit 3 for a version 2 store file cut short of its header *(2026-11-17)*
+
+A version 2 store file that is cut short of its 109-byte header is a changed file:
+`SecretStore::open` answers `Auth`. `inspect` now says "header cut short" with exit 3 for it,
+where it gave exit 0. A version 1 file cut short of its header is still exit 0.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*

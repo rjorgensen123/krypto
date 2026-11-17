@@ -247,7 +247,8 @@ fn help_of(command: &str) -> &'static str {
              deep. It never shows a key, a plaintext or a hash value, except the SHA-256\n\
              fingerprint of an SSH public key. A krypto blob whose header names a format\n\
              version or an algorithm krypto does not know, or whose header is cut short,\n\
-             is exit 3, as for open. docs/Inspect.md lists what it knows."
+             is exit 3, as for open, and so is a version 2 store file whose header is\n\
+             cut short. docs/Inspect.md lists what it knows."
         }
         "keyid" => {
             "usage: krypto-cli keyid --key-file <file>\n\

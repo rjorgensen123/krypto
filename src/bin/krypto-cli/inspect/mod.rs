@@ -295,7 +295,13 @@ fn store(input: &[u8]) -> Option<Finding> {
         }
     };
     if input.len() < header {
-        return Some(found.fact("header", "cut short"));
+        // A v2 file cut short of its header is a changed file: `Auth` at
+        // `SecretStore::open` (spec/SPEC-secretstore.md §4), flagged changed
+        // here as a blob cut short of its header is. A v1 header cut short is
+        // `Format` there and is not flagged.
+        let mut found = found.fact("header", "cut short");
+        found.changed = ver == 2;
+        return Some(found);
     }
     let mut found = found
         .fact("format", ver.to_string())

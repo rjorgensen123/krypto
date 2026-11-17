@@ -325,9 +325,11 @@ fn inspect_reads_store_files_of_both_versions() {
     );
 
     // Cut short: a header that is not whole is "cut short", in both versions.
-    for cut in [&v2[..100], &v1[..30]] {
+    // A v2 header cut short is a changed file, exit 3, as `SecretStore::open`
+    // gives `Auth` for it; a v1 header cut short is `Format` there, exit 0.
+    for (cut, want) in [(&v2[..100], 3), (&v1[..30], 0)] {
         let (code, r) = report(cut);
-        assert_eq!(code, 0, "{r}");
+        assert_eq!(code, want, "{r}");
         assert!(r.contains("cut short"), "{r}");
     }
 
