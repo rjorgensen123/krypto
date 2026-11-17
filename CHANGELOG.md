@@ -87,6 +87,10 @@ bind a blob to something larger, pass a hash of it as the AAD. The constant is i
   short is exit 3; `docs/API.md` lists the AAD functions in its root block, says that the AAD is
   public data held in ordinary memory, and states what `blob_key_id` does and does not detect.
 
+### Changed — the `SecretStore` spec is revised *(2026-11-17)*
+
+`spec/SPEC-secretstore.md` is now spec version 2.0. Its revision history says what changed.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*
