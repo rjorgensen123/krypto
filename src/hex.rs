@@ -36,7 +36,10 @@ pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
     let bytes = s.as_bytes();
     let mut out = Vec::new();
     out.try_reserve_exact(s.len() / 2).map_err(|_| {
-        Error::Hardening(format!("cannot allocate {} bytes for hex decode", s.len() / 2))
+        Error::Hardening(format!(
+            "cannot allocate {} bytes for hex decode",
+            s.len() / 2
+        ))
     })?;
     let (pairs, _) = bytes.as_chunks::<2>();
     for pair in pairs {

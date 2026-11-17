@@ -858,7 +858,9 @@ fn open_with_version_1_creates_a_v1_store_and_put_keeps_it_v1() {
     // Reopening the existing file keeps v1, however it is asked for.
     assert_eq!(SecretStore::open(&path, &mk).unwrap().version(), 1);
     assert_eq!(
-        SecretStore::open_with_version(&path, &mk, 2).unwrap().version(),
+        SecretStore::open_with_version(&path, &mk, 2)
+            .unwrap()
+            .version(),
         1
     );
     // Anything but 1 or 2 is Format, whether or not the file exists.
@@ -971,7 +973,11 @@ fn two_swapped_entries_in_a_v2_store_give_auth_at_open() {
     let (path, mk, mut bytes) = v2_store_bytes("tamper-swap", &["aa", "bb"]);
     let r = v2_entry_ranges(&bytes);
     assert_eq!(r.len(), 2);
-    assert_eq!(r[0].1 - r[0].0, r[1].1 - r[1].0, "entries must be same-sized");
+    assert_eq!(
+        r[0].1 - r[0].0,
+        r[1].1 - r[1].0,
+        "entries must be same-sized"
+    );
     let e0 = bytes[r[0].0..r[0].1].to_vec();
     let e1 = bytes[r[1].0..r[1].1].to_vec();
     bytes[r[0].0..r[0].1].copy_from_slice(&e1);
@@ -1065,11 +1071,15 @@ fn open_with_min_counter_detects_a_rolled_back_file() {
 
     // Anchored at or below the file's counter: opens.
     assert_eq!(
-        SecretStore::open_with_min_counter(&path, &mk, 2).unwrap().counter(),
+        SecretStore::open_with_min_counter(&path, &mk, 2)
+            .unwrap()
+            .counter(),
         2
     );
     assert_eq!(
-        SecretStore::open_with_min_counter(&path, &mk, 0).unwrap().counter(),
+        SecretStore::open_with_min_counter(&path, &mk, 0)
+            .unwrap()
+            .counter(),
         2
     );
     // Above it: Rollback, with both counters in the error.

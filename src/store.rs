@@ -376,9 +376,7 @@ impl<'a> SecretStore<'a> {
                 return Err(e);
             }
             // The file no longer holds the entry, so memory does not either.
-            Err(e @ WriteError::ReplacedUnsynced(_)) => {
-                return Err(e.into_error(CHANGE_UNSYNCED))
-            }
+            Err(e @ WriteError::ReplacedUnsynced(_)) => return Err(e.into_error(CHANGE_UNSYNCED)),
         }
         Ok(())
     }
@@ -670,8 +668,7 @@ impl<'a> SecretStore<'a> {
                 return Err(Error::Auth);
             }
             let k_mac = master.derive(CTX_V2_CONTAINER_MAC, &salt)?;
-            let mut mac_input =
-                Vec::with_capacity(V2_MAC_OFF + (data.len() - V2_HEADER_LEN));
+            let mut mac_input = Vec::with_capacity(V2_MAC_OFF + (data.len() - V2_HEADER_LEN));
             mac_input.extend_from_slice(&data[..V2_MAC_OFF]); // header[0..77]
             mac_input.extend_from_slice(&data[V2_HEADER_LEN..]); // entries
             let expected_mac = crate::hmac_sha256(&k_mac, &mac_input)?;
@@ -717,6 +714,7 @@ impl<'a> SecretStore<'a> {
             buf.extend_from_slice(&key_check);
             buf.extend_from_slice(&self.counter.to_le_bytes());
             debug_assert_eq!(buf.len(), V2_MAC_OFF); // 77
+
             // container_mac = HMAC-SHA256(K_mac, header[0..77] || entries): the
             // whole file as one authenticated unit, so no entry can be removed,
             // swapped, injected or reordered, and the counter cannot be lowered,

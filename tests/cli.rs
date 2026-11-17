@@ -319,7 +319,10 @@ fn inspect_reads_store_files_of_both_versions() {
     let many: Vec<String> = (0..25).map(|i| format!("k{i:02}")).collect();
     let refs: Vec<&str> = many.iter().map(String::as_str).collect();
     let (_, r) = report(&store_file(&m, 2, 0, &refs));
-    assert!(line(&r, "entries").ends_with("25") && r.contains("and 5 more"), "{r}");
+    assert!(
+        line(&r, "entries").ends_with("25") && r.contains("and 5 more"),
+        "{r}"
+    );
 
     // Cut short: a header that is not whole is "cut short", in both versions.
     for cut in [&v2[..100], &v1[..30]] {
