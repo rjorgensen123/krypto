@@ -26,7 +26,8 @@ back = krypto.open(key, blob)                                 # a SecretBuf: the
 ```
 
 Errors are exceptions, one per kind, all under `krypto_py.Error`. `AuthError` means tampering, the
-wrong key or the wrong password, and is the one to alert on.
+wrong key or the wrong password, and is the one to alert on. At the open of a version 2 store a
+master key that does not fit is `WrongKeyError`.
 
 The secrets live in krypto's locked memory, wiped when dropped and, on Linux, kept out of core
 dumps. What Python itself holds — the `bytes` you pass in, and the copies `expose` hands out — is

@@ -111,7 +111,8 @@ on top. If you need both TLS and secret handling, they belong together — but e
 
 The format of encrypted data has been the same since early on, but AEGIS-256 blobs from 0.4.4 and
 older do not open in 0.5.0 and newer: 0.5.0 fixed a key and nonce swap in AEGIS-256, and such blobs
-must be encrypted again.
+must be encrypted again. From 0.9.0 a new `SecretStore` file is format version 2, which krypto
+before 0.9.0 does not read; version 1 files are read and written as before.
 
 ## Reviews
 

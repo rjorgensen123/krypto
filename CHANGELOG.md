@@ -126,6 +126,15 @@ They also say that a store file is not tied to its path, and the README and `doc
 point to the spec. Tests: duplicate names in a version 2 file, and that the counter follows
 the file after a failed write.
 
+### Changed — the documentation is corrected for 0.9.0 *(2026-11-17)*
+
+`docs/API.md` is checked against the code in both directions, and its floor is 0.9.0. It now
+says which error each limit gives, the order `put` checks in, what `delete` of a name that is
+not there does, and how the Python forms differ. Sentences that said more than the code does,
+and notes on how things were in earlier versions, are removed. `docs/Usage.md` has a row for
+0.8.2 and a complete row for 0.9.0. The README install line says `krypto = "0.9"`, and
+`SECURITY.md` lists 0.9.x as the supported version.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*

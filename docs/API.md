@@ -1,10 +1,9 @@
-# API — reference (v0.7.0)
+# API — reference (v0.9.0)
 
-**The version is a floor: v0.7.0 is the LOWEST krypto this contract describes.** Every krypto from
-0.7.0 onwards has what is written here. 0.7.0 is the first release on crates.io, so the contract
-starts there. The number is raised only when the public surface itself changes — to the crate
-version at that moment. Each part also carries the version it applies from, as *(x.y.z)*, so a part
-can be added, changed or phased out on its own timeline.
+**The version is a floor: v0.9.0 is the LOWEST krypto this contract describes.** Every krypto from
+0.9.0 onwards has what is written here. The number is raised only when the public surface itself
+changes — to the crate version at that moment. Each part also carries the version it applies from,
+as *(x.y.z)*, so a part can be added, changed or phased out on its own timeline.
 
 Every public type and function in `krypto`.
 
@@ -17,9 +16,10 @@ Everything that can fail returns `Result<_, Error>`. The crate does not panic on
 **This document is the contract** — precise enough to reimplement the crate from, and it ships
 with the module. Two normative rules bind whoever *changes* the surface:
 
-- **Verify input and output.** All input is validated (type, length, range, character set —
-  fail-closed; unknown values are rejected, not ignored), and output never carries secrets or
-  unexpected structure. An uncovered case → update this document.
+- **Verify input and output.** Input is validated (type, range, character set, and length
+  wherever this document states a limit — fail-closed; unknown values are rejected, not ignored),
+  and output never carries secrets or unexpected structure. An uncovered case → update this
+  document.
 - **The feedback contract.** What the crate answers — success, errors and status — lives HERE: the
   library through `Result` and [`Error`](#error--error) (the crate never logs — logging belongs to
   the consumer), *(0.8.0)* Python through the same values and one exception per `Error` variant. No
@@ -53,12 +53,10 @@ pub mod sign;
 That is the entire root surface. If something is listed here and not exported, this document is
 wrong.
 
-*(The size caps `MAX_MASTER_KEY_BYTES` (4 KiB) and `MAX_STORE_BYTES` (16 MiB) became reachable in
-0.5.0 — they were named in the contract but lived in private modules. `MAX_DERIVE_INPUT_BYTES`
-(1 KiB) joined them in 0.7.0: `derive` took unbounded `info` and `salt`; from 0.8.2 the same cap
-holds for the salt of `password::derive_key`. `MAX_RANDOM_BYTES` (1 MiB) joined them in 0.7.3:
-`random_bytes` and `SecretBuf::random` took any length. `MAX_AAD_BYTES` (1 KiB) arrived in 0.9.0
-with the AAD functions it caps.)*
+The size caps: `MAX_MASTER_KEY_BYTES` (4 KiB) and `MAX_STORE_BYTES` (16 MiB) *(0.5.0)*;
+`MAX_DERIVE_INPUT_BYTES` (1 KiB) *(0.7.0)* for the `info` and `salt` of `derive`, and *(0.8.2)* for
+the salt of `password::derive_key`; `MAX_RANDOM_BYTES` (1 MiB) *(0.7.3)* for `random_bytes` and
+`SecretBuf::random`; `MAX_AAD_BYTES` (1 KiB) *(0.9.0)* for the AAD functions.
 
 ---
 
@@ -149,6 +147,9 @@ and key exchange are not covered by the overwrite.
 The root key. Comes from outside — the crate does not create it.
 
 ```rust
+pub const MAX_MASTER_KEY_BYTES: usize = 4096;
+pub const MAX_DERIVE_INPUT_BYTES: usize = 1024;   // 0.7.0
+
 impl MasterKey {
     pub fn from_secret_file(path: impl AsRef<Path>) -> Result<Self, Error>;
     pub fn from_bytes(key: SecretBuf) -> Result<Self, Error>;   // consumes the buffer
@@ -159,16 +160,14 @@ impl MasterKey {
 
 `derive` is HKDF-SHA256. `info` is your own context string — the crate does not know your purpose
 names. Different `info` gives different keys, and that is how you keep purposes apart. **An
-empty `info` is rejected** — it IS the purpose separation — with `Format` *(0.7.3; it was
-`Hardening`)*. An empty `salt` is allowed, as RFC 5869
-permits. Both `info` and `salt` are capped
-*(0.7.0)* at
-`MAX_DERIVE_INPUT_BYTES` (1024); they reach the API from command lines and config files, and the
-longest real one is the store's prefix plus a key name — 16 + 512 bytes.
+empty `info` is rejected** — it IS the purpose separation — with `Format` *(0.7.3)*. An empty
+`salt` is allowed, as RFC 5869 permits. Both `info` and `salt` are capped *(0.7.0)* at
+`MAX_DERIVE_INPUT_BYTES` (1024), and a longer one is `Format`; they reach the API from command
+lines and config files, and the longest real one is the store's prefix plus a key name — 16 + 512
+bytes. The checks run in this order: an empty `info`, the length of `info`, the length of `salt`.
 
-The key must be 32..=`MAX_MASTER_KEY_BYTES` (4096) bytes, on **both** ways in *(0.7.0: the cap
-was only on `from_secret_file` before)*; file reads are
-bounded (never OOM).
+The key must be 32..=`MAX_MASTER_KEY_BYTES` (4096) bytes, on **both** ways in *(0.7.0)*; a shorter
+or longer one is `Format`. File reads are bounded (never OOM).
 `from_bytes` **consumes** the buffer (the key cannot be read back out) and is the path for a
 key that must never touch disk.
 
@@ -178,7 +177,7 @@ publish. HMAC-SHA256 over `key-id`, keyed with the key `derive` gives for the co
 
 ### `DerivedKey`
 
-A working key. Opaque — no public methods. Used by `seal`, `open` and `hmac_sha256`.
+A working key of 32 bytes. Opaque — no public methods. Used by `seal`, `open` and `hmac_sha256`.
 
 ### `hmac_sha256`
 
@@ -245,10 +244,10 @@ name.
 > — *(0.7.3)* a version or algorithm krypto does not know included. Only data that is not a krypto
 > blob at all gives `Format`. *(0.9.0)* That is data shorter than its 4-byte magic, or not starting
 > with `FAFN`; a blob starting with `FAFN` but cut short of the 54-byte header is a changed blob
-> and gives `Auth` too, so the alarm class is no longer the tamperer's choice. Never wrong
+> and gives `Auth` too, so the alarm class is not the tamperer's choice. Never wrong
 > plaintext is an absolute guarantee, not a detail.
 
-### The blob format (`FAFN`, format_ver 1 — unchanged since 0.2)
+### The blob format (`FAFN`, format_ver 1)
 
 ```text
 magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciphertext | tag
@@ -263,8 +262,7 @@ magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciph
   the blob is opened, in `open` and `reseal` (and, from 0.9.0, their `_with_aad` variants).
   `blob_key_id` authenticates nothing: a version or alg_id krypto does not know yields `Auth`
   there too; a changed key_id or nonce, an alg_id changed to another one krypto knows, or a body
-  cut short does not. *(0.7.3, before 0.9.0)* Data shorter than the 54-byte header, or without the
-  `FAFN` magic, yielded `Format`. *(0.9.0)* The magic is checked before the length: data shorter
+  cut short does not. *(0.9.0)* The magic is checked before the length: data shorter
   than the 4-byte magic, or not starting with `FAFN`, yields `Format`; a blob that starts with
   `FAFN` but is cut short of the 54-byte header yields `Auth`, in `blob_key_id` too.
 - The nonce is random per blob from the OS CSPRNG. The 32-byte field is used partially:
@@ -275,15 +273,14 @@ magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciph
   caller knows its volume. AEGIS-256 (32-byte nonce) and XChaCha (24-byte) have no limit that matters
   in practice.
 - **Verified against official vectors** (0.5.0): AEGIS-256 against `draft-irtf-cfrg-aegis-aead`,
-  XChaCha against draft-arciszewski A.1, AES-256-GCM against NIST CAVS. ⚠ 0.5.0 fixed a
-  key/nonce swap in the AEGIS layer — AEGIS blobs from ≤ 0.4.4 yield `Auth` on ≥ 0.5.0 and must
-  be re-encrypted.
+  XChaCha against draft-arciszewski A.1, AES-256-GCM against NIST CAVS.
 
 ---
 
 ## `SecretStore` — encrypted store on file
 
 ```rust
+pub const MAX_STORE_BYTES: usize = 16 * 1024 * 1024;
 pub struct SecretStore<'a>;   // borrows &MasterKey for its lifetime
 
 impl<'a> SecretStore<'a> {
@@ -308,9 +305,10 @@ Each entry gets its own key derived from its name (`info = "krypto/store/v1|" + 
 therefore cannot be moved to another name — the open fails. Writes are atomic (tmp + fsync +
 rename), and the file is private (0600). *(0.7.2)* The tmp file is new, with an unpredictable name,
 so nothing planted at that name is followed or reused, and the directory is synced after the
-rename. *(0.7.2)* An existing file with any other mode gets 0600 when opened, unless the process may
-not change it, in which case it is left as it is; *(0.8.2)* that happens only once `open` has read the
-file as a store, so a file that is not a store keeps its mode.
+rename. *(0.7.2)* An existing file with any other mode gets 0600 when opened. If the process is
+not permitted to change it, it is left as it is; any other failure to change it, such as a
+read-only file system, makes `open` fail with `Io`. *(0.8.2)* The mode is changed only once `open`
+has read the file as a store, so a file that is not a store keeps its mode.
 *(0.8.2)* If what is at the store path can be opened but is not a regular file, such as a FIFO, a
 device or a directory, `open` fails with `Format`; what cannot be opened, for example for lack of
 permission or because it is a socket, gives the `Error::Io` from opening it. A FIFO at the store
@@ -318,12 +316,19 @@ path does not make `open` wait. A symbolic link at the store path is followed, s
 file is read through; the first write replaces the link with a regular file, and the file the link
 pointed to keeps its old contents.
 File reads are capped at `MAX_STORE_BYTES` (16 MiB), and *(0.7.2)* so are writes: a `put` that would
-grow the file past it fails with `Format`, so the store always opens again. *(0.9.0)* The cap
-counts the whole file, header included — 37 bytes in v1, 109 in v2 — and `put` checks it on the
-prospective file size before the value is sealed, not after.
+grow the file past it fails with `Format`, so the store always opens again. The cap counts the
+whole file, header included — 37 bytes in v1, 109 in v2 — and *(0.9.0)* `put` checks it on the
+prospective file size before the value is sealed.
 Name rules: non-empty, ≤ 512 bytes, printable ASCII only (`[\x20-\x7e]`) — names are
 addresses, not secrets, and get listed out. Checked on read as well as on write
 *(0.7.0)*: a store file need not have come from `put`.
+
+`put` checks in this order: the name, then the size cap — both `Format` — then it seals the value,
+and last the counter (below). `get` does not check the name: a name that breaks the rules is not
+in the store, and the answer is `KeyNotFound`. An entry whose blob is not a krypto blob gives
+`Format` from `get`, and stops `rotate` and `upgrade` with the same error. `delete` of a name that
+is not in the store returns `Ok`, writes nothing and leaves the counter where it was. `list` gives
+the names sorted.
 
 *(0.9.0)* **The store file: format versions 1 and 2.** The normative description is
 `spec/SPEC-secretstore.md`; what follows is the contract in brief. The 4 bytes at offset 0 are
@@ -349,11 +354,13 @@ frozen. MACs are compared in constant time. The v2 header is 109 bytes.
 
 *(0.9.0)* **What `open` verifies.** If there is no file at the path, a new store is created and
 the checks below do not apply, except that an open anchored above counter 0 fails with `Io`
-(below). Otherwise the checks run in this order: the path opens, else `Io`, and is a regular file,
+(below). The lock is taken before the file is looked at (below; a failure there is `Io`).
+Otherwise the checks run in this order: the path opens, else `Io`, and is a regular file,
 else `Format`; the size is within `MAX_STORE_BYTES` (the whole file, header included, on read and
-on write), else `Format`; the magic is `FST1`, else `Format`; the version byte is 1 or 2, anything
-else is `Format` with `unsupported store version N`, and a version other than the one the open
-names is `Format` too, with the version the file is. On a **v2** file three checks then run,
+on write), else `Format`; the file holds the magic `FST1` and the version byte, else `Format`; the
+version byte is 1 or 2, anything else is `Format` with `unsupported store version N`, and a
+version other than the one the open names is `Format` too, with the version the file is. A v1
+file shorter than its 37-byte header is `Format`. On a **v2** file three checks then run,
 before anything else in the file is interpreted: the file holds the whole 109-byte header, else
 `Auth`; `key_check` matches, else `WrongKey` — the master key does not fit the file;
 `container_mac` matches over `header[0..77]` followed by every byte after the header, else `Auth`
@@ -361,9 +368,9 @@ before anything else in the file is interpreted: the file holds the whole 109-by
 arithmetic, no panic on any input, valid UTF-8, legal names, no duplicate names, else `Format`; in
 a v2 file whose MAC holds, an invalid structure was written that way. So on a v2 file `open` itself
 proves the master key and the file as a whole: a wrong key fails at `open` with `WrongKey`, and a
-file cut short or a removed, swapped or injected entry with `Auth`. A changed salt or `key_check`
-gives `WrongKey` too and cannot be told from a wrong key, so a caller that knows its key is the
-right one treats `WrongKey` as a changed file. On a **v1** file nothing extra is verified: `open`
+file cut short after its version byte, or a removed, swapped or injected entry, with `Auth`. A
+changed salt or `key_check` gives `WrongKey` too and cannot be told from a wrong key, so a caller
+that knows its key is the right one treats `WrongKey` as a changed file. On a **v1** file nothing extra is verified: `open`
 still does not check the master key, and a wrong key shows as `Auth` from `get`.
 
 *(0.9.0)* **Sticky versioning; new stores are v2.** A store is always written in the version it was
@@ -373,7 +380,8 @@ files remain readable and, once opened as v1, stay v1 until upgraded. A v2 file 
 krypto is `Format` (`unsupported store version 2`). `open` reads both versions and says which one it
 read (`version()`). An open that names a version accepts only a file of that version, and creates
 one of that version when there is none: `open_with_version(path, master, version)` names 1 or 2 —
-anything else is `Format` — and `open_with_min_counter` names 2. A file of another version is
+anything else is `Format`, before the path is looked at or the lock is taken — and
+`open_with_min_counter` names 2. A file of another version is
 refused with `Format`, and the error says which version the file is. `open` cannot tell a v1 file
 from a v2 file that has been made into one: it reads it as v1, with what v1 protects and no more. A
 caller that relies on what v2 adds names version 2.
@@ -384,7 +392,9 @@ aborts with the file untouched and the error. The file is then written as versio
 atomic write. Salt, `key_id` and the per-name key context are unchanged, so the existing blobs
 are re-wrapped, not re-encrypted. There is no way back: after an upgrade, binaries that accept
 only version 1 report `unsupported store version 2`. On a store already at version 2 there is
-nothing to upgrade.
+nothing to upgrade: `upgrade` returns `Ok` with the store as it was and writes nothing. The v2
+header is 72 bytes longer than the v1 header, so a v1 file within 72 bytes of `MAX_STORE_BYTES`
+does not fit as v2: `upgrade` fails with `Format` and the file is untouched.
 
 *(0.9.0)* **Rollback detection, anchored by the caller.** krypto is stateless — it stores nothing
 outside the store file, so the anchor is yours. The v2 `counter` is covered by `container_mac`,
@@ -396,21 +406,24 @@ every `min_counter`, 0 included. It loads the store as `open` does and then fail
 The counter is compared only after the file has passed the checks above, so a counter that cannot
 be trusted is never compared. Without an anchor, no freshness check is performed — on a v2 file,
 `key_check` and `container_mac` are verified either way. A missing file is not a rollback: with
-`min_counter` above 0 the open creates no store and fails with `Error::Io`,
-saying that the store file is missing; with 0 it creates an empty v2 store, as `open` does.
+`min_counter` above 0 the open creates no store and fails with `Error::Io`, saying that the store
+file is missing; the file is looked for before the lock is taken, so no lock file is made either,
+unless the file is removed while the open runs. With 0 it creates an empty v2 store, as `open`
+does.
 
-`version()`, `counter()` and `key_id()` are there for an anchor of your own: after each write,
+*(0.9.0)* `version()`, `counter()` and `key_id()` are there for an anchor of your own: after each write,
 keep the store's `key_id` and `counter` outside the file; when you open it, pass that counter as
 `min_counter` and check that `key_id()` is the one you kept. A rotation starts a new generation,
 with a new `key_id` and the counter at 0, and an upgrade starts version 2 at counter 0; start your
 anchor again from there. A caller that names version 2 and does this knows that the file is a
 state of that store that it wrote itself, and no older than the counter it kept.
 
-The counter never wraps: a v2 store whose counter is at the maximum of a u64 refuses to write.
+*(0.9.0)* The counter never wraps: a v2 store whose counter is at the maximum of a u64 refuses to
+write.
 `put` and `delete` fail with `Error::Hardening`, the error says that the counter is at its maximum
 and that the store must be rotated, and nothing is written.
 
-**`key_id`.** 16 random bytes that krypto draws when a store is created and again at each
+*(0.9.0)* **`key_id`.** 16 random bytes that krypto draws when a store is created and again at each
 `rotate`. It names the store's current generation and is not secret. `key_id()` gives it from an
 open store. `SecretStore::key_id_from_file(path)` reads it from the file without the master key:
 it takes no lock, creates nothing and reads no more than the header, and the value is what the
@@ -424,10 +437,10 @@ which file belongs where is the caller's to know, and `key_id` is what tells two
 *(0.8.2)* **A write that fails.** The directory is opened before the rename, so a directory that
 cannot be opened fails the write while the old file still stands. A write that fails before the
 rename leaves the file as it was, and `put` and `delete` leave the handle as it was. If only the
-sync of the directory after the rename fails, `put`, `delete`, `rotate`, and an `open` that creates
-a new store return `Error::Io` although the change is in the file, and the error says so; `put` and
-`delete` keep the change in the handle too. After `rotate` the file is then under the new master
-key.
+sync of the directory after the rename fails, `put`, `delete`, `rotate`, `upgrade`, and an `open`
+that creates a new store return `Error::Io` although the change is in the file, and the error says
+so; `put` and `delete` keep the change in the handle too. After `rotate` the file is then under
+the new master key, and after `upgrade` it is version 2.
 
 **What the store protects.** krypto protects the contents, in both versions: without the master
 key nobody can read a value, or make or change one that `get` accepts. Who may write to the file
@@ -517,8 +530,8 @@ pub fn derive_key(password: &SecretString, salt: &[u8], preset: Preset)
   secret key krypto does not have), parameters outside the range — is `Format`, refused before
   Argon2 runs, so a stored string cannot make one call use more memory or time than that.
 - `derive_key` requires a salt of **at least 16 bytes** and, *(0.8.2)*, at most
-  `MAX_DERIVE_INPUT_BYTES` (1024); a longer salt is `Format`. The salt is not secret and is stored
-  in plaintext next to the encrypted data.
+  `MAX_DERIVE_INPUT_BYTES` (1024); a shorter or longer salt is `Format`. The key it gives is 32
+  bytes. The salt is not secret and is stored in plaintext next to the encrypted data.
 
 > **Never store a verification hash next to the ciphertext.** If the password is wrong, the open
 > fails by itself. A stored hash would additionally hand an attacker with the disk a separate
@@ -531,7 +544,7 @@ The crate owns the numbers. You pick a profile and store its **name**, not the n
 | Preset | Memory | Intended for |
 |---|---|---|
 | `Interactive` | 64 MiB (t=3, p=2) | login |
-| `Balanced` | 128 MiB (t=3, p=3) | the middle ground *(new in 0.5.0; p adjusted 2 → 3 in 0.6.0 — note that `derive_key` then yields a different key than 0.5.x)* |
+| `Balanced` | 128 MiB (t=3, p=3) | the middle ground *(0.5.0; p = 3 from 0.6.0)* |
 | `High` | 256 MiB (t=4, p=4) | high value, or anything an attacker can attack offline |
 
 The floor is `m ≥ 64 MiB, t ≥ 2, p ≥ 1` — every preset sits on or above it, and *(0.8.2)*
@@ -570,7 +583,7 @@ A signature that does not hold → `Auth`. Malformed key/signature → `Format`.
 deterministic; the verifier also accepts randomized signatures (same wire form). Tested against
 RFC 8032 (TEST 1+2) and RFC 6979 A.2.5.
 
-*(0.8.2; up to 0.8.1, `ed25519_verify` was what `ed25519_verify_relaxed` is now)* **Two Ed25519
+*(0.8.2)* **Two Ed25519
 verifiers.** `ed25519_verify` is strict: a public key of small order (a *weak* key) or an R of
 small order in the signature → `Auth`, and a public key that is not the canonical 32-byte encoding
 of its point → `Format`. So `Ok` means the signature was made with the private key that belongs to
@@ -595,7 +608,8 @@ pub fn x25519_shared(secret: &SecretBuf, peer_public: &[u8]) -> Result<SecretBuf
 The primitive under sealed envelopes (RFC 7748) — the envelope **format** belongs to the
 consumer. `x25519_shared` rejects a non-contributory result (a low-order peer point) with
 `Auth`, and the result is keying *material*: run it through HKDF (`MasterKey::derive`) before
-use. Tested against RFC 7748 §6.1.
+use. A private key or a peer public key that is not exactly 32 bytes is `Format`, checked before
+the shared secret is computed. Tested against RFC 7748 §6.1.
 
 ---
 
@@ -614,7 +628,7 @@ still fills the memory.
 
 ---
 
-## `base64` — canonical base64 *(new in 0.5.1, wish #1)*
+## `base64` — canonical base64 *(0.5.1)*
 
 ```rust
 pub fn encode(bytes: &[u8]) -> String;                     // STANDARD, padded (PEM body)
@@ -660,11 +674,13 @@ promises but cannot back still fills the memory.
 pub fn harden_process() -> Result<(), Error>;       // core dumps off + non-dumpable
 pub fn no_new_privs() -> Result<(), Error>;         // never gain privileges (PR_SET_NO_NEW_PRIVS)
 pub fn close_inherited_fds() -> Result<(), Error>;  // closes EVERYTHING above stderr (close_range, Linux 5.9+)
-pub fn drop_filesystem(dir: impl AsRef<Path>) -> Result<(), Error>; // chroot into an EMPTY dir, the process inside it (0.7.3)
+pub fn drop_filesystem(dir: impl AsRef<Path>) -> Result<(), Error>; // chroot into an EMPTY dir, the process inside it
 ```
 
-All of them are **fail-closed**: if the call cannot deliver, you get `Err` — never silent
-degradation. Each step is its own deliberate choice. Recommended order: `harden_process()` and
+On Linux, the platform krypto supports, all of them are **fail-closed**: if the call cannot
+deliver, you get `Err` — never silent degradation. On other systems `no_new_privs` and
+`drop_filesystem` fail with `Hardening`, and `harden_process` only turns core dumps off. Each step
+is its own deliberate choice. Recommended order: `harden_process()` and
 `no_new_privs()` first in `main` · `close_inherited_fds()` early, before opening your own files
 (NB: it also kills deliberately inherited sockets, e.g. socket activation — hence a separate
 call) · `drop_filesystem(dir)` **after** key material is read — irreversible, needs privileges
@@ -673,8 +689,10 @@ call) · `drop_filesystem(dir)` **after** key material is read — irreversible,
 directory that was checked, and the root changes as the last step, with the process already
 inside; on `Err` the root has not changed and the process stands where it stood, unless stepping
 back out of the directory fails too; then it stays in the directory, and the error says so. After
-the chroot krypto needs no filesystem: randomness comes from the `getrandom` syscall, and
-AEAD/KDF/signing/passwords touch no files.
+the chroot krypto needs no filesystem: randomness comes from the `getrandom` syscall (Linux 3.17
+and later), and AEAD/KDF/signing/passwords touch no files. A directory that is missing or cannot be
+opened is `Io`; one that is not a directory or is not empty, and a chroot that fails, are
+`Hardening`.
 
 `close_inherited_fds` also closes the lock of a
 [`SecretStore`](#secretstore--encrypted-store-on-file) that is already open, after which a second
@@ -694,21 +712,23 @@ pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotF
 
 | Variant | Means |
 |---|---|
-| `Io` | file or directory; also a store file that `open_with_min_counter` with `min_counter` above 0 did not find |
-| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening — never a verdict on the data; treated fail-closed *(0.7.3: described as what it covers)*. Also a `SecretStore` write refused because the store's counter is at its maximum: rotate the store |
-| `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob, or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info`. *(0.9.0)* Not a krypto blob means shorter than its 4-byte magic, or not starting with `FAFN`; before 0.9.0 it meant shorter than the 54-byte header, or not starting with `FAFN`. For a `SecretStore`: not a store file, an unknown version or another version than the open names, or an invalid structure |
-| `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, a header cut short past the magic included *(0.9.0)*, and a key id in a `SecretStore` that does not match. At the open of a v2 store file: the file is not what was written — cut short of its header, or the master key fits and something else was changed, added or removed |
+| `Io` | file or directory; *(0.9.0)* also a store file that `open_with_min_counter` with `min_counter` above 0 did not find |
+| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening — never a verdict on the data; treated fail-closed. *(0.9.0)* Also a `SecretStore` write refused because the store's counter is at its maximum: rotate the store |
+| `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob, or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info`. *(0.9.0)* Not a krypto blob means shorter than its 4-byte magic, or not starting with `FAFN`. For a `SecretStore`: not a store file, an unknown version, an invalid structure, or *(0.9.0)* another version than the open names |
+| `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, a header cut short past the magic included *(0.9.0)*, and a key id in a `SecretStore` that does not match. *(0.9.0)* At the open of a v2 store file: the file is not what was written — cut short of its header, or the master key fits and something else was changed, added or removed |
 | `KeyNotFound` | the name does not exist in the store |
-| `WrongKey` | the key does not fit. For a blob: it belongs to another key generation — routing, not tampering *(new in 0.5.0)*; *(0.7.3)* no blob function returns it, since a `SecretStore` holds one generation and a different key id there is `Auth`, and it is the answer for a caller that routes between generations. At the open of a v2 store file: the master key does not fit the file; a changed salt or `key_check` gives the same answer, so a caller that knows its key is the right one treats it as a changed file |
+| `WrongKey` | the key does not fit *(0.5.0)*. *(0.9.0)* At the open of a v2 store file: the master key does not fit the file; a changed salt or `key_check` gives the same answer, so a caller that knows its key is the right one treats it as a changed file. No blob function returns it: a blob opened with a key of another generation is `Auth`. It is also the answer for a caller's own code that routes blobs between key generations |
 | `Rollback { file_counter, min_counter }` | *(0.9.0)* only from `SecretStore::open_with_min_counter`: a v2 store file whose `counter` (`file_counter`) is below the caller's minimum (`min_counter`) — an older copy of the file may have been put back. Distinct from `Auth`, which means the content itself does not verify |
 
 No variant carries key material or plaintext.
 
-**The distinction that is the whole point:** `Auth` = tampering or a wrong key — **should be
-alarmed on**. `WrongKey` = the blob belongs to another key generation — **routing**: find the
-right key (`blob_key_id`). Merging them reintroduces a false alarm. At the open of a v2 store file
-the two say different things: `WrongKey` that the master key does not fit the file, `Auth` that
-the key fits and the file is not what was written.
+**The distinction that is the whole point:** `Auth` means that what was given does not verify —
+tampering, or for a blob a wrong key — and **should be alarmed on**. `WrongKey` means that the key
+is not the one for this data, and says nothing against the data. *(0.9.0)* At the open of a v2
+store file the library gives both: `WrongKey` when the master key does not fit the file, `Auth` when the file
+is not what was written. For a blob the library gives `Auth` in both cases, so a caller that holds
+several key generations reads `blob_key_id` and picks the key before it opens; then a blob from
+another generation is routed, not alarmed on.
 
 ---
 
@@ -723,7 +743,7 @@ Part of the contract on equal footing with the functions — especially the **ab
 | `Error` | `Debug`, `Display`, `std::error::Error`, `From<std::io::Error>` |
 | `Alg` | `Clone`, `Copy`, `PartialEq`, `Eq`, `Debug` |
 | `Preset` | `Clone`, `Copy`, `Debug` |
-| `MasterKey`, `DerivedKey`, `SecretStore<'a>` | `Send`, `Sync`; **nothing else** |
+| `MasterKey`, `DerivedKey`, `SecretStore<'a>` | `Send`, `Sync` and the other auto traits; **no written or derived impl** |
 
 No secret-bearing type has `Clone`, `Serialize`, `PartialEq` or `Default` — absence is
 enforcement. The modules `sign`/`exchange`/`hex`/`base64` are free functions + constants.
@@ -746,14 +766,17 @@ How the Rust forms read in Python:
 | `&[u8]`, `Vec<u8>`, `[u8; N]` | `bytes`; a wrong length for `[u8; N]` is `FormatError` |
 | `&str`, `String` | `str` |
 | `impl AsRef<Path>` | `str` or a path object |
+| `usize`, `u8`, `u64` | `int`; a negative number, or one too large for the Rust type, is Python's `OverflowError`, raised before krypto runs |
+| A function on a type without `self`: `SecretBuf::from_vec`, `MasterKey::from_bytes`, `SecretStore::open`, … | A static method on the class: `SecretBuf.from_vec(…)`, `MasterKey.from_bytes(…)`, `SecretStore.open(…)`, … |
 | `Result<T, Error>` | `T`, or an exception |
-| `Error::Io`, `Hardening`, `Format`, `Auth`, `KeyNotFound`, `WrongKey`, `Rollback` *(0.9.0)* | `IoError`, `HardeningError`, `FormatError`, `AuthError`, `KeyNotFoundError`, `WrongKeyError`, `RollbackError`, all subclasses of `Error`; `RollbackError` has the attributes `file_counter` and `min_counter` |
+| `Error::Io`, `Hardening`, `Format`, `Auth`, `KeyNotFound`, `WrongKey`, `Rollback` *(0.9.0)* | `IoError`, `HardeningError`, `FormatError`, `AuthError`, `KeyNotFoundError`, `WrongKeyError`, `RollbackError`, all subclasses of `krypto_py.Error`, which is a subclass of `Exception`; they are at the module root and in `krypto_py.error`. `RollbackError` has the attributes `file_counter` and `min_counter` |
 | `VERSION` | `VERSION`, and the same value as `__version__` |
 | `SecretBuf::len`, `SecretString::len` | `len()`, and also Python's `len(secret)` |
-| `Alg::Aegis256`, `Preset::High`, … | `Alg.Aegis256`, `password.Preset.High`, …; both compare with `==`, though Rust's `Preset` has no `PartialEq` |
-| A value taken by value: `MasterKey::from_bytes(SecretBuf)`, `SecretStore::rotate(self, …)` | The object is consumed, also when the operation itself fails; using it afterwards is a `ValueError`. An argument of the wrong type is rejected with `TypeError` before anything is consumed |
+| `Alg::Aegis256`, `Preset::High`, … | `Alg.Aegis256`, `password.Preset.High`, …; both compare with `==`, though Rust's `Preset` has no `PartialEq`. They also compare equal to their position as an `int` (0, 1, 2 — not the blob's `alg_id`), and they are not hashable |
+| A value taken by value: `MasterKey::from_bytes(SecretBuf)`, `SecretStore::rotate(self, …)`, `SecretStore::upgrade(self)` | The object is consumed, also when the operation itself fails, and also when `upgrade` on a v2 store writes nothing; using it afterwards is a `ValueError`. An argument of the wrong type is rejected with `TypeError` before anything is consumed |
 | `expose(\|b\| …)`, `expose_str(\|s\| …)` | `expose(f)`, `expose_str(f)`: `f` is called with a copy, and what it returns is returned |
 | `SecretStore<'a>` borrows the `MasterKey` | `SecretStore` keeps the `MasterKey` object alive |
+| `Debug` (redacted, where the type has it) | `repr()` on every class, never the contents: `SecretBuf([REDACTED], len=N)`, `SecretString([REDACTED], len=N)`, `MasterKey([REDACTED])`, `DerivedKey([REDACTED])`, `SecretStore` |
 
 ### What is guaranteed, and where Python differs
 

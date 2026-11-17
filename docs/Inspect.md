@@ -45,7 +45,7 @@ ECDSA P-256 private key is tested with a key made by `openssl`.
 | Format | Recognized by | What `inspect` tells |
 |---|---|---|
 | krypto blob, from `seal` | `FAFN` | the format version, the algorithm (AEGIS-256, XChaCha20-Poly1305 or AES-256-GCM), the key id and the length |
-| Store file, from `SecretStore` | `FST1` | the format version (1 or 2), the key id, the number of entries, their names (at most 20, then how many more) and the algorithm of their blobs; *(0.9.0)* in a version 2 file also the write counter. The key-check and the container MAC of a v2 file are recognized but not verified — verifying them needs the master key, which `inspect` never takes |
+| Store file, from `SecretStore` | `FST1` | the format version (1 or 2), the key id, the number of entries, their names (at most 20, then how many more) and the algorithm of their blobs; *(0.9.0)* in a version 2 file also the write counter. The key-check and the container MAC of a v2 file are not verified, and the MAC is shown as present, not verified — verifying them needs the master key, which `inspect` never takes |
 | Password hash, from `password::hash` | `$argon2id$` | the Argon2id version, memory, iterations and lanes, and which krypto preset they are |
 | ECDSA P-256 private key | PKCS#8 DER with the OIDs for EC and P-256 | that it is one; the key is not shown |
 | ECDSA P-256 public key | 65 bytes starting with `04` | that it is one, by its length and first byte only |

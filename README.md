@@ -11,8 +11,9 @@ Standalone crypto and secret-handling crate. It grew out of building a real appl
 is fully self-contained — nothing here depends on that app.
 
 It owns all handling of secrets in memory
-and at rest: locked secret types, AEAD with a self-describing blob format, HKDF key derivation,
-keyed MACs, an encrypted key-value store, key rotation (`reseal`, `SecretStore::rotate`),
+and at rest: locked secret types, AEAD with a self-describing blob format and caller-supplied
+associated data, HKDF key derivation, keyed MACs, an encrypted key-value store (file format
+version 2 authenticates the whole file), key rotation (`reseal`, `SecretStore::rotate`),
 argon2id password hashing/derivation, signatures
 (Ed25519, ECDSA P-256 — ring-compatible), X25519 key agreement, canonical hex/base64/SHA-256/`ct_eq`
 utilities and process hardening. A thin, opinionated wrapper around established primitives — **no cryptography of our
@@ -64,7 +65,7 @@ variant of their own, is free to build it.
 
 ```toml
 [dependencies]
-krypto = "0.8"
+krypto = "0.9"
 ```
 
 From Python 3.11 or newer: `pip install krypto-py`, then `import krypto_py` — the same API; see

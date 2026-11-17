@@ -24,8 +24,8 @@ a vulnerability is to upgrade.
 
 | Version | Supported |
 |---------|-----------|
-| 0.8.x   | yes       |
-| < 0.8   | no        |
+| 0.9.x   | yes       |
+| < 0.9   | no        |
 
 ## Reporting a vulnerability
 
@@ -106,6 +106,8 @@ What is in scope here is how the crate uses them:
 
 - key derivation and purpose separation (HKDF `info`, salts, the store's per-name keys)
 - the sealed blob format and what it authenticates
+- the store file format and what it authenticates: the whole file in version 2, with the key
+  check, the container MAC and the write counter
 - how secrets are held in memory, and whether they are wiped when they should be
 - the process hardening calls and their failure behaviour
 - `krypto-cli`: how key material enters and leaves the process

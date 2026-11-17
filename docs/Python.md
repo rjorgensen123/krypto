@@ -140,7 +140,7 @@ token = store.get("api-token")
 store.contains("api-token")   # does it exist?
 store.list("api-")            # all names with this prefix
 store.delete("api-token")
-store.key_id()                # the store's key_id, 16 bytes, not secret
+store.key_id()                # the store's key_id, 16 bytes, not secret (0.9.0)
 ```
 
 In Rust the store borrows the master key; here it keeps the `MasterKey` object alive for as long as

@@ -220,7 +220,7 @@ store.delete("api-token")?;
 
 store.version();                    // 1 or 2 — the file's format version (0.9.0)
 store.counter();                    // the write counter (v2); 0 on a v1 store (0.9.0)
-store.key_id();                     // the store's key_id, 16 bytes, not secret
+store.key_id();                     // the store's key_id, 16 bytes, not secret (0.9.0)
 ```
 
 The store file is never read more than one byte past `MAX_STORE_BYTES` (16 MiB) — the same guard
@@ -239,18 +239,18 @@ the link with a regular file, and the file the link pointed to keeps its old con
 
 *(0.8.2)* **A write that fails.** A write that fails before the new file is in place leaves the
 file as it was, and `put` and `delete` leave the handle as it was. If only the sync of the
-directory after the rename fails, `put`, `delete`, `rotate`, and an `open` that creates a new store
-return `Io` although the change is in the file, and the error says so; `put` and `delete` keep the
-change in the handle too. After `rotate` the file is then under the new master key, so reopen it
-with that key.
+directory after the rename fails, `put`, `delete`, `rotate`, `upgrade`, and an `open` that creates
+a new store return `Io` although the change is in the file, and the error says so; `put` and
+`delete` keep the change in the handle too. After `rotate` the file is then under the new master
+key, so reopen it with that key; after `upgrade` it is version 2.
 
 *(0.9.0)* **Store file version 2: the file as a whole is authenticated.** Version 1 authenticates
 each entry but not the file: someone who can write it can remove an entry or put back an older
 copy, and `open` notices neither, nor does it check the master key. Version 2 adds three fields to
 the header — a `key_check` (the master key, proven at `open`), a write `counter`, and a
 `container_mac` over the header and all entries — so on a v2 file `open` fails with `WrongKey`
-when the master key does not fit, and with `Auth` when the key fits and the file is not what was
-written: cut short, or an entry removed, swapped or injected. A changed salt or key check gives
+when the master key does not fit, and with `Auth` when the file is not what was written: cut
+short, or an entry removed, swapped or injected. A changed salt or key check gives
 `WrongKey` too, so if you know your key is the right one, treat `WrongKey` as a changed file. The
 normative format is `spec/SPEC-secretstore.md`.
 
@@ -529,7 +529,8 @@ None of them carry key material or plaintext. You can log them as they are.
 
 | Version | What arrived |
 |---|---|
-| **0.9.0** | **Store file format v2** (`spec/SPEC-secretstore.md`): the whole file is authenticated (`container_mac`), the master key is checked at `open` (`key_check`; `WrongKey` when it does not fit), and a write counter enables rollback detection (`open_with_min_counter`, `Error::Rollback`) · new stores are v2, an opened file keeps its version · an open that names a version (`open_with_version`, and `open_with_min_counter` for v2) accepts only that version · `upgrade()` (v1 → v2, one-way), `version()`, `counter()`, `key_id()`, `key_id_from_file()` · `rotate` keeps the version and resets the counter on v2 · a blob cut short of its 54-byte header past the `FAFN` magic now gives `Auth`, not `Format` · `SecretStore::put` checks the 16 MiB cap on the prospective file size before sealing · caller-supplied AAD on blobs: `seal_with_aad`/`open_with_aad`/`reseal_with_aad` — the blob format is unchanged, an empty AAD is the old behaviour |
+| **0.9.0** | **Store file format v2** (`spec/SPEC-secretstore.md`): the whole file is authenticated (`container_mac`), the master key is checked at `open` (`key_check`; `WrongKey` when it does not fit), and a write counter enables rollback detection (`open_with_min_counter`, `Error::Rollback`) · new stores are v2, an opened file keeps its version · an open that names a version (`open_with_version`, and `open_with_min_counter` for v2) accepts only that version · `upgrade()` (v1 → v2, one-way), `version()`, `counter()`, `key_id()`, `key_id_from_file()` · `rotate` keeps the version and resets the counter on v2 · a blob cut short of its 54-byte header past the `FAFN` magic now gives `Auth`, not `Format` · `SecretStore::put` checks the 16 MiB cap on the prospective file size before sealing · caller-supplied AAD on blobs: `seal_with_aad`/`open_with_aad`/`reseal_with_aad` — the blob format is unchanged, an empty AAD is the old behaviour; the AAD is capped at `MAX_AAD_BYTES` (1024) · ⚠ krypto before 0.9.0 cannot read a v2 store file; name version 1 where older readers must keep working · a write to a store whose counter is at its maximum fails with `Hardening`: rotate the store · `hex::decode`, `base64::decode` and `base64::decode_nopad` give `Hardening` when the output buffer cannot be reserved · `krypto-cli`: a blob cut short in its header gives exit 3 from `open` (it was 1) and from `inspect` (it was 0) |
+| **0.8.2** | ⚠ `ed25519_verify` refuses weak keys, and `ed25519_verify_relaxed` is new · ⚠ `password::verify` accepts only the hashes krypto makes · ⚠ `password::derive_key` caps the salt at 1024 bytes · `SecretStore`: a write that fails after the rename says so, the lock file is not followed through a link, and what is at the store path must be a regular file · `seal`, `open`, `hmac_sha256` and `derive` overwrite the key material they leave on the stack · `hex` and `base64` decode errors no longer show the input · `krypto-cli inspect` shows only printable ASCII, and reads crafted DER, PEM, OpenPGP and zip input right or says it is invalid · krypto-py declares that it needs the GIL · the README and Home say who has reviewed krypto |
 | **0.8.1** | No functional change: the documentation is corrected where it said more than the code does, a test file no longer names the machine it was made on, and the Python packages carry no paths from the machine that built them |
 | **0.8.0** | **Python: `krypto-py`.** The same API from Python, built from the same code: what one seals, the other opens; one API reference, with the guarantees that differ set apart · `MasterKey::key_id` in the library, the value `krypto-cli` has always used · the repository is a workspace of `krypto` and `krypto-py` · `krypto-cli` is a small helper with nine commands |
 | **0.7.3** | `drop_filesystem` changes the root only as its last step, on the directory it checked; when it fails, the root is as it was, and so is the working directory unless stepping back fails too · every change to a blob past its `FAFN` magic gives `Auth` (`krypto-cli` exit 3, though `krypto-cli open` gives 4 for a changed key id), and `SecretStore::get` gives `Auth` for a key id that does not match · an empty `info` for `derive` is `Format` · random bytes are capped at 1 MiB per call, with your own cap as an option |
