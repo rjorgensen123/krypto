@@ -212,6 +212,10 @@ now says when they do. No code that runs is changed.
 it leaves the file as it is and goes on. That held for a file the process does not own; on a
 read-only file system `open` failed with `Io` instead. It now leaves the file as it is there too.
 
+### Changed — the wording of four comments is tidied *(2026-11-18)*
+
+Four comments, one in `krypto-cli` and three in its tests, are tidied. No code is changed.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

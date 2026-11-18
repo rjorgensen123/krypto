@@ -100,7 +100,7 @@ fn seal_and_open_with_their_exit_codes() {
 }
 
 /// `inspect` tells what krypto made without a key, and never shows a hash
-/// value; random bytes are only a length (FS-0056).
+/// value; random bytes are only a length.
 #[test]
 fn inspect_tells_what_krypto_made() {
     let report = |input: &[u8]| {
@@ -250,7 +250,7 @@ fn inspect_tells_what_others_made() {
 /// `inspect` shows only printable ASCII (0.8.2): control characters a file
 /// puts in a PGP armor label, a PHC version, an OpenSSH key's cipher and KDF,
 /// the key type in an SSH key blob or an SSH signature's hash are left out and
-/// counted, and cannot add a line to the report (FS-0105).
+/// counted, and cannot add a line to the report.
 #[test]
 fn inspect_shows_no_control_characters() {
     let string = |b: &[u8]| [&(b.len() as u32).to_be_bytes()[..], b].concat();
@@ -351,7 +351,7 @@ fn inspect_shows_no_control_characters() {
 /// part too long for 64 bits is `OID too long to show`, PEM inside PEM is
 /// unwrapped at most two levels deep as hex is, and the report notes where
 /// that limit stops it, an S2K count is read from its own byte when a session
-/// key follows, and a WinZip AES strength from the AES extra field (FS-0106).
+/// key follows, and a WinZip AES strength from the AES extra field.
 #[test]
 fn inspect_reads_crafted_files_right_or_says_invalid() {
     let der = |h: &str| hex::decode(h).unwrap();
