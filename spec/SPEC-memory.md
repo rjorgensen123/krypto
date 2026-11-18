@@ -100,10 +100,16 @@ guarantee: the amount overwritten was measured on Linux on x86_64, and another c
 or processor may leave copies beyond it. Signing and key agreement are not followed by an
 overwrite.
 
-**The working memory of the password function** is 64 to 320 MiB of ordinary memory per call:
-not locked, not kept out of dumps, and not wiped when released. While a call runs, and for as
-long as the released memory is not reused, an image of it helps recover the password or the
-key derived from it. This is a known limit (THREAT-MODEL).
+**The working memory of the password function** is 64 to 320 MiB of ordinary memory per call,
+not locked and not kept out of dumps. When a key is derived from a password, krypto holds that
+memory itself and wipes it before releasing it. When a password is hashed or checked, the
+implementation holds it and releases it without wiping: the implementation lets a caller
+provide the memory only for the bare derivation. To do the same for hashing and checking,
+krypto would have to take over work that is the implementation's, and krypto uses the
+implementations as they are and writes no cryptography of its own. While a call runs, an image
+of the memory helps recover the password or the key derived from it; after hashing or checking,
+so does an image of the released memory for as long as it is not reused. This is a known limit
+(THREAT-MODEL).
 
 ## 7. What the protection does not reach
 
@@ -145,6 +151,12 @@ one that knew.
 **Order.** Turning off dumps first, forbidding new privileges right after. Closing inherited
 descriptors early, before the program opens its own files or a store. Leaving the file system
 last, after key material has been read.
+
+**One protection lies outside the process:** the kernel can be set to wipe memory when it is
+released to it (on Linux, `init_on_free=1` on the kernel command line). krypto cannot set it.
+It recommends it, because the setting covers the ordinary memory of sections 5 and 6 once that
+memory has gone back to the kernel, the working memory of hashing or checking a password above
+all.
 
 **Outside Linux** a secret is made locked, fenced and wiped but not kept out of dumps, and no
 error says so. Turning off dumps only sets the limits on the size of a core dump to zero and

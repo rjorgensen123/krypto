@@ -217,6 +217,16 @@ AEGIS-256 test vectors, and `SPEC-secretstore.md` refers to the RFC where it ref
 draft. The algorithm table in `docs/Home.md` calls AEGIS-256 the first choice, as the text
 below it does.
 
+### ⚠ Changed — `password::derive_key` wipes Argon2's working memory *(2026-11-18)*
+
+`password::derive_key` holds the working memory Argon2 uses, 64 to 256 MiB by the preset, and
+overwrites it with zeros before releasing it. It uses the `argon2` crate's own entry for memory
+the caller provides, and the key it derives is unchanged. ⚠ When that memory cannot be had,
+`derive_key` answers `Hardening`, where it answered `Format`. `password::hash` and `verify` are
+unchanged: there the Argon2 library holds the working memory and releases it without wiping.
+The documentation says which is which, and recommends the Linux kernel setting
+`init_on_free=1`, which wipes memory when it goes back to the kernel.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*

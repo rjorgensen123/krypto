@@ -275,3 +275,17 @@ fn phc_over_max_phc_bytes_gives_format() {
         other => panic!("expected Format for the length, got {other:?}"),
     }
 }
+
+/// The key `derive_key` gives for a fixed password, salt and preset, byte for
+/// byte: a key derived once must be derived again unchanged, or what it sealed
+/// can no longer be opened.
+#[test]
+fn derive_key_gives_the_known_key() {
+    let pw = SecretString::from_string("example-password".to_string()).unwrap();
+    let key = password::derive_key(&pw, b"example-salt-016", Preset::Interactive).unwrap();
+    let hex = key.expose(|k| krypto::hex::encode(k).unwrap());
+    assert_eq!(
+        hex,
+        "46f062b91e15996b13e9722e79d312094f78271935dc9432c8d6d6fb0e6adad0"
+    );
+}

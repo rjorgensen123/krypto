@@ -54,9 +54,10 @@ failure.
 | `Hardening` | A protection or the environment failed: memory that cannot be had or locked, random bytes, a hardening step, or an internal step no input can cause. One case comes from a file: a version 2 store whose counter is at its maximum refuses to be written | Look at the machine and its limits; for the counter, rotate the store. Never a statement about whether data is genuine |
 | `Io` | A file or directory could not be opened, read, written or synced; the store is already open through another handle; its lock file is not a regular file; an anchored open found no file. One case comes when the work is done: a store write has replaced its file and only the sync of the directory afterwards failed, so the change is in the file | Look at the file system |
 
-The classes are uneven in one place. When Argon2 itself fails, memory that cannot be had
-included, hashing a password answers `Hardening`, while checking a password and deriving a key
-from one answer `Format`.
+The classes are uneven in one place. When the working memory of Argon2 cannot be had, hashing
+a password and deriving a key from one answer `Hardening`, while checking a password answers
+`Format`; when Argon2 fails in another way, hashing answers `Hardening`, and checking and
+deriving answer `Format`.
 
 ## 4. The lines between the classes
 

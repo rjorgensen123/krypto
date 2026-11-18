@@ -28,8 +28,9 @@ getrandom = "0.4"
 aegis = "0.9.20"
 # `zeroize` makes these dependencies wipe the keys and state their own types
 # hold when they are dropped (0.8.2). argon2 wipes its initial and final hash
-# with it, not its working memory. hkdf has no such feature; the HMAC state it
-# holds is wiped through sha2's. aegis has none either.
+# with it, not its working memory. `password::derive_key` gives argon2 working
+# memory that krypto holds and wipes itself (0.9.0). hkdf has no such feature;
+# the HMAC state it holds is wiped through sha2's. aegis has none either.
 chacha20poly1305 = { version = "0.11", features = ["zeroize"] }
 aes-gcm = { version = "0.11", features = ["zeroize"] }
 hkdf = "0.13"

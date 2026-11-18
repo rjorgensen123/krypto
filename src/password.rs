@@ -13,7 +13,8 @@
 
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier};
-use argon2::{Algorithm, Argon2, Params, Version};
+use argon2::{Algorithm, Argon2, Block, Params, Version};
+use zeroize::Zeroize;
 
 use crate::error::Error;
 use crate::kdf::MAX_DERIVE_INPUT_BYTES;
@@ -211,6 +212,35 @@ pub fn verify(password: &SecretString, phc: &str) -> Result<(), Error> {
 // Argon2id as KEY DERIVATION (KDF) — not as a stored hash
 // --------------------------------------------------------------------------- //
 
+/// The working memory Argon2 fills during one [`derive_key`] call (0.9.0).
+/// krypto holds it so that `Drop` can overwrite every block with zeros before
+/// it is released, on every way out, an unwinding panic included.
+struct WorkingMemory(Vec<Block>);
+
+impl WorkingMemory {
+    /// Reserves `count` blocks, all zero. Memory that cannot be had is
+    /// `Error::Hardening`; the message carries only the size.
+    fn new(count: usize) -> Result<Self, Error> {
+        let mut blocks = Vec::new();
+        blocks.try_reserve_exact(count).map_err(|_| {
+            Error::Hardening(format!(
+                "cannot allocate {} bytes for argon2 working memory",
+                count.saturating_mul(Block::SIZE)
+            ))
+        })?;
+        blocks.resize(count, Block::new());
+        Ok(WorkingMemory(blocks))
+    }
+}
+
+impl Drop for WorkingMemory {
+    fn drop(&mut self) {
+        // Wipes every block and the spare capacity, so the whole allocation is
+        // zero when it is released.
+        self.0.zeroize();
+    }
+}
+
 /// Derive a 32-byte key from a password (SPEC SIKKERHETSMODELL §8.4).
 ///
 /// # This is not the same as [`hash`]
@@ -239,6 +269,12 @@ pub fn verify(password: &SecretString, phc: &str) -> Result<(), Error> {
 ///
 /// At most [`MAX_PASSWORD_BYTES`]; a longer one is `Error::Format`, checked
 /// before the salt and before Argon2 runs (0.9.0).
+///
+/// # The working memory
+///
+/// The working memory Argon2 uses is held by this function and overwritten
+/// with zeros before it is released (0.9.0). When that memory cannot be had,
+/// the answer is `Error::Hardening`.
 pub fn derive_key(
     password: &SecretString,
     salt: &[u8],
@@ -257,11 +293,12 @@ pub fn derive_key(
             salt.len()
         )));
     }
+    let mut memory = WorkingMemory::new(preset.params().block_count())?;
     // The key is written straight into locked memory (0.7.2).
     let res = crate::secret::SecretBuf::fill_with(32, |out| {
         password.expose_str(|pw| {
             hasher(preset)
-                .hash_password_into(pw.as_bytes(), salt, out)
+                .hash_password_into_with_memory(pw.as_bytes(), salt, out, &mut memory.0)
                 .map_err(|e| Error::Format(format!("argon2 derivation failed: {e}")))
         })
     });

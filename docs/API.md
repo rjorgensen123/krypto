@@ -161,9 +161,11 @@ Where a library has a `zeroize` feature, krypto turns it on, so its types wipe w
 they are dropped: AES-256-GCM, XChaCha20-Poly1305 (except the Poly1305 state it makes for each
 message), HMAC and SHA-256. AEGIS-256 and HKDF have no such feature: for AEGIS-256 only the
 overwrite removes its copy of the key, and HKDF's state is an HMAC over SHA-256, which is wiped.
-Argon2 wipes only its initial and final hash, not its working memory. That working memory, 64 to
-320 MiB per call, is ordinary memory: not locked, not excluded from core dumps, and not wiped when
-it is released.
+Argon2 wipes only its initial and final hash. Its working memory, 64 to 320 MiB per call, is
+ordinary memory: not locked and not excluded from core dumps. `password::derive_key` *(0.9.0)*
+holds that memory itself and overwrites it with zeros before releasing it. In `password::hash` and
+`verify` the Argon2 library holds it and releases it without wiping, and what is released unwiped
+can be read from the machine's memory until it is reused.
 
 This is a measure, not a guarantee. What is left on the stack depends on the compiler, the build
 and the platform, and how much is overwritten was set from measurements on x86-64 Linux. Signing
@@ -636,8 +638,9 @@ pub fn derive_key(password: &SecretString, salt: &[u8], preset: Preset)
   Anything else — Argon2i, Argon2d, version 16, a string without `v=`, a `keyid` (it names a
   secret key krypto does not have), parameters outside the range — is `Format`, refused before
   Argon2 runs, so a stored string cannot make one call use more memory or time than that.
-- When Argon2 itself fails, memory it cannot get included, `hash` answers `Hardening`, while
-  `verify` and `derive_key` answer `Format`.
+- When the working memory of Argon2 cannot be had, `hash` and, *(0.9.0)*, `derive_key` answer
+  `Hardening`, while `verify` answers `Format`; when Argon2 fails in another way, `hash` answers
+  `Hardening`, and `verify` and `derive_key` answer `Format`.
 - `derive_key` requires a salt of **at least 16 bytes** and, *(0.8.2)*, at most
   `MAX_DERIVE_INPUT_BYTES` (1024); a shorter or longer salt is `Format`. The key it gives is 32
   bytes. The salt is not secret and is stored in plaintext next to the encrypted data.
@@ -870,6 +873,15 @@ in [SPEC-memory](../spec/SPEC-memory.md).
 
 Hardening is process-local: it protects the process that calls it. *(0.8.0)* From Python,
 `krypto-py` hardens the Python process with these same functions.
+
+One protection lies outside the process, and krypto cannot turn it on: the Linux kernel setting
+`init_on_free=1`, set on the kernel command line by whoever runs the machine, makes the kernel
+overwrite memory with zeros when it is released to it. krypto recommends turning it on, so that
+ordinary memory a secret has passed through, above all the Argon2 working memory of
+`password::hash` and `verify`, is not left readable once it has gone back to the kernel. With
+glibc's allocator at its default settings, a block as large as that working memory goes back as
+soon as it is released; another allocator, or other settings, can keep it in the process. See
+[What is left on the stack](#what-is-left-on-the-stack-082).
 
 ---
 

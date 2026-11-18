@@ -201,10 +201,11 @@ SPEC-secretstore; the two breaks SPEC-blob names stand. The protections of memor
 hardening steps are read back from the kernel. SPEC-primitives gives the check of each
 algorithm in a table.
 
-What the checks cannot show: that memory was wiped before it was given back, that nothing of a
-password is left after Argon2, and what a real core dump holds. The layer that steps outside
-the language's safety rules is examined by reading and by those kernel checks; the tool that
-checks Rust code for undefined behaviour cannot run it, because that layer calls the kernel.
+What the checks cannot show: that protected memory was wiped before it was given back, that
+nothing of a password is left after Argon2, and what a real core dump holds. The layer that
+steps outside the language's safety rules is examined by reading and by those kernel checks;
+the tool that checks Rust code for undefined behaviour cannot run it, because that layer calls
+the kernel.
 
 ## 6. Where krypto ends
 

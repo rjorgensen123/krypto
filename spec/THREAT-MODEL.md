@@ -149,9 +149,10 @@ What remains with the caller:
 What is not covered: copies the caller makes; in Python, the interpreter's copies; registers
 and suspend-to-disk images; a forked child, whose copies of locked pages are not locked; the
 ordinary memory secrets pass through during an operation; text decoded from hex or base64; and
-the password function's working memory, 64 to 320 MiB of ordinary memory that is not locked,
-not kept out of dumps and not wiped when released, from which an image helps recover the
-password or the derived key.
+the password function's working memory, 64 to 320 MiB of ordinary memory that is not locked
+and not kept out of dumps. It is wiped before release when a key is derived from a password,
+and not when a password is hashed or checked; an image taken during a call, or of the released
+memory after hashing or checking, helps recover the password or the derived key.
 
 **The hardening steps leave things open** (SPEC-memory): a later change of user or group id
 undoes the mark that turning off dumps sets, and crash handlers inside the process are not
@@ -218,6 +219,8 @@ work in ordinary memory.
   of a password beside data sealed under a key from it.
 - The hardening steps, early and in order, before a store is opened, and the privilege to
   change the root given up after leaving the file system.
+- On Linux, the kernel setting that wipes memory when it is released (`init_on_free=1`):
+  krypto recommends it and cannot set it (SPEC-memory).
 - What section 4.7 leaves open; logging; access control.
 
 ## 6. Assumptions
@@ -248,7 +251,8 @@ work in ordinary memory.
 - **Nothing hides that data exists,** how much there is, what entries are called, or which
   changed between two copies. **Freshness is the caller's:** krypto authenticates what was
   written, not when.
-- **The password function's working memory is unprotected** (section 4.4).
+- **The password function's working memory is wiped only in part** (section 4.4): after
+  deriving a key, not after hashing or checking a password.
 - **Random bytes can come from the wrong place.** Where the kernel's call is unavailable,
   krypto reads the random device through a descriptor it keeps; a program that closes
   inherited descriptors afterwards can leave that descriptor pointing at something else

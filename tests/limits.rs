@@ -179,6 +179,80 @@ fn a_result_that_cannot_be_reserved_gives_hardening() {
     );
 }
 
+/// (0.9.0) When Argon2's working memory cannot be had, `password::derive_key`
+/// answers `Hardening`, with a message that carries only the size. Shown the
+/// same way as above: a forked child whose data size is capped just above
+/// what it already uses, so the 64 MiB of `Preset::Interactive` cannot be
+/// reserved.
+#[cfg(all(target_os = "linux", not(miri)))]
+#[test]
+fn working_memory_that_cannot_be_reserved_gives_hardening() {
+    use krypto::password::{self, Preset};
+    use krypto::SecretString;
+
+    const MIB: usize = 1024 * 1024;
+    // Built in the parent: the child only has to reserve the working memory.
+    let pw = SecretString::from_string("example-password".to_string()).unwrap();
+
+    // One field of /proc/self/statm, in bytes: field 0 is the address space,
+    // field 5 the data and stack.
+    fn statm(field: usize) -> usize {
+        let statm = std::fs::read_to_string("/proc/self/statm").unwrap();
+        let pages: usize = statm
+            .split_whitespace()
+            .nth(field)
+            .unwrap()
+            .parse()
+            .unwrap();
+        // SAFETY: sysconf takes no pointer.
+        pages * unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize
+    }
+    if statm(0) > 1 << 40 {
+        eprintln!("skipped: under a sanitizer the allocator aborts where it would fail");
+        return;
+    }
+
+    // SAFETY: fork(); the child only calls setrlimit and the function under
+    // test, and leaves with _exit. glibc's atfork handlers make its
+    // allocations safe.
+    let code = unsafe {
+        match libc::fork() {
+            -1 => panic!("fork failed"),
+            0 => {
+                let mut lim = libc::rlimit {
+                    rlim_cur: 0,
+                    rlim_max: 0,
+                };
+                if libc::getrlimit(libc::RLIMIT_DATA, &mut lim) != 0 {
+                    libc::_exit(2);
+                }
+                // Measured in the child, so what other tests of this binary
+                // take while it forks does not count.
+                lim.rlim_cur = (statm(5) + 4 * MIB) as libc::rlim_t;
+                if libc::setrlimit(libc::RLIMIT_DATA, &lim) != 0 {
+                    libc::_exit(2);
+                }
+                let hardening = matches!(
+                    password::derive_key(&pw, b"example-salt-016", Preset::Interactive),
+                    Err(Error::Hardening(m))
+                        if m == "cannot allocate 67108864 bytes for argon2 working memory"
+                );
+                libc::_exit(if hardening { 0 } else { 10 })
+            }
+            pid => {
+                let mut status = 0;
+                assert_eq!(libc::waitpid(pid, &mut status, 0), pid);
+                assert!(libc::WIFEXITED(status), "child did not exit normally");
+                libc::WEXITSTATUS(status)
+            }
+        }
+    };
+    assert_eq!(
+        code, 0,
+        "2 = the limit could not be set; 10 = derive_key did not give Hardening for its working memory"
+    );
+}
+
 /// (0.9.0) `seal` and `seal_with_aad` refuse a plaintext over
 /// `MAX_DATA_BYTES` themselves. The plaintext is a `SecretBuf`, and
 /// `from_vec` already refuses that much, so it is made with the caller's own
