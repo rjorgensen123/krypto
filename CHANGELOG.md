@@ -227,6 +227,12 @@ unchanged: there the Argon2 library holds the working memory and releases it wit
 The documentation says which is which, and recommends the Linux kernel setting
 `init_on_free=1`, which wipes memory when it goes back to the kernel.
 
+### Changed — Miri skips the test of the 64 MiB bound *(2026-11-18)*
+
+`content_over_max_data_bytes_gives_format` in `tests/secret.rs` builds two buffers of 64 MiB.
+Under Miri that cost gigabytes of memory and a long run, and showed nothing a small buffer does
+not. Miri no longer runs the test; the other CI jobs run it as before.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*

@@ -42,6 +42,9 @@ fn empty_buffer() {
 
 /// The content is bounded (0.9.0): one byte over `MAX_DATA_BYTES` is `Format`,
 /// refused before any memory is locked, so the test needs no locked memory.
+/// Not run under Miri: two 64 MiB buffers, wiped byte by byte in an
+/// interpreter, cost gigabytes and show it nothing a small buffer does not.
+#[cfg(not(miri))]
 #[test]
 fn content_over_max_data_bytes_gives_format() {
     assert!(matches!(
