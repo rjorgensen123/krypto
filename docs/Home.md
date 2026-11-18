@@ -35,7 +35,7 @@ The curiosity behind it comes from work on data-plane confidentiality — see
 | **Encrypt something for storage** | and detect with certainty if anyone changed it |
 | **Make many keys out of one** | one key per purpose, without storing several |
 | **A small encrypted store on disk** | secrets under names, like a keyring |
-| **Store and check passwords** | without the timing giving anything away |
+| **Store and check passwords** | the check takes as long whether the password is right or wrong |
 | **Unlock data with a password** | the key is derived, and no password hash is stored beside the data; the encrypted data itself can still be used to test guesses |
 | **Put a seal on something** | so it can be proven unchanged afterwards |
 | **Sign and verify** | Ed25519 and ECDSA P-256 — prove a message came from you |
@@ -49,8 +49,9 @@ same names, running the same Rust code inside, so what one seals, the other open
 
 **[How to use krypto](Usage.md)** shows how each of them is done, with examples in Rust, and
 **[from Python](Python.md)** the same with Python code. **[API](API.md)** is the reference over
-every type and function, for both. The file format of `SecretStore` has its own specification,
-[`spec/SPEC-secretstore.md`](../spec/SPEC-secretstore.md).
+every type and function, for both. The design has its own specification in
+[`spec/`](../spec/README.md): what krypto is and why it is built as it is, the threat model, and
+the stored formats.
 
 ## What it does not do
 
@@ -63,6 +64,12 @@ Just as important as what it can:
   allowed to do what is your program's job.
 - **It does not decide where your master key comes from.** You must provide it — from a file,
   from a password, or from something you unlocked yourself.
+- **It does not log, alarm or count attempts.** It answers what happened, and no answer carries a
+  secret; what to record, what to alarm on and how often a password may be tried is your
+  program's.
+
+What krypto protects, against whom, and what it leaves to you is in the
+[threat model](../spec/THREAT-MODEL.md).
 
 ## What it is built on
 
@@ -81,13 +88,17 @@ their own variant. Here is what actually runs, with a reference for each:
 | Signatures | Ed25519 | [RFC 8032](https://www.rfc-editor.org/rfc/rfc8032) |
 | Signatures | ECDSA P-256 (SHA-256, deterministic) | [FIPS 186-5](https://csrc.nist.gov/pubs/fips/186-5/final) · [RFC 6979](https://www.rfc-editor.org/rfc/rfc6979) |
 | Key agreement | X25519 | [RFC 7748](https://www.rfc-editor.org/rfc/rfc7748) |
-| Randomness | the operating system's CSPRNG (`getrandom`) | — |
+| Randomness | the operating system's CSPRNG: the `getrandom` system call, or `/dev/urandom` where that call is unavailable or blocked | — |
+
+Why the three ciphers and the key forms were chosen, and how each algorithm is checked against its
+definition, is in [SPEC-krypto](../spec/SPEC-krypto.md) and
+[SPEC-primitives](../spec/SPEC-primitives.md).
 
 **Why three encryption algorithms and not one?**
 
-**AEGIS-256** is the default — fast and modern. **XChaCha20-Poly1305** is there as an exit: should
-the analysis of the default ever turn, you can switch without converting data, because they share a
-format. **AES-256-GCM** exists to talk to systems that require exactly that one.
+**AEGIS-256** is the first choice — fast and modern. **XChaCha20-Poly1305** is there as an exit:
+should the analysis of AEGIS-256 ever turn, you can switch without converting data, because they
+share a format. **AES-256-GCM** exists to talk to systems that require exactly that one.
 
 Encrypted data says for itself which algorithm was used, so the reader does not need to know in
 advance — and a switch does not make old data unreadable.
@@ -110,9 +121,11 @@ on top. If you need both TLS and secret handling, they belong together — but e
 ## Maturity
 
 The format of encrypted data has been the same since early on, but AEGIS-256 blobs from 0.4.4 and
-older do not open in 0.5.0 and newer: 0.5.0 fixed a key and nonce swap in AEGIS-256, and such blobs
-must be encrypted again. From 0.9.0 a new `SecretStore` file is format version 2, which krypto
-before 0.9.0 does not read; version 1 files are read and written as before.
+older do not open in 0.5.0 and newer: 0.5.0 fixed a key and nonce swap in AEGIS-256, and such
+blobs, the entries of store files those versions wrote included, must be encrypted again. From
+0.9.0 a blob larger than 64 MiB plus 86 bytes does not open, also one an earlier krypto sealed, and
+a new `SecretStore` file is format version 2, which krypto before 0.9.0 does not read; version 1
+files are read and written as before.
 
 ## Reviews
 

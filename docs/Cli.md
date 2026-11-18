@@ -25,7 +25,7 @@ krypto-cli bench                                                           # Arg
 | `version` | → the krypto version |
 | `inspect` | a file or dump on stdin → what it is and how it was made, without a key; **[Inspect](Inspect.md)** lists what it recognizes |
 | `keyid --key-file <f>` | → the key id of a master key (hex) |
-| `seal --key-file <f> --context <s> --salt <s> [--alg aegis256\|xchacha20\|aes256gcm]` | plaintext → blob |
+| `seal --key-file <f> --context <s> --salt <s> [--alg aegis256\|xchacha20\|aes256gcm]` | plaintext → blob; `aegis256` when `--alg` is left out |
 | `open --key-file <f> --context <s> --salt <s>` | blob → plaintext |
 | `mac --key-file <f> --context <s> --salt <s>` | data → HMAC-SHA256 (hex) |
 | `sha256` | data → SHA-256 (hex) |
@@ -34,11 +34,11 @@ krypto-cli bench                                                           # Arg
 
 `krypto-cli --help` lists the commands and the exit codes, and `krypto-cli <command> --help`
 explains one command and its flags. Data goes in on stdin and out on stdout, and stdin is bounded
-at 64 MiB. `--context` and `--salt` are the values you would give `derive`. Each command takes only
-its own flags, and hex must be lowercase. *(0.9.0)* `verify` takes `--public` of at most 130
-characters and `--signature` of at most 144, the hex of the largest P-256 public key (65 bytes)
-and signature (72 bytes); a longer one is a wrong call, exit `2`, and the message names the flag
-and the limit.
+at 64 MiB; more is a wrong call, exit `2`. `--context` and `--salt` are the values you would give
+`derive`. Each command takes only its own flags, and hex in a flag must be lowercase. *(0.9.0)*
+`verify` takes `--public` of at most 130 characters and `--signature` of at most 144, the hex of
+the largest P-256 public key (65 bytes) and signature (72 bytes); a longer one is a wrong call,
+exit `2`, and the message names the flag and the limit.
 
 The exit code tells the kinds of failure apart:
 
@@ -46,17 +46,20 @@ The exit code tells the kinds of failure apart:
 |---|---|---|
 | `0` | ok | |
 | `1` | I/O, input the command cannot take (a krypto `Format` error, such as data that is not a blob or a key file that is too short), or an internal error | look at the message |
-| `2` | the call is wrong | fix the call |
+| `2` | the call is wrong: also stdin over 64 MiB, and a value on the command line that krypto refuses, such as an empty `--context`, a `--context` or `--salt` over 1024 bytes, or a `--public` or `--signature` that is not a key or signature of its kind | fix the call |
 | **`3`** | **authentication failure** | **someone tampered with the data, or the context or salt is wrong; for `verify`, the signature does not hold** · *(0.9.0)* a blob cut short of its 54-byte header — `FAFN` magic intact — is `3` too, for `open` (it was `1`) and for `inspect` (it was `0`), and so is a version 2 store file cut short of its 109-byte header, for `inspect` |
 | `4` | the blob names another key generation | find the right key (see `keyid` and `inspect`); a changed key id is `4` too |
 
 `open` compares the key id in the blob with the key's before it opens, so another key generation
 is `4`, not `3`. The key id is not authenticated until the blob is opened, so a blob whose key id
-was changed is `4` too. Messages go to stderr in English, and never carry key material or
-plaintext.
+was changed is `4` too, and so is a blob sealed with any other value in its key id field, such as
+a store entry, which carries the store's key id. Messages go to stderr in English, and never carry
+key material or plaintext.
 
 At start `krypto-cli` hardens its process with `harden_process`. If that fails, it writes a
-warning to stderr and goes on.
+warning to stderr and goes on. It takes none of the other hardening steps, and stands outside
+krypto's promises about memory: an opened plaintext is written through the buffer of stdout, and
+`inspect` reads what it describes, private keys included, into ordinary memory.
 
 Until 0.7.3 the tool had 21 commands, and its exit codes were a contract; the commands that went
 are done with the crate or `krypto-py`.

@@ -9,21 +9,24 @@ krypto-cli inspect < something
 ```
 
 Part 1 is what krypto makes; part 2 is what other tools make. Anything wrapped in PEM or hex is
-unwrapped, and base64 when what it holds is recognized; PEM, hex and base64 are unwrapped at most
-two levels deep, counted together. Below that, a PEM block is told by its label, and read only
-where the label names a format of its own: OpenSSH private keys, SSH signatures, RSA public keys
-and PGP armor. Where the limit stops the unwrapping, the report ends with a `note` that says so
-*(0.8.2)*. What is inside is told, with the wrapping. Anything it cannot place is
-`not recognized`, with its length and whether it looks like text, random bytes or other binary
-data. Random bytes cannot be told apart: encrypted data, compressed data and key material all look
-the same.
+unwrapped, hex in upper or lower case, and base64 when what it holds is recognized; PEM, hex and
+base64 are unwrapped at most two levels deep, counted together. Below that, a PEM block is told by
+its label, and read only where the label names a format of its own: OpenSSH private keys, SSH
+signatures, RSA public keys and PGP armor. Where the limit stops the unwrapping, the report ends
+with a `note` that says so *(0.8.2)*. What is inside is told, with the wrapping. Anything it cannot
+place is `not recognized`, with its length and whether it looks like text, random bytes or other
+binary data. Random bytes cannot be told apart: encrypted data, compressed data and key material
+all look the same.
 
 The exit code is `0` when it has said what something is, also `not recognized`; `3` for a krypto
 blob whose header names a format version or an algorithm krypto does not know, *(0.9.0)* for one
 that starts with `FAFN` but is cut short of its 54-byte header, as for `open`, and *(0.9.0)* for a
 version 2 store file cut short of its 109-byte header; `1` when stdin cannot be read; and `2` when
 stdin is more than 64 MiB. Other changes to a blob still give a report and exit `0`; it takes
-`open`, with the key, to find them.
+`open`, with the key, to find them. A store file of a version krypto does not know, and a version 1
+store file cut short of its 37-byte header, are reported with exit `0`: `SecretStore::open` answers
+`Format` for them, not `Auth`. `inspect` reads a store file with its own reader, not the
+library's.
 
 The report shows only printable ASCII. Any other character, such as a control character or a letter
 outside ASCII in a label or a name taken from the input, is left out, and the line ends with how
@@ -41,7 +44,8 @@ the private keys in them are made only for the tests, protect nothing and must n
 ## Part 1: what krypto makes
 
 Tested, against what the crate makes: the krypto blob, the store file and the password hash. The
-ECDSA P-256 private key is tested with a key made by `openssl`.
+ECDSA P-256 private key is tested with a key made by `openssl`. The blob and the store file are
+specified in [SPEC-blob](../spec/SPEC-blob.md) and [SPEC-secretstore](../spec/SPEC-secretstore.md).
 
 | Format | Recognized by | What `inspect` tells |
 |---|---|---|

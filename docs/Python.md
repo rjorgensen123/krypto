@@ -200,14 +200,14 @@ adds, name version 2. `upgrade` verifies every entry first (any failure leaves t
 and the handle is consumed all the same) and rewrites the file as v2 in one atomic write — the
 values are re-wrapped, not re-encrypted. For rollback detection, keep the store's `key_id()` and
 `counter()` outside the file after each write; when you open it, pass that counter to
-`open_with_min_counter` and check that `key_id()` is the one you kept. `RollbackError` means an
-older copy of the file may have been put back. A rotation or an upgrade starts the counter at 0;
-start your anchor again from there. With an anchor above 0, a missing file raises `IoError` and
-nothing is created. Without an anchor, no freshness check runs — the key check and the MAC always
-do on a v2 file. At its maximum the counter does not wrap: `put` and `delete` raise
-`HardeningError` and write nothing, and the store must be rotated. `key_id_from_file` reads the
-header only, without the master key: `IoError` if the file cannot be opened, `FormatError` if it is
-not a store file.
+`open_with_min_counter` and check that `key_id()` is the one you kept, since the anchored open
+compares only the counter. `RollbackError` means an older copy of the file may have been put back. A
+rotation or an upgrade starts the counter at 0; start your anchor again from there. With an anchor
+above 0, a missing file raises `IoError` and nothing is created. Without an anchor, no freshness
+check runs — the key check and the MAC always do on a v2 file. At its maximum the counter does not
+wrap: `put` and `delete` raise `HardeningError` and write nothing, and the store must be rotated.
+`key_id_from_file` reads the header only, without the master key: `IoError` if the file cannot be
+opened, `FormatError` if it is not a store file.
 
 As in Rust, on a v1 file the store protects its contents and not the file as a whole, and `open`
 does not check the master key: a wrong one raises `AuthError` from `get`.
@@ -231,13 +231,15 @@ key = password.derive_key(attempt, salt, Preset.High)
 master = krypto.MasterKey.from_bytes(key)
 ```
 
-The three functions let other Python threads run while Argon2 works. The two jobs, and the presets:
+The three functions let other Python threads run while Argon2 works, so threads that run them at
+once each take Argon2's memory, 64 to 320 MiB per call. The two jobs, and the presets:
 [Passwords](Usage.md#passwords).
 
-*(0.8.2)* `password.verify` accepts only what krypto makes or can make: Argon2id, version 19, with
-parameters within the range in [Passwords](Usage.md#passwords), and associated data if the string
-carries it. Any other stored string, such as an Argon2i hash from another tool or one made with a
-secret key (`keyid=`), raises `FormatError`, before Argon2 runs.
+*(0.8.2)* `password.verify` accepts Argon2id, version 19, with parameters within the range in
+[Passwords](Usage.md#passwords), and associated data if the string carries it; within that it takes
+somewhat more than krypto writes, as [API](API.md#password--passwords) says. Any other stored
+string, such as an Argon2i hash from another tool or one made with a secret key (`keyid=`), raises
+`FormatError`, before Argon2 runs.
 
 `password.derive_key` takes a salt of at least 16 bytes and, *(0.8.2)*, at most 1024; outside that
 it raises `FormatError`.
@@ -331,7 +333,7 @@ Each kind is an exception, all under `krypto.Error`:
 | Rust | Python | What it means for you |
 |---|---|---|
 | `Error::Auth` | `AuthError` | tampering, wrong key, wrong password; at the open of a v2 store, a file that is not what was written — **alert on it** |
-| `Error::WrongKey` | `WrongKeyError` | the key does not fit: for a blob, another key generation, so find the right key; at the open of a v2 store, a master key that does not fit the file |
+| `Error::WrongKey` | `WrongKeyError` | the key does not fit: krypto raises it only at the open of a v2 store whose master key does not fit the file; a blob under another key generation raises `AuthError` from `open`, so read `blob_key_id` first and pick the key |
 | `Error::Format` | `FormatError` | the input has the wrong shape, such as a file that is not a store file or a store of another version than the open names |
 | `Error::KeyNotFound` | `KeyNotFoundError` | the name does not exist in the store |
 | `Error::Rollback` *(0.9.0)* | `RollbackError` | `SecretStore.open_with_min_counter`: the file's counter is below your minimum — an older copy may be back; the attributes `file_counter` and `min_counter` hold both |

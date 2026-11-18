@@ -14,7 +14,7 @@ how to use it is in the [README](README.md) and under [`docs/`](docs/Home.md).
 | `krypto-py/` | The Python binding, built from the same code |
 | `tests/` | Integration tests, one file per area, and `tests/fixtures/` with files made once that must still open |
 | `docs/` | `API.md` is the contract; `Usage.md`, `Python.md`, `Cli.md`, `Inspect.md` and `Home.md` explain |
-| `spec/` | Specifications of krypto's own formats |
+| `spec/` | The specification: the design and its reasons, the threat model, and the stored formats |
 | `.gitea/workflows/`, `.github/workflows/` | CI on Gitea and on GitHub, with the same checks in both; the ASan job runs on Gitea only |
 
 ## Fixed design constraints
@@ -56,9 +56,10 @@ logs. Guard: `every_error_says_what_went_wrong_and_nothing_secret`.
 are derived with cannot change, because stored data depends on them. A new need gets a new
 version beside the old one. Guard: `files_made_once_still_open`.
 
-**The specification comes first.** The specifications of krypto's formats are in `spec/`. A change
-to a format that has one is settled there before the code is written. A specification gives
-structure and rules, not names or code.
+**The specification comes first.** The specification is in `spec/`. A change to a stored format,
+or to anything else it settles, is settled there before the code is written. A specification
+gives direction, structure and rules, not names or code: whoever writes the code chooses inside
+that frame.
 
 ## The public surface
 

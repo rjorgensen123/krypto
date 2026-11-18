@@ -189,6 +189,27 @@ One test holds a secret of 64 MiB in locked memory, to show that `seal` refuses 
 the limit. `cargo test` needs a locked-memory limit of 65 MiB or more; it was 22 MiB. The README
 says so.
 
+### Added — a specification of krypto in `spec/` *(2026-11-18)*
+
+`spec/` holds a specification of krypto as a whole, written as explanatory text without code:
+what krypto is and why it is built as it is (`SPEC-krypto.md`), the threat model
+(`THREAT-MODEL.md`), secrets in memory and hardening (`SPEC-memory.md`), keys and passwords
+(`SPEC-keys.md`), the sealed blob (`SPEC-blob.md`), signatures, key agreement, encodings and
+random bytes (`SPEC-primitives.md`), the answers and the limits (`SPEC-answers.md`), and the
+three ways in (`SPEC-interfaces.md`). `spec/README.md` is the entry. The new documents are
+drafts; `SPEC-secretstore.md` is unchanged. The README, `docs/Home.md` and `DEVELOPMENT.md`
+point to the specification.
+
+### Changed — the documentation follows the specification and the code *(2026-11-18)*
+
+`docs/` is checked against the specification and the code. It points to `spec/` for the design,
+the threat model and the stored formats. Corrected: what `password::verify` accepts; that three
+of the hardening calls fail outside Linux, not two; where random bytes come from after
+`drop_filesystem`; that the library has no default cipher. Added: where a secret is while an
+operation runs, and that Argon2's working memory is not protected; what an anchored open does
+and does not compare; what a writer of stored data can make krypto answer; what signatures and
+key agreement leave to the caller.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*

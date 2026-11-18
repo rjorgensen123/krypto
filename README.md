@@ -34,9 +34,10 @@ own is implemented**.
   checks that it names the root exports, the functions, constants and types of the public modules,
   and the methods of `SecretStore` (names only) · the test tool `krypto-cli`
   [`docs/Cli.md`](docs/Cli.md), where the same test checks that every command is named, and what
-  its `inspect` recognizes [`docs/Inspect.md`](docs/Inspect.md) · the `SecretStore` file format
-  [`spec/SPEC-secretstore.md`](spec/SPEC-secretstore.md) · how the code is laid out and the rules a
-  change follows [`DEVELOPMENT.md`](DEVELOPMENT.md)
+  its `inspect` recognizes [`docs/Inspect.md`](docs/Inspect.md) · how the code is laid out and the
+  rules a change follows [`DEVELOPMENT.md`](DEVELOPMENT.md)
+- **Specification:** [`spec/`](spec/README.md) — what krypto is and why it is built as it is, the
+  threat model, and its stored formats, written to be read without the code
 - **Changes:** [`CHANGELOG.md`](CHANGELOG.md) · **Version:** see [`VERSION`](VERSION)
   (kept in lockstep with `Cargo.toml` by `tests/version.rs`)
 
