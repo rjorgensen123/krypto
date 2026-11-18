@@ -230,7 +230,7 @@ fn primitive_seal(
             // including 0.4.4 these were SWAPPED — both are &[u8; 32] here, so
             // the compiler could not tell, and roundtrip tests passed because
             // seal and open made the same mistake. Found by the official
-            // draft vectors below; see CHANGELOG [0.5.0].
+            // test vectors below; see CHANGELOG [0.5.0].
             let cipher = Aegis256::<32>::new(key, nonce32);
             let (mut ct, tag) = cipher.encrypt(pt, aad);
             ct.extend_from_slice(&tag);
@@ -340,10 +340,10 @@ mod official_vectors {
         assert!(primitive_open(alg, &key, &nonce, &bad, &ad).is_err());
     }
 
-    /// draft-irtf-cfrg-aegis-aead, AEGIS-256 Test Vector 3 (256-bit tag —
-    /// the tag length this crate uses).
+    /// RFC 10032, Appendix A.3.4: AEGIS-256 Test Vector 3 (256-bit tag — the tag
+    /// length this crate uses).
     #[test]
-    fn aegis256_draft_vector_3() {
+    fn aegis256_rfc10032_vector_3() {
         check(
             Alg::Aegis256,
             "1001000000000000000000000000000000000000000000000000000000000000",
@@ -356,10 +356,10 @@ mod official_vectors {
         );
     }
 
-    /// draft-irtf-cfrg-aegis-aead, AEGIS-256 Test Vector 2 (empty msg and ad —
-    /// the tag alone carries the authentication).
+    /// RFC 10032, Appendix A.3.3: AEGIS-256 Test Vector 2 (empty msg and ad — the
+    /// tag alone carries the authentication).
     #[test]
-    fn aegis256_draft_vector_2_empty() {
+    fn aegis256_rfc10032_vector_2_empty() {
         check(
             Alg::Aegis256,
             "1001000000000000000000000000000000000000000000000000000000000000",
