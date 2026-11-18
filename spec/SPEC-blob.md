@@ -182,8 +182,7 @@ Inside krypto:
 
 Outside krypto:
 
-- RFC 10032 — AEGIS-256; draft-irtf-cfrg-aegis-aead, from which it was published, for its
-  test vectors with a 256-bit tag
+- RFC 10032 — AEGIS-256, and its test vectors with a 256-bit tag (Appendix A.3)
 - draft-irtf-cfrg-xchacha (earlier draft-arciszewski-xchacha), with RFC 8439 for the
   underlying construction — XChaCha20-Poly1305
 - NIST SP 800-38D — AES-256-GCM, and the limit on blobs per key (section 8.3)

@@ -210,6 +210,13 @@ operation runs, and that Argon2's working memory is not protected; what an ancho
 and does not compare; what a writer of stored data can make krypto answer; what signatures and
 key agreement leave to the caller.
 
+### Changed — the specification and `docs/Home.md` name RFC 10032 for AEGIS-256 *(2026-11-18)*
+
+Follows the change under 0.8.2. The specification names RFC 10032 as the source of the
+AEGIS-256 test vectors, and `SPEC-secretstore.md` refers to the RFC where it referred to the
+draft. The algorithm table in `docs/Home.md` calls AEGIS-256 the first choice, as the text
+below it does.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*

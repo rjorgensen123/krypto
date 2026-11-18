@@ -137,7 +137,7 @@ This table gives the check each algorithm has; SPEC-krypto says how correctness 
 
 | What | Published test vectors | Independent implementation |
 |---|---|---|
-| AEGIS-256 | those of draft-irtf-cfrg-aegis-aead, from which RFC 10032 was published | none |
+| AEGIS-256 | those of RFC 10032 | none |
 | XChaCha20-Poly1305 | those of draft-irtf-cfrg-xchacha (earlier draft-arciszewski-xchacha) | none |
 | AES-256-GCM | a NIST vector | blobs, both ways, with and without associated data |
 | HKDF, HMAC-SHA256, the master key's id | none | compared |
@@ -164,7 +164,7 @@ Outside krypto:
 - FIPS 186-5 — ECDSA; RFC 6979 — deterministic signing; RFC 5208 — PKCS#8; SEC 1 — the
   encoding of a point
 - FIPS 180-4 — SHA-256; RFC 2104 — HMAC; RFC 5869 — HKDF; RFC 4648 — base64 and hex
-- RFC 10032, and draft-irtf-cfrg-aegis-aead for its test vectors — AEGIS-256
+- RFC 10032 — AEGIS-256
 - draft-irtf-cfrg-xchacha (earlier draft-arciszewski-xchacha), with RFC 8439 for the
   underlying construction — XChaCha20-Poly1305
 - The Linux manual pages `getrandom(2)` and `random(4)`

@@ -218,7 +218,7 @@ Outside krypto:
 - RFC 5869 — HKDF
 - RFC 2104 — HMAC
 - FIPS 180-4 — SHA-256
-- draft-irtf-cfrg-aegis-aead — AEGIS-256, the algorithm the entry blobs are sealed with
+- RFC 10032 — AEGIS-256, the algorithm the entry blobs are sealed with
 
 ## 10. Revision history
 

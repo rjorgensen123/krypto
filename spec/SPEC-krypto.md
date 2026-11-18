@@ -236,7 +236,7 @@ Inside krypto: `spec/README.md`, and the documents named in section 7.
 
 Outside krypto:
 
-- RFC 10032 — AEGIS-256, published from draft-irtf-cfrg-aegis-aead, whose test vectors are used
+- RFC 10032 — AEGIS-256, whose test vectors are used
 - draft-irtf-cfrg-xchacha (earlier draft-arciszewski-xchacha), with RFC 8439 for the
   underlying construction — XChaCha20-Poly1305
 - NIST SP 800-38D — AES-256-GCM
