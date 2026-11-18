@@ -1,10 +1,9 @@
-# API — reference (v0.7.0)
+# API — reference (v0.8.2)
 
-**The version is a floor: v0.7.0 is the LOWEST krypto this contract describes.** Every krypto from
-0.7.0 onwards has what is written here. 0.7.0 is the first release on crates.io, so the contract
-starts there. The number is raised only when the public surface itself changes — to the crate
-version at that moment. Each part also carries the version it applies from, as *(x.y.z)*, so a part
-can be added, changed or phased out on its own timeline.
+**The version is a floor: v0.8.2 is the LOWEST krypto this contract describes.** Every krypto from
+0.8.2 onwards has what is written here. The number is raised only when the public surface itself
+changes — to the crate version at that moment. Each part also carries the version it applies from,
+as *(x.y.z)*, so a part can be added, changed or phased out on its own timeline.
 
 Every public type and function in `krypto`.
 
@@ -17,9 +16,15 @@ Everything that can fail returns `Result<_, Error>`. The crate does not panic on
 **This document is the contract** — precise enough to reimplement the crate from, and it ships
 with the module. Two normative rules bind whoever *changes* the surface:
 
-- **Verify input and output.** All input is validated (type, length, range, character set —
+- **Verify input and output.** Input is validated (type, length, range, character set —
   fail-closed; unknown values are rejected, not ignored), and output never carries secrets or
-  unexpected structure. An uncovered case → update this document.
+  unexpected structure. Not every input has an upper bound on its length: there is none on the
+  plaintext of `seal`, a blob given to `open`, `reseal` or `blob_key_id`, the data of
+  `hmac_sha256` and `sha256`, what `ct_eq` compares, the content of `SecretBuf::from_vec` and
+  `SecretString::from_string`, the message of the sign and verify functions, what `hex` and
+  `base64` encode and decode, the password of the `password` functions, and the name or prefix
+  given to `SecretStore::get`, `contains`, `delete` and `list`. An uncovered case → update this
+  document.
 - **The feedback contract.** What the crate answers — success, errors and status — lives HERE: the
   library through `Result` and [`Error`](#error--error) (the crate never logs — logging belongs to
   the consumer), *(0.8.0)* Python through the same values and one exception per `Error` variant. No
@@ -148,6 +153,9 @@ and key exchange are not covered by the overwrite.
 The root key. Comes from outside — the crate does not create it.
 
 ```rust
+pub const MAX_MASTER_KEY_BYTES: usize = 4096;
+pub const MAX_DERIVE_INPUT_BYTES: usize = 1024;   // 0.7.0
+
 impl MasterKey {
     pub fn from_secret_file(path: impl AsRef<Path>) -> Result<Self, Error>;
     pub fn from_bytes(key: SecretBuf) -> Result<Self, Error>;   // consumes the buffer
@@ -162,11 +170,12 @@ empty `info` is rejected** — it IS the purpose separation — with `Format` *(
 `Hardening`)*. An empty `salt` is allowed, as RFC 5869
 permits. Both `info` and `salt` are capped
 *(0.7.0)* at
-`MAX_DERIVE_INPUT_BYTES` (1024); they reach the API from command lines and config files, and the
-longest real one is the store's prefix plus a key name — 16 + 512 bytes.
+`MAX_DERIVE_INPUT_BYTES` (1024), and a longer one is `Format`; they reach the API from command
+lines and config files, and the longest real one is the store's prefix plus a key name — 16 + 512
+bytes.
 
 The key must be 32..=`MAX_MASTER_KEY_BYTES` (4096) bytes, on **both** ways in *(0.7.0: the cap
-was only on `from_secret_file` before)*; file reads are
+was only on `from_secret_file` before)*; a shorter or longer key is `Format`. File reads are
 bounded (never OOM).
 `from_bytes` **consumes** the buffer (the key cannot be read back out) and is the path for a
 key that must never touch disk.
@@ -177,7 +186,7 @@ publish. HMAC-SHA256 over `key-id`, keyed with the key `derive` gives for the co
 
 ### `DerivedKey`
 
-A working key. Opaque — no public methods. Used by `seal`, `open` and `hmac_sha256`.
+A working key. Opaque — no public methods. Used by `seal`, `open`, `reseal` and `hmac_sha256`.
 
 ### `hmac_sha256`
 
@@ -194,7 +203,7 @@ pub enum Alg { Aegis256, XChaCha20Poly1305, Aes256Gcm }   // #[non_exhaustive]
 
 pub fn seal(key: &DerivedKey, key_id: &[u8; 16], plaintext: &SecretBuf, alg: Alg)
     -> Result<Vec<u8>, Error>;
-pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error>;   // any change past FAFN: Auth (0.7.3)
+pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error>;   // under 54 bytes or no FAFN: Format; any other change: Auth (0.7.3)
 pub fn blob_key_id(blob: &[u8]) -> Result<[u8; 16], Error>;   // unknown version or alg: Auth (0.7.3)
 pub fn reseal(old: &DerivedKey, new: &DerivedKey, new_key_id: &[u8; 16], blob: &[u8])
     -> Result<Vec<u8>, Error>;   // 0.6.0 — key rotation; reads the header as open (0.7.3)
@@ -229,9 +238,11 @@ magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciph
 - `alg_id`: 1 = AEGIS-256 (256-bit tag) · 2 = XChaCha20-Poly1305 · 3 = AES-256-GCM.
 - **The AAD contract (absolute):** the whole header up to and including the nonce (**54 bytes**)
   is associated data — the "key-id swap test": a changed header never yields a mis-decrypt.
-  *(0.7.3)* A changed version, alg_id, key_id or nonce, or a body cut short, yields `Auth`, in
-  `open`, `reseal` and `blob_key_id` alike; data too short for a header or without the `FAFN`
-  magic yields `Format`.
+  *(0.7.3)* A changed version, alg_id, key_id or nonce, or a body cut short, yields `Auth` in
+  `open` and `reseal`. `blob_key_id` reads only the header: a version or alg_id krypto does not
+  know yields `Auth` there too, but a changed key_id is returned as it stands, and an alg_id
+  changed to another one krypto knows, a changed nonce or a body cut short is not noticed. In all
+  three, data too short for a header or without the `FAFN` magic yields `Format`.
 - The nonce is random per blob from the OS CSPRNG. The 32-byte field is used partially:
   AEGIS-256 all 32, XChaCha 24, AES-GCM 12 — the rest zero.
 - *(0.7.2)* **AES-256-GCM: at most 2³² blobs per key.** With a 12-byte random nonce, NIST SP 800-38D
@@ -249,6 +260,7 @@ magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciph
 ## `SecretStore` — encrypted store on file
 
 ```rust
+pub const MAX_STORE_BYTES: usize = 16 * 1024 * 1024;
 pub struct SecretStore<'a>;   // borrows &MasterKey for its lifetime
 
 impl<'a> SecretStore<'a> {
@@ -281,6 +293,28 @@ Name rules: non-empty, ≤ 512 bytes, printable ASCII only (`[\x20-\x7e]`) — n
 addresses, not secrets, and get listed out. Checked on read as well as on write
 *(0.7.0)*: a store file need not have come from `put`.
 
+**The file.** A 37-byte header, then the entries, written sorted by name:
+
+```text
+magic "FST1" (4) | version (1) = 1 | salt (16) | key_id (16) | entries
+entry: name_len (u16 LE) | name | blob_len (u32 LE) | blob
+```
+
+Each blob is a FAFN blob, sealed with `Alg::Aegis256` under the entry's key (derived with the
+store's salt) and carrying the store's `key_id`: 16 random bytes made when the store is created
+and again at `rotate`, not `MasterKey::key_id`.
+
+`open` on a path where there is no file creates an empty store and writes it. On a file it gives
+`Format` when the file is larger than `MAX_STORE_BYTES` or shorter than the 37-byte header, when
+the magic is not `FST1` or the version not 1, when an entry runs past the end of the file, when a
+name is not UTF-8 or breaks the name rules, and when a name occurs twice. `open` does not look at
+the blobs: an entry that is not a krypto blob, shorter than its header or without the `FAFN`
+magic, gives `Format` from `get`. `get`, `contains`, `delete` and `list` do not check the name or
+prefix they are given; a name that breaks the rules is never in the store, so `get` gives
+`KeyNotFound` for it, `contains` `false` and `delete` `Ok`. `delete` of a name that is not in the
+store returns `Ok` and writes nothing. `list` returns the names that start with the prefix,
+sorted.
+
 *(0.8.2)* **A write that fails.** The directory is opened before the rename, so a directory that
 cannot be opened fails the write while the old file still stands. A write that fails before the
 rename leaves the file as it was, and `put` and `delete` leave the handle as it was. If only the
@@ -308,8 +342,11 @@ exclusive lock for as long as the handle lives, and a second `open` of the same 
 same path, in this or another process, fails at once with `Error::Io` (`WouldBlock`). You can rely
 on that guard, or keep to one handle in your own code as well — your choice. The lock is the
 kernel's (`flock`) on an empty `.<name>.lock` beside the path given to `open`: it goes with the
-handle or the process, also after a crash, so it never goes stale. The same file opened through
-another name, such as a link, takes another lock. *(0.8.2)* A symbolic link at the lock file's
+handle or the process, also after a crash, so it never goes stale. If the path has no file name,
+or its file name is not valid UTF-8, the lock file is `.store.lock`, the same as for a store named
+`store` in that directory. The same file opened through another name, such as a link, takes
+another lock. If the lock file is replaced or removed each time right after `open` has locked it,
+`open` gives up after three tries with `Error::Io`. *(0.8.2)* A symbolic link at the lock file's
 name is not followed, and something there that is not a regular file, such as a FIFO, is not used
 as the lock: `open` fails with `Error::Io` either way, and a FIFO there does not make it wait.
 `open` goes ahead without a lock only on a read-only file system, or when there is no lock file and
@@ -354,16 +391,24 @@ pub fn derive_key(password: &SecretString, salt: &[u8], preset: Preset)
 - `verify` is constant-time. `Auth` means the password does not match: a **wrong password**, or a
   PHC string that can be read but was cut short or altered. `Format` means the PHC string cannot
   be read or is foreign. Do not merge them.
-- *(0.8.2)* `verify` accepts only what krypto makes or can make: **Argon2id, version 19** with the
-  `v=19` field present, and parameters between the floor and a ceiling a little above `High`:
+- `hash` gives a PHC string for Argon2id, version 19 (`v=19`), with the preset's parameters, a
+  random salt of 16 bytes and a hash of 32 bytes.
+- *(0.8.2)* `verify` accepts **Argon2id, version 19** with the `v=19` field present, and
+  parameters between the floor and a ceiling a little above `High`:
   `65 536 ≤ m ≤ 327 680` KiB (64–320 MiB), `2 ≤ t ≤ 5`, `1 ≤ p ≤ 5`. The ceiling is `High` plus a
-  margin (m + 25 %, t + 1, p + 1) and moves with it. Associated data (`data=`) is accepted and
-  used. Anything else — Argon2i, Argon2d, version 16, a string without `v=`, a `keyid` (it names a
-  secret key krypto does not have), parameters outside the range — is `Format`, refused before
-  Argon2 runs, so a stored string cannot make one call use more memory or time than that.
+  margin (m + 25 %, t + 1, p + 1) and moves with it. That is wider than what krypto writes: the
+  parameters may come in any order, a string that leaves out `t` or `p` is read with Argon2's
+  defaults (`t=2`, `p=1`), the salt may be 8 to 48 bytes and the hash 10 to 64 bytes, and the
+  length of the stored hash is the length of the output compared. Associated data (`data=`) of up
+  to 32 bytes is accepted and used; krypto never writes it. Argon2i, Argon2d, version 16, a string
+  without `v=`, a `keyid` (it names a secret key krypto does not have) and parameters outside the
+  range are `Format`, refused before Argon2 runs, so a stored string cannot make one call use more
+  memory or time than that.
+- When Argon2 itself fails, also when it cannot get its working memory, `hash` answers
+  `Hardening`, and `verify` and `derive_key` answer `Format`.
 - `derive_key` requires a salt of **at least 16 bytes** and, *(0.8.2)*, at most
-  `MAX_DERIVE_INPUT_BYTES` (1024); a longer salt is `Format`. The salt is not secret and is stored
-  in plaintext next to the encrypted data.
+  `MAX_DERIVE_INPUT_BYTES` (1024); a shorter or longer salt is `Format`. The key it gives is 32
+  bytes. The salt is not secret and is stored in plaintext next to the encrypted data.
 
 > **Never store a verification hash next to the ciphertext.** If the password is wrong, the open
 > fails by itself. A stored hash would additionally hand an attacker with the disk a separate
@@ -391,8 +436,8 @@ parameter-dependent** — a preset adjustment changes the key it yields.
 
 Ed25519 with **raw** keys (32-byte seed/public, 64-byte signature) and ECDSA P-256 with a
 **PKCS#8** private key, a **SEC1** public point (65 bytes, leading `0x04`; verification also takes
-the compressed form, 33 bytes) and an **ASN.1 DER** signature over SHA-256 — the same wire form as
-`ring`'s `ECDSA_P256_SHA256_ASN1`.
+the 33-byte forms: compressed, leading `0x02` or `0x03`, and compact, leading `0x05`) and an
+**ASN.1 DER** signature over SHA-256 — the same wire form as `ring`'s `ECDSA_P256_SHA256_ASN1`.
 
 ```rust
 pub const ED25519_SEED_LEN: usize = 32;
@@ -411,19 +456,28 @@ pub fn ecdsa_p256_sign(pkcs8: &SecretBuf, message: &[u8]) -> Result<Vec<u8>, Err
 pub fn ecdsa_p256_verify(public_sec1: &[u8], message: &[u8], sig_der: &[u8]) -> Result<(), Error>;
 ```
 
-A signature that does not hold → `Auth`. Malformed key/signature → `Format`. Signing is RFC 6979
-deterministic; the verifier also accepts randomized signatures (same wire form). Tested against
-RFC 8032 (TEST 1+2) and RFC 6979 A.2.5.
+A signature that does not hold → `Auth`. For Ed25519, a public key that is not 32 bytes or not a
+point on the curve, and a signature that is not 64 bytes, are `Format`; in a signature of 64 bytes,
+an S that is not below the group order or an R that is not the canonical encoding of a point is
+`Auth` (see below). For P-256, a public key is `Format` unless it is a point on the curve other than
+the identity, given as 65 bytes starting with `0x04` or as 33 bytes starting with `0x02`, `0x03` or
+`0x05`; and a signature is `Format` unless it is ASN.1 DER of two integers r and s, each from 1 to
+below the group order. Signing is RFC 6979 deterministic; the verifier also accepts randomized
+signatures (same wire form). Tested against RFC 8032 (TEST 1+2) and RFC 6979 A.2.5.
 
 *(0.8.2; up to 0.8.1, `ed25519_verify` was what `ed25519_verify_relaxed` is now)* **Two Ed25519
 verifiers.** `ed25519_verify` is strict: a public key of small order (a *weak* key) or an R of
 small order in the signature → `Auth`, and a public key that is not the canonical 32-byte encoding
 of its point → `Format`. So `Ok` means the signature was made with the private key that belongs to
-that public key. `ed25519_verify_relaxed` only checks that the signature equation holds: it does
-not refuse weak keys, an R of small order or non-canonical key encodings, and for a weak key anyone
-can make signatures that hold, without a private key. Use it only where such keys must be
-accepted, never to check who signed with a public key that came from someone else. Keys from
-`ed25519_keypair` and signatures from `ed25519_sign` verify with both.
+that public key. `ed25519_verify_relaxed` checks that the signature equation holds and, as
+`ed25519_verify` does, refuses with `Auth` an S that is not below the group order and an R that is
+not the canonical encoding of a point; it does not refuse weak keys, an R of small order or
+non-canonical key encodings, and for a weak key anyone can make signatures that hold, without a
+private key. Use it only where such keys must be accepted, never to check who signed with a public
+key that came from someone else. Keys from `ed25519_keypair` and signatures from `ed25519_sign`
+verify with both. Both refuse such an S as long as no crate in your build turns on the
+`legacy_compatibility` feature of `ed25519-dalek`; Cargo merges features across a build, and with
+that feature both accept such an S if its top three bits are clear.
 
 ---
 
@@ -440,7 +494,8 @@ pub fn x25519_shared(secret: &SecretBuf, peer_public: &[u8]) -> Result<SecretBuf
 The primitive under sealed envelopes (RFC 7748) — the envelope **format** belongs to the
 consumer. `x25519_shared` rejects a non-contributory result (a low-order peer point) with
 `Auth`, and the result is keying *material*: run it through HKDF (`MasterKey::derive`) before
-use. Tested against RFC 7748 §6.1.
+use. A private key or a peer public key that is not exactly 32 bytes is `Format`, checked before
+the shared secret is computed. Tested against RFC 7748 §6.1.
 
 ---
 
@@ -452,7 +507,9 @@ pub fn decode(s: &str) -> Result<Vec<u8>, Error>;      // fail-closed: [0-9a-f] 
 ```
 
 One canonical form: `decode` rejects UPPERCASE on purpose — two spellings of the same bytes must
-not be able to exist in signed forms and fingerprint comparisons.
+not be able to exist in signed forms and fingerprint comparisons. What `decode` rejects is
+`Format`; *(0.8.2)* the message for an invalid character names neither the character nor where it
+is.
 
 ---
 
@@ -466,8 +523,10 @@ pub fn decode_nopad(s: &str) -> Result<Vec<u8>, Error>;    // fail-closed, rejec
 ```
 
 Same philosophy as `hex`: one spelling — whitespace, wrong padding and non-canonical trailing
-bits are rejected. Keys and signatures on the wire are still HEX; base64 exists only for formats
-that ARE base64 by nature (`SHA256:<base64-no-pad>` fingerprints, PEM).
+bits are rejected. What `decode` and `decode_nopad` reject is `Format`; *(0.8.2)* the message for
+an invalid character names neither the character nor where it is. Keys and signatures on the wire
+are still HEX; base64 exists only for formats that ARE base64 by nature (`SHA256:<base64-no-pad>`
+fingerprints, PEM).
 
 ---
 
@@ -496,28 +555,41 @@ promises but cannot back still fills the memory.
 ## `harden` — process hardening
 
 ```rust
-pub fn harden_process() -> Result<(), Error>;       // core dumps off + non-dumpable
+pub fn harden_process() -> Result<(), Error>;       // core dumps off + non-dumpable (Linux)
 pub fn no_new_privs() -> Result<(), Error>;         // never gain privileges (PR_SET_NO_NEW_PRIVS)
 pub fn close_inherited_fds() -> Result<(), Error>;  // closes EVERYTHING above stderr (close_range, Linux 5.9+)
 pub fn drop_filesystem(dir: impl AsRef<Path>) -> Result<(), Error>; // chroot into an EMPTY dir, the process inside it (0.7.3)
 ```
 
-All of them are **fail-closed**: if the call cannot deliver, you get `Err` — never silent
-degradation. Each step is its own deliberate choice. Recommended order: `harden_process()` and
-`no_new_privs()` first in `main` · `close_inherited_fds()` early, before opening your own files
-(NB: it also kills deliberately inherited sockets, e.g. socket activation — hence a separate
-call) · `drop_filesystem(dir)` **after** key material is read — irreversible, needs privileges
-(root or `CAP_SYS_CHROOT`), and the directory must be empty (verified before the chroot).
-*(0.7.3)* Use a directory only root can write to, such as `/var/empty`. The chroot applies to the
-directory that was checked, and the root changes as the last step, with the process already
-inside; on `Err` the root has not changed and the process stands where it stood, unless stepping
-back out of the directory fails too; then it stays in the directory, and the error says so. After
-the chroot krypto needs no filesystem: randomness comes from the `getrandom` syscall, and
-AEAD/KDF/signing/passwords touch no files.
+On Linux all of them are **fail-closed**: if the call cannot deliver, you get `Err` — never silent
+degradation. On other systems `no_new_privs` and `close_inherited_fds` fail with `Hardening`, and so
+does `drop_filesystem` once it has checked the directory; `harden_process` sets only the core-dump
+limit to zero, failing with `Hardening` if it cannot, and does not make the process non-dumpable.
+Each step is its own deliberate choice. Recommended order: `harden_process()` and `no_new_privs()`
+first in `main` · `close_inherited_fds()` early, before opening your own files (NB: it also kills
+deliberately inherited sockets, e.g. socket activation — hence a separate call) ·
+`drop_filesystem(dir)` **after** key material is read — irreversible, needs privileges (root or
+`CAP_SYS_CHROOT`), and the directory must be empty (verified before the chroot). *(0.7.3)* Use a
+directory only root can write to, such as `/var/empty`. The chroot applies to the directory that was
+checked, and the root changes as the last step, with the process already inside; on `Err` the root
+has not changed and the process stands where it stood, unless stepping back out of the directory
+fails too; then it stays in the directory, and the error says so. A directory that is missing or
+cannot be opened or read is `Io`; one that is not a directory or is not empty, and any failure from
+the step into it up to the change of root, are `Hardening`. After the chroot krypto needs no
+filesystem, with two exceptions. An open `SecretStore` can no longer write its file: writes go by
+path, and the path now resolves inside the new root. And randomness comes from the `getrandom`
+syscall (Linux 3.17 and later), which needs no file; the exception is where that call is unavailable
+or blocked (`ENOSYS`, or `EPERM` from a seccomp filter): there the `getrandom` crate reads
+`/dev/urandom` instead on most Linux targets, x86-64 and AArch64 among them, through a descriptor it
+keeps open, and if it had not opened it before the chroot, random calls fail with `Hardening`. AEAD,
+KDF, signing and passwords touch no files.
 
 `close_inherited_fds` also closes the lock of a
 [`SecretStore`](#secretstore--encrypted-store-on-file) that is already open, after which a second
-`open` of that file succeeds: call it before opening a store.
+`open` of that file succeeds: call it before opening a store. It also closes descriptors that
+libraries hold, among them the `/dev/urandom` descriptor where the `getrandom` crate has fallen
+back to it; later random bytes are then read from whatever is opened next under that number, or
+fail. Call it before anything has asked for random bytes.
 
 Hardening is process-local: it protects the process that calls it. *(0.8.0)* From Python,
 `krypto-py` hardens the Python process with these same functions.
@@ -529,14 +601,15 @@ Hardening is process-local: it protects the process that calls it. *(0.8.0)* Fro
 ```rust
 pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotFound, WrongKey }
 ```
-`#[non_exhaustive]`. Implements `Display`, `std::error::Error` and `From<std::io::Error>`.
+`#[non_exhaustive]`. Implements `Display`, `std::error::Error` (its `source()` is the inner
+`io::Error` for `Io`, and `None` for the others) and `From<std::io::Error>`.
 
 | Variant | Means |
 |---|---|
 | `Io` | file or directory |
-| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening — never a verdict on the data; treated fail-closed *(0.7.3: described as what it covers)* |
+| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening, or an internal step no input can cause — never a verdict on the data; treated fail-closed *(0.7.3: described as what it covers)* |
 | `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob (too short for a header, or not starting with `FAFN`), or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info` |
-| `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, and a key id in a `SecretStore` that does not match |
+| `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change past the `FAFN` magic to a blob that is still at least a header long, and a key id in a `SecretStore` that does not match |
 | `KeyNotFound` | the name does not exist in the store |
 | `WrongKey` | the blob belongs to another key generation — routing, not tampering *(new in 0.5.0)*. *(0.7.3)* No library function returns it: a `SecretStore` holds one generation, so a different key id there is `Auth`. It is the answer for a caller that routes between generations |
 
@@ -586,23 +659,25 @@ How the Rust forms read in Python:
 | `Error::Io`, `Hardening`, `Format`, `Auth`, `KeyNotFound`, `WrongKey` | `IoError`, `HardeningError`, `FormatError`, `AuthError`, `KeyNotFoundError`, `WrongKeyError`, all subclasses of `Error` |
 | `VERSION` | `VERSION`, and the same value as `__version__` |
 | `SecretBuf::len`, `SecretString::len` | `len()`, and also Python's `len(secret)` |
-| `Alg::Aegis256`, `Preset::High`, … | `Alg.Aegis256`, `password.Preset.High`, …; both compare with `==`, though Rust's `Preset` has no `PartialEq` |
+| `Alg::Aegis256`, `Preset::High`, … | `Alg.Aegis256`, `password.Preset.High`, …; both compare with `==`, though Rust's `Preset` has no `PartialEq`. Being simple enums, they also compare equal to an `int`: their position in the declaration (0, 1, 2), which is not the blob's `alg_id`, so code must not rely on it |
 | A value taken by value: `MasterKey::from_bytes(SecretBuf)`, `SecretStore::rotate(self, …)` | The object is consumed, also when the operation itself fails; using it afterwards is a `ValueError`. An argument of the wrong type is rejected with `TypeError` before anything is consumed |
 | `expose(\|b\| …)`, `expose_str(\|s\| …)` | `expose(f)`, `expose_str(f)`: `f` is called with a copy, and what it returns is returned |
 | `SecretStore<'a>` borrows the `MasterKey` | `SecretStore` keeps the `MasterKey` object alive |
+| `Debug` / `Display` of `SecretBuf` and `SecretString`, always redacted | `repr()`, and so printing, shows no secret: `SecretBuf([REDACTED], len=N)`, or `SecretBuf(<consumed>)` once consumed; `SecretString([REDACTED], len=N)`; `MasterKey([REDACTED])`; `DerivedKey([REDACTED])`; `SecretStore` |
 
 ### What is guaranteed, and where Python differs
 
 | | Rust | Python |
 |---|---|---|
-| `SecretBuf`, `SecretString`, `MasterKey`, `DerivedKey`, and in a `SecretStore` the keys and the plaintext it returns | In locked memory, kept out of core dumps, guard pages, wiped on drop; a store's names and sealed blobs are in ordinary memory | The same: the objects hold Rust memory |
+| `SecretBuf`, `SecretString`, `MasterKey`, `DerivedKey`, and in a `SecretStore` the keys and the plaintext it returns | In locked memory, kept out of core dumps on Linux, guard pages, wiped on drop; a store's names and sealed blobs are in ordinary memory | The same: the objects hold Rust memory |
 | What goes in | Moved in, or zeroized by `from_vec` | Copied in. The `bytes` or `str` passed stays as Python keeps it, neither locked nor wiped; a `bytearray` given to `SecretBuf.from_vec` is zeroed, also when the call fails |
 | What comes out | Seen inside the closure, in locked memory | `expose` and `expose_str` hand `f` a Python copy, neither locked nor wiped. `open` and `get` return a `SecretBuf`, so plaintext stays locked until exposed |
 | Locked memory | Counted against `RLIMIT_MEMLOCK` of the process | The same, in the Python process |
 | `fork` | The child's copies of locked pages are not locked | The same |
 | `harden` | Applies to the process | Applies to the Python process; `close_inherited_fds` closes the interpreter's own descriptors too |
-| Long calls | — | `password::hash`, `verify` and `derive_key` release the GIL |
-| A panic inside krypto | Unwinds to the caller | Becomes `pyo3_runtime.PanicException` |
+| The GIL | — | *(0.8.2)* The module declares that it needs the GIL (`gil_used = true`): krypto-py is built and tested only with Python that has the GIL, not on a free-threaded Python |
+| Long calls | — | `password::hash`, `verify` and `derive_key` release the GIL; the salt of `derive_key` must be `bytes` (a `bytearray` or `memoryview` is a `TypeError`), so it cannot change while Argon2 runs |
+| A panic inside krypto | Unwinds to the caller | Becomes `pyo3_runtime.PanicException`, which derives from `BaseException`, so `except Exception` does not catch it |
 
 ---
 

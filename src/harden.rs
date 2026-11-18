@@ -65,9 +65,11 @@ pub fn close_inherited_fds() -> Result<(), Error> {
 /// After this call the process cannot open key files, configuration or
 /// anything else on disk, because kernel-wise they no longer exist: an
 /// attacker with a foothold in the running process finds no key file to
-/// read. krypto itself needs nothing from the filesystem afterwards —
-/// randomness comes from the `getrandom` syscall (not `/dev/urandom`), and
-/// AEAD, KDF, signing and password hashing touch no files.
+/// read. krypto itself needs nothing from the filesystem afterwards:
+/// AEAD, KDF, signing and password hashing touch no files, and randomness
+/// comes from the `getrandom` syscall. Where that syscall is unavailable or
+/// blocked, the `getrandom` crate reads `/dev/urandom` instead, which cannot
+/// be opened after this call unless it was opened before.
 ///
 /// The rules, enforced or fail-closed:
 ///

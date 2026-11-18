@@ -23,7 +23,7 @@ krypto-cli bench                                                           # Arg
 | Command | In → out |
 |---|---|
 | `version` | → the krypto version |
-| `inspect` | a file or dump on stdin → what it is and how it was made, without a key; **[Inspect](Inspect.md)** lists what it recognizes |
+| `inspect` | a file or dump on stdin → what it is and how it was made, without a key; exit 3 for a krypto blob whose header names a format version or an algorithm krypto does not know; **[Inspect](Inspect.md)** lists what it recognizes |
 | `keyid --key-file <f>` | → the key id of a master key (hex) |
 | `seal --key-file <f> --context <s> --salt <s> [--alg aegis256\|xchacha20\|aes256gcm]` | plaintext → blob |
 | `open --key-file <f> --context <s> --salt <s>` | blob → plaintext |
@@ -34,8 +34,8 @@ krypto-cli bench                                                           # Arg
 
 `krypto-cli --help` lists the commands and the exit codes, and `krypto-cli <command> --help`
 explains one command and its flags. Data goes in on stdin and out on stdout, and stdin is bounded
-at 64 MiB. `--context` and `--salt` are the values you would give `derive`. Each command takes only
-its own flags, and hex must be lowercase.
+at 64 MiB; more is exit `2`. `--context` and `--salt` are the values you would give `derive`.
+Each command takes only its own flags, and hex must be lowercase.
 
 The exit code tells the kinds of failure apart:
 
@@ -43,8 +43,8 @@ The exit code tells the kinds of failure apart:
 |---|---|---|
 | `0` | ok | |
 | `1` | I/O, input the command cannot take (a krypto `Format` error, such as data that is not a blob or a key file that is too short), or an internal error | look at the message |
-| `2` | the call is wrong | fix the call |
-| **`3`** | **authentication failure** | **someone tampered with the data, or the context or salt is wrong; for `verify`, the signature does not hold** |
+| `2` | the call is wrong, a value given on the command line is one krypto refuses (`--context`, `--salt`, `--public`, `--signature`), or stdin is more than 64 MiB | fix the call |
+| **`3`** | **authentication failure** | **someone tampered with the data, or the context or salt is wrong; for `verify`, the signature does not hold; for `inspect`, a krypto blob whose header names a format version or an algorithm krypto does not know** |
 | `4` | the blob names another key generation | find the right key (see `keyid` and `inspect`); a changed key id is `4` too |
 
 `open` compares the key id in the blob with the key's before it opens, so another key generation

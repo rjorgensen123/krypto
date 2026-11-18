@@ -22,8 +22,8 @@ And first of all in `main`, before anything else:
 krypto::harden_process()?;
 ```
 
-It disables core dumps and stops other processes without privileges from reading your memory;
-root still can. Call it once, early. It is safe to call again, but there is no reason to.
+It disables core dumps and, on Linux, stops other processes without privileges from reading your
+memory; root still can. Call it once, early. It is safe to call again, but there is no reason to.
 
 If you want to tighten further, there are three more optional steps — each one call, each
 failing hard if it cannot deliver:
@@ -38,11 +38,14 @@ krypto::drop_filesystem("/var/empty")?; // chroot: the disk "disappears" — AFT
 `drop_filesystem` is irreversible, needs privileges, and the directory must be empty; use one only
 root can write to. If it fails, the root is as it was, and so is the working directory, unless
 stepping back out of the directory fails too; then the process stays in it, and the error says so.
-After it krypto needs no filesystem — randomness comes straight from the operating system, not from
-`/dev`. And `close_inherited_fds` also closes sockets you inherited *on purpose* (e.g. socket
-activation) — which is why it is its own choice and not part of `harden_process`. It closes the
-lock of a [store](#a-small-encrypted-store-on-disk) you have already opened too, after which a
-second `open` of that file succeeds, so call it before opening a store.
+After it krypto needs no filesystem, with two exceptions: a store you have open can no longer write
+its file; and where the kernel's `getrandom` call, which randomness normally comes from, is
+unavailable or blocked, krypto reads `/dev/urandom` on most Linux systems, which it cannot open
+after the chroot if it had not opened it before. And `close_inherited_fds` also closes
+sockets you inherited *on purpose* (e.g. socket activation) — which is why it is its own choice
+and not part of `harden_process`. It closes the lock of a [store](#a-small-encrypted-store-on-disk)
+you have already opened too, after which a second `open` of that file succeeds, so call it before
+opening a store.
 
 *In Python: [Getting started](Python.md#getting-started).*
 
@@ -123,8 +126,9 @@ bloated file cannot eat the memory.
 Never use the master key directly. Make a separate key for each thing you protect:
 
 ```rust
-let log_key   = master.derive(b"my-app/log/v1",   &salt)?;
-let store_key = master.derive(b"my-app/store/v1", &salt)?;
+let salt      = b"per-store-salt";
+let log_key   = master.derive(b"my-app/log/v1",   salt)?;
+let store_key = master.derive(b"my-app/store/v1", salt)?;
 ```
 
 The first argument is a **context string you make up yourself**. Krypto does not know what it
@@ -143,14 +147,16 @@ old data.
 ```rust
 use krypto::{seal, open, Alg};
 
+let key_id = master.key_id()?;
 let blob = seal(&log_key, &key_id, &secret, Alg::Aegis256)?;
 // blob is a plain Vec<u8> — store it wherever you like
 
 let back = open(&log_key, &blob)?;   // gives you a SecretBuf
 ```
 
-`key_id` is 16 bytes you choose yourself, carried in the blob in plaintext. It exists so you can
-see **which key generation** a blob belongs to, without opening it:
+`key_id` is 16 bytes carried in the blob in plaintext; here it is the master key's own key id,
+which is safe to publish. It exists so you can see **which key generation** a blob belongs to,
+without opening it:
 
 ```rust
 let id = krypto::blob_key_id(&blob)?;   // which key do I need?
@@ -294,6 +300,7 @@ that.
 ### Give me the key this password unlocks (encryption at rest)
 
 ```rust
+let salt = krypto::random_bytes(16)?;   // made once, stored in the open next to the data
 let key = password::derive_key(&password, &salt, Preset::High)?;
 let master = MasterKey::from_bytes(key)?;
 ```

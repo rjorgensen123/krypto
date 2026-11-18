@@ -195,6 +195,17 @@ AEGIS was published as RFC 10032 in September 2026. `docs/Home.md` and
 AEGIS-256 test vectors are those of RFC 10032, Appendix A.3, with the same
 values as before; their tests and comments say so. No code that runs is changed.
 
+### Changed — the documentation is checked against the code for 0.8.2 *(2026-11-18)*
+
+`docs/` was checked against the code both ways before the release, and corrected where it said
+more or less than the code does. `docs/API.md` now states its version as 0.8.2. It names the
+error each refusal gives, describes the store file format and what `open`, `get`, `delete` and
+`list` do with a name or a file that is not right, says what `blob_key_id` does not notice and
+what `password::verify` accepts, and says what hardening does outside Linux. It lists the inputs
+that have no upper bound on their length. `docs/Cli.md` and `docs/Inspect.md` give the exit codes
+as they are. A comment on `drop_filesystem` said random bytes never come from `/dev/urandom`; it
+now says when they do. No code that runs is changed.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than
