@@ -4,7 +4,12 @@ Every notable change to this crate is recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
-## [0.8.2]
+## [0.8.2] — 2026-11-18
+
+*Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`
+accepts only the hashes krypto makes, `password::derive_key` caps its salt, and the stack is
+overwritten after more operations. `SecretStore` and `krypto-cli inspect` are corrected in
+several places, and the documentation is checked against the code.*
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*
 
