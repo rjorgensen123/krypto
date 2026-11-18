@@ -180,7 +180,11 @@ const KEY_ID_CONTEXT: &[u8] = b"krypto/key-id/v1";
 /// HMAC-SHA256 over `data` with a derived key — an audit chain's MAC, say.
 /// Keyed MAC, not a plain hash, so someone who can edit the data
 /// cannot simply recompute the chain without the key.
+///
+/// `data` is at most [`crate::MAX_DATA_BYTES`]; more is `Error::Format`,
+/// refused before the key is used (0.9.0).
 pub fn hmac_sha256(key: &DerivedKey, data: &[u8]) -> Result<[u8; 32], Error> {
+    crate::util::check_data_len("HMAC data", data.len())?;
     let res = key.with_key(|k| hmac_sha256_raw(k, data));
     crate::secret::scrub_stack::<HMAC_SCRUB_BYTES>();
     res?

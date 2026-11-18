@@ -3,7 +3,7 @@
 
 use argon2::password_hash::PasswordHasher;
 use argon2::{Algorithm, Argon2, AssociatedData, KeyId, Params, ParamsBuilder, Version};
-use krypto::password::{self, Preset};
+use krypto::password::{self, Preset, MAX_PASSWORD_BYTES, MAX_PHC_BYTES};
 use krypto::{Error, SecretString};
 
 #[test]
@@ -231,4 +231,47 @@ fn hash_with_keyid_gives_format() {
     .to_string();
     assert!(phc.contains(",keyid="), "PHC string: {phc}");
     assert_refused(&phc);
+}
+
+/// The password is bounded (0.9.0): `MAX_PASSWORD_BYTES` is taken, one byte
+/// more is `Format` in `hash`, `verify` and `derive_key`, refused before
+/// Argon2 runs (`verify` would otherwise answer `Auth`).
+#[test]
+fn password_over_max_password_bytes_gives_format() {
+    let at_cap = SecretString::from_string("p".repeat(MAX_PASSWORD_BYTES)).unwrap();
+    let over = SecretString::from_string("p".repeat(MAX_PASSWORD_BYTES + 1)).unwrap();
+    let phc = password::hash(&at_cap, Preset::Interactive).unwrap();
+    password::verify(&at_cap, &phc).unwrap();
+    password::derive_key(&at_cap, &[0u8; 16], Preset::Interactive).unwrap();
+
+    assert!(matches!(
+        password::hash(&over, Preset::Interactive),
+        Err(Error::Format(_))
+    ));
+    assert!(matches!(
+        password::verify(&over, &phc),
+        Err(Error::Format(_))
+    ));
+    assert!(matches!(
+        password::derive_key(&over, &[0u8; 16], Preset::Interactive),
+        Err(Error::Format(_))
+    ));
+}
+
+/// The PHC string is bounded (0.9.0): one of `MAX_PHC_BYTES` reaches the
+/// parser, which refuses this one; one byte more is refused before it, with
+/// the limit in the message. No string krypto accepts comes near the limit.
+#[test]
+fn phc_over_max_phc_bytes_gives_format() {
+    let pw = SecretString::from_string("password".to_string()).unwrap();
+    let at_cap = "x".repeat(MAX_PHC_BYTES);
+    let over = "x".repeat(MAX_PHC_BYTES + 1);
+    match password::verify(&pw, &at_cap) {
+        Err(Error::Format(m)) => assert!(m.starts_with("invalid PHC string"), "{m}"),
+        other => panic!("expected the parser's Format, got {other:?}"),
+    }
+    match password::verify(&pw, &over) {
+        Err(Error::Format(m)) => assert!(m.ends_with(&format!("max {MAX_PHC_BYTES}")), "{m}"),
+        other => panic!("expected Format for the length, got {other:?}"),
+    }
 }

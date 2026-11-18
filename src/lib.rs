@@ -54,4 +54,7 @@ pub use kdf::{hmac_sha256, DerivedKey, MasterKey, MAX_DERIVE_INPUT_BYTES, MAX_MA
 pub use secret::{SecretBuf, SecretString};
 pub use store::{SecretStore, MAX_STORE_BYTES};
 // 0.5.0 (§8d.1): the utilities every consumer was rolling on its own.
-pub use util::{ct_eq, random_bytes, random_bytes_with_limit, sha256, MAX_RANDOM_BYTES};
+// 0.9.0: MAX_DATA_BYTES, the shared limit on an amount of data.
+pub use util::{
+    ct_eq, random_bytes, random_bytes_with_limit, sha256, MAX_DATA_BYTES, MAX_RANDOM_BYTES,
+};

@@ -16,10 +16,13 @@ Everything that can fail returns `Result<_, Error>`. The crate does not panic on
 **This document is the contract** — precise enough to reimplement the crate from, and it ships
 with the module. Two normative rules bind whoever *changes* the surface:
 
-- **Verify input and output.** Input is validated (type, range, character set, and length
-  wherever this document states a limit — fail-closed; unknown values are rejected, not ignored),
-  and output never carries secrets or unexpected structure. An uncovered case → update this
-  document.
+- **Verify input and output.** Input is validated (type, range, character set and length —
+  fail-closed; unknown values are rejected, not ignored), and output never carries secrets or
+  unexpected structure. *(0.9.0)* Every input has an upper bound, stated in this document, with
+  these exceptions: `sha256` and `ct_eq`, which cannot fail and reserve no memory; paths, which
+  the operating system bounds (a path it refuses gives `Io`); and `random_bytes_with_limit` and
+  `SecretBuf::random_with_limit`, whose limit is the caller's own. An uncovered case → update
+  this document.
 - **The feedback contract.** What the crate answers — success, errors and status — lives HERE: the
   library through `Result` and [`Error`](#error--error) (the crate never logs — logging belongs to
   the consumer), *(0.8.0)* Python through the same values and one exception per `Error` variant. No
@@ -39,7 +42,7 @@ pub use aead::{seal, open, reseal, blob_key_id, Alg, seal_with_aad, open_with_aa
 pub use store::{SecretStore, MAX_STORE_BYTES};
 pub use error::Error;
 pub use harden::{close_inherited_fds, drop_filesystem, harden_process, no_new_privs};
-pub use util::{ct_eq, random_bytes, random_bytes_with_limit, sha256, MAX_RANDOM_BYTES};  // random_bytes_with_limit and MAX_RANDOM_BYTES: 0.7.3
+pub use util::{ct_eq, random_bytes, random_bytes_with_limit, sha256, MAX_DATA_BYTES, MAX_RANDOM_BYTES};  // random_bytes_with_limit and MAX_RANDOM_BYTES: 0.7.3; MAX_DATA_BYTES: 0.9.0
 
 pub mod error;
 pub mod exchange;
@@ -56,7 +59,16 @@ wrong.
 The size caps: `MAX_MASTER_KEY_BYTES` (4 KiB) and `MAX_STORE_BYTES` (16 MiB) *(0.5.0)*;
 `MAX_DERIVE_INPUT_BYTES` (1 KiB) *(0.7.0)* for the `info` and `salt` of `derive`, and *(0.8.2)* for
 the salt of `password::derive_key`; `MAX_RANDOM_BYTES` (1 MiB) *(0.7.3)* for `random_bytes` and
-`SecretBuf::random`; `MAX_AAD_BYTES` (1 KiB) *(0.9.0)* for the AAD functions.
+`SecretBuf::random`; `MAX_AAD_BYTES` (1 KiB) *(0.9.0)* for the AAD functions. *(0.9.0)*
+`MAX_DATA_BYTES` (64 MiB) for every amount of data: the plaintext of `seal`, a blob
+(`MAX_DATA_BYTES` + 86 bytes, its header and longest tag), the data of `hmac_sha256`, a message to
+sign or verify, the bytes `hex` and `base64` encode or decode to, and the content of
+`SecretBuf::from_vec` and `SecretString::from_string`. *(0.9.0)* `password::MAX_PASSWORD_BYTES`
+(1 KiB) and `password::MAX_PHC_BYTES` (512 bytes), and `sign::MAX_ECDSA_P256_PUBLIC_BYTES` (65),
+`sign::MAX_ECDSA_P256_SIG_BYTES` (72) and `sign::MAX_ECDSA_P256_PKCS8_BYTES` (512). Store names
+have their own rules (below). An input over its cap is `Format`. ⚠ *(0.9.0)* That holds also for
+what was accepted before: a blob over the limit that an older krypto sealed does not open, and a
+password over 1024 bytes is not hashed, verified or used to derive a key.
 
 ---
 
@@ -84,7 +96,7 @@ a process with `CAP_IPC_LOCK` is not limited by it.
 
 ```rust
 impl SecretBuf {
-    pub fn from_vec(v: Vec<u8>) -> Result<Self, Error>;   // copies in, zeroizes the source
+    pub fn from_vec(v: Vec<u8>) -> Result<Self, Error>;   // copies in, zeroizes the source; at most MAX_DATA_BYTES (0.9.0)
     pub fn random(len: usize) -> Result<Self, Error>;     // from the OS CSPRNG, at most MAX_RANDOM_BYTES (0.7.3)
     pub fn random_with_limit(len: usize, limit: usize) -> Result<Self, Error>; // your own cap (0.7.3)
     pub fn len(&self) -> usize;
@@ -95,13 +107,17 @@ impl SecretBuf {
 
 `expose` is the **only** path to the plaintext, and the reference cannot escape the closure.
 
+*(0.9.0)* `from_vec` takes at most `MAX_DATA_BYTES` (64 MiB); more is `Format`, refused before any
+memory is locked, and the source is zeroized on that path too. `from_string` has the same limit,
+counted in bytes.
+
 ### `SecretString`
 
 Like `SecretBuf`, but guaranteed valid UTF-8.
 
 ```rust
 impl SecretString {
-    pub fn from_string(s: String) -> Result<Self, Error>;
+    pub fn from_string(s: String) -> Result<Self, Error>;   // zeroizes the source; at most MAX_DATA_BYTES bytes (0.9.0)
     pub fn len(&self) -> usize;
     pub fn is_empty(&self) -> bool;
     pub fn expose_str<R>(&self, f: impl FnOnce(&str) -> R) -> R;
@@ -185,6 +201,9 @@ A working key of 32 bytes. Opaque — no public methods. Used by `seal`, `open` 
 pub fn hmac_sha256(key: &DerivedKey, data: &[u8]) -> Result<[u8; 32], Error>;
 ```
 
+*(0.9.0)* `data` is at most `MAX_DATA_BYTES` (64 MiB); more is `Format`, refused before the key is
+used.
+
 ---
 
 ## Encryption
@@ -239,12 +258,21 @@ or by a krypto older than 0.9.0, fails with `Auth`. AAD binds one blob to a cont
 each call, under one key; `derive(info, …)` gives a key per context, as `SecretStore` does per
 name.
 
+*(0.9.0)* **The size of the plaintext and the blob.** The plaintext of `seal` and `seal_with_aad`
+is at most `MAX_DATA_BYTES` (64 MiB); more is `Format`, refused before a nonce is drawn or the key
+is used (after the AAD check in `seal_with_aad`). The blob given to `open`, `open_with_aad`,
+`reseal`, `reseal_with_aad` and `blob_key_id` is at most `MAX_DATA_BYTES` + 86 bytes — the 54-byte
+header and the longest tag, AEGIS-256's 32 bytes — so every blob `seal` makes opens. A longer blob
+is `Format`, refused before its magic is looked at (after the AAD checks in the `_with_aad`
+functions).
+
 > **Tampering gives `Auth`, never wrong plaintext.** The whole blob header is part of the
 > authentication, so changing the algorithm id, key id or version makes the open fail with `Auth`
 > — *(0.7.3)* a version or algorithm krypto does not know included. Only data that is not a krypto
 > blob at all gives `Format`. *(0.9.0)* That is data shorter than its 4-byte magic, or not starting
 > with `FAFN`; a blob starting with `FAFN` but cut short of the 54-byte header is a changed blob
-> and gives `Auth` too, so the alarm class is not the tamperer's choice. Never wrong
+> and gives `Auth` too, so the alarm class is not the tamperer's choice. The one exception is
+> size: data longer than the blob limit above gives `Format`, whatever it starts with. Never wrong
 > plaintext is an absolute guarantee, not a detail.
 
 ### The blob format (`FAFN`, format_ver 1)
@@ -262,7 +290,8 @@ magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciph
   the blob is opened, in `open` and `reseal` (and, from 0.9.0, their `_with_aad` variants).
   `blob_key_id` authenticates nothing: a version or alg_id krypto does not know yields `Auth`
   there too; a changed key_id or nonce, an alg_id changed to another one krypto knows, or a body
-  cut short does not. *(0.9.0)* The magic is checked before the length: data shorter
+  cut short does not. *(0.9.0)* A blob longer than `MAX_DATA_BYTES` + 86 bytes yields `Format`
+  first. Then the magic is checked before the length: data shorter
   than the 4-byte magic, or not starting with `FAFN`, yields `Format`; a blob that starts with
   `FAFN` but is cut short of the 54-byte header yields `Auth`, in `blob_key_id` too.
 - The nonce is random per blob from the OS CSPRNG. The 32-byte field is used partially:
@@ -288,10 +317,10 @@ impl<'a> SecretStore<'a> {
     pub fn open_with_version(path: impl AsRef<Path>, master: &'a MasterKey, version: u8) -> Result<Self, Error>;   // 0.9.0: only that version
     pub fn open_with_min_counter(path: impl AsRef<Path>, master: &'a MasterKey, min_counter: u64) -> Result<Self, Error>;   // 0.9.0: v2 only
     pub fn put(&mut self, name: &str, secret: &SecretBuf) -> Result<(), Error>;
-    pub fn get(&self, name: &str) -> Result<SecretBuf, Error>;   // Auth if the key id does not match the store's (0.7.3)
-    pub fn delete(&mut self, name: &str) -> Result<(), Error>;
-    pub fn contains(&self, name: &str) -> bool;
-    pub fn list(&self, prefix: &str) -> Vec<String>;
+    pub fn get(&self, name: &str) -> Result<SecretBuf, Error>;   // Auth if the key id does not match the store's (0.7.3); a name that breaks the rules: Format (0.9.0)
+    pub fn delete(&mut self, name: &str) -> Result<(), Error>;   // a name that breaks the rules: Format (0.9.0)
+    pub fn contains(&self, name: &str) -> bool;   // a name that breaks the rules: false (0.9.0)
+    pub fn list(&self, prefix: &str) -> Vec<String>;   // a prefix no name can start with: empty (0.9.0)
     pub fn version(&self) -> u8;    // 0.9.0: the file's format version, 1 or 2
     pub fn counter(&self) -> u64;   // 0.9.0: the write counter, 0 on a v1 store
     pub fn key_id(&self) -> [u8; 16];   // 0.9.0: the store's key_id, not secret
@@ -324,11 +353,14 @@ addresses, not secrets, and get listed out. Checked on read as well as on write
 *(0.7.0)*: a store file need not have come from `put`.
 
 `put` checks in this order: the name, then the size cap — both `Format` — then it seals the value,
-and last the counter (below). `get` does not check the name: a name that breaks the rules is not
-in the store, and the answer is `KeyNotFound`. An entry whose blob is not a krypto blob gives
-`Format` from `get`, and stops `rotate` and `upgrade` with the same error. `delete` of a name that
-is not in the store returns `Ok`, writes nothing and leaves the counter where it was. `list` gives
-the names sorted.
+and last the counter (below). *(0.9.0)* The name rules hold at lookup too, checked first: `get`
+and `delete` give `Format` for a name that breaks them, and `delete` then writes nothing;
+`contains` gives `false`; and `list` gives an empty list for a prefix longer than 512 bytes or with
+a character outside printable ASCII, since no name can start with it. A legal name that is not in
+the store is `KeyNotFound` from `get`. An entry whose blob is not a krypto blob gives `Format` from
+`get`, and stops `rotate` and `upgrade` with the same error. `delete` of a legal name that is not
+in the store returns `Ok`, writes nothing and leaves the counter where it was. `list` gives the
+names sorted, and an empty prefix lists them all.
 
 *(0.9.0)* **The store file: format versions 1 and 2.** The normative description is
 `spec/SPEC-secretstore.md`; what follows is the contract in brief. The 4 bytes at offset 0 are
@@ -512,6 +544,8 @@ Argon2id, in **two roles that must not be confused**:
 
 ```rust
 pub enum Preset { Interactive, Balanced, High }
+pub const MAX_PASSWORD_BYTES: usize = 1024;   // 0.9.0
+pub const MAX_PHC_BYTES: usize = 512;         // 0.9.0
 
 pub fn hash(password: &SecretString, preset: Preset) -> Result<String, Error>;
 pub fn verify(password: &SecretString, phc: &str) -> Result<(), Error>;
@@ -532,6 +566,10 @@ pub fn derive_key(password: &SecretString, salt: &[u8], preset: Preset)
 - `derive_key` requires a salt of **at least 16 bytes** and, *(0.8.2)*, at most
   `MAX_DERIVE_INPUT_BYTES` (1024); a shorter or longer salt is `Format`. The key it gives is 32
   bytes. The salt is not secret and is stored in plaintext next to the encrypted data.
+- *(0.9.0)* The password of `hash`, `verify` and `derive_key` is at most `MAX_PASSWORD_BYTES`
+  (1024) bytes, and the PHC string of `verify` at most `MAX_PHC_BYTES` (512) bytes; a longer one is
+  `Format`, refused before Argon2 runs. The password is checked first, then the salt or the PHC
+  string, and the PHC string before it is parsed. No string krypto accepts comes near 512 bytes.
 
 > **Never store a verification hash next to the ciphertext.** If the password is wrong, the open
 > fails by itself. A stored hash would additionally hand an attacker with the disk a separate
@@ -566,6 +604,9 @@ the compressed form, 33 bytes) and an **ASN.1 DER** signature over SHA-256 — t
 pub const ED25519_SEED_LEN: usize = 32;
 pub const ED25519_PUBLIC_LEN: usize = 32;
 pub const ED25519_SIG_LEN: usize = 64;
+pub const MAX_ECDSA_P256_PUBLIC_BYTES: usize = 65;    // 0.9.0
+pub const MAX_ECDSA_P256_SIG_BYTES: usize = 72;       // 0.9.0
+pub const MAX_ECDSA_P256_PKCS8_BYTES: usize = 512;    // 0.9.0
 
 pub fn ed25519_keypair() -> Result<(SecretBuf, [u8; 32]), Error>;
 pub fn ed25519_public(seed: &SecretBuf) -> Result<[u8; 32], Error>;
@@ -582,6 +623,13 @@ pub fn ecdsa_p256_verify(public_sec1: &[u8], message: &[u8], sig_der: &[u8]) -> 
 A signature that does not hold → `Auth`. Malformed key/signature → `Format`. Signing is RFC 6979
 deterministic; the verifier also accepts randomized signatures (same wire form). Tested against
 RFC 8032 (TEST 1+2) and RFC 6979 A.2.5.
+
+*(0.9.0)* **Sizes.** The message of every sign and verify function is at most `MAX_DATA_BYTES`
+(64 MiB); more is `Format`, checked first. For P-256, the public key is at most
+`MAX_ECDSA_P256_PUBLIC_BYTES` (65), the signature at most `MAX_ECDSA_P256_SIG_BYTES` (72) and the
+PKCS#8 private key at most `MAX_ECDSA_P256_PKCS8_BYTES` (512) bytes; a longer one is `Format`,
+refused before it is parsed. `ecdsa_p256_verify` checks the message, the public key and the
+signature in that order; `ecdsa_p256_sign` the message, then the key.
 
 *(0.8.2)* **Two Ed25519
 verifiers.** `ed25519_verify` is strict: a public key of small order (a *weak* key) or an R of
@@ -616,7 +664,7 @@ the shared secret is computed. Tested against RFC 7748 §6.1.
 ## `hex` — canonical hex *(new in 0.5.0)*
 
 ```rust
-pub fn encode(bytes: &[u8]) -> String;                 // lowercase
+pub fn encode(bytes: &[u8]) -> Result<String, Error>;  // lowercase; a Result from 0.9.0
 pub fn decode(s: &str) -> Result<Vec<u8>, Error>;      // fail-closed: [0-9a-f] only, even length
 ```
 
@@ -626,15 +674,21 @@ not be able to exist in signed forms and fingerprint comparisons. What `decode` 
 reservation is `Error::Hardening` instead of an abort; a length the system promises but cannot back
 still fills the memory.
 
+*(0.9.0)* The limit is on the bytes: `encode` takes at most `MAX_DATA_BYTES` (64 MiB), and `decode`
+a text of at most twice that, the hex of `MAX_DATA_BYTES` bytes, so `decode` takes whatever
+`encode` makes. More is `Format`, refused before any memory is reserved; for `decode` it is the
+first check. `encode` reserves its output with `try_reserve_exact` too, and a failed reservation
+is `Hardening`.
+
 ---
 
 ## `base64` — canonical base64 *(0.5.1)*
 
 ```rust
-pub fn encode(bytes: &[u8]) -> String;                     // STANDARD, padded (PEM body)
-pub fn encode_nopad(bytes: &[u8]) -> String;               // the ssh fingerprint form
-pub fn decode(s: &str) -> Result<Vec<u8>, Error>;          // fail-closed, requires padding
-pub fn decode_nopad(s: &str) -> Result<Vec<u8>, Error>;    // fail-closed, rejects padding
+pub fn encode(bytes: &[u8]) -> Result<String, Error>;        // STANDARD, padded (PEM body); a Result from 0.9.0
+pub fn encode_nopad(bytes: &[u8]) -> Result<String, Error>;  // the ssh fingerprint form; a Result from 0.9.0
+pub fn decode(s: &str) -> Result<Vec<u8>, Error>;            // fail-closed, requires padding
+pub fn decode_nopad(s: &str) -> Result<Vec<u8>, Error>;      // fail-closed, rejects padding
 ```
 
 Same philosophy as `hex`: one spelling — whitespace, wrong padding and non-canonical trailing
@@ -643,6 +697,14 @@ only for formats that ARE base64 by nature (`SHA256:<base64-no-pad>` fingerprint
 *(0.9.0)* `decode` and `decode_nopad` reserve the output buffer with `try_reserve_exact`: a failed
 reservation is `Error::Hardening` instead of an abort; a length the system promises but cannot back
 still fills the memory.
+
+*(0.9.0)* The limit is on the bytes: `encode` and `encode_nopad` take at most `MAX_DATA_BYTES`
+(64 MiB), and `decode` and `decode_nopad` decode to at most that many, so they take whatever the
+encoders make. A text longer than the encoding of `MAX_DATA_BYTES` bytes (padded for `decode`,
+unpadded for `decode_nopad`) is `Format`, the first check; so is a padded text of that length that
+would decode to more, with one `=` or none where the encoding of `MAX_DATA_BYTES` bytes has two.
+Both are refused before any memory is reserved. The encoders reserve their output with
+`try_reserve_exact`, and a failed reservation is `Hardening`.
 
 ---
 
@@ -654,9 +716,11 @@ pub fn ct_eq(a: &[u8], b: &[u8]) -> bool;                   // constant-time; le
 pub fn random_bytes(len: usize) -> Result<Vec<u8>, Error>;  // OS CSPRNG for NON-secrets, at most MAX_RANDOM_BYTES (0.7.3)
 pub fn random_bytes_with_limit(len: usize, limit: usize) -> Result<Vec<u8>, Error>; // 0.7.3
 pub const MAX_RANDOM_BYTES: usize = 1 << 20;                // 0.7.3
+pub const MAX_DATA_BYTES: usize = 64 * 1024 * 1024;         // 0.9.0 — the shared limit on an amount of data
 ```
 
 `sha256` is not authentication (use `hmac_sha256`) and not passwords (use `password`).
+*(0.9.0)* `sha256` and `ct_eq` have no size limit: they cannot fail and reserve no memory.
 `random_bytes` is for salts/ids/jitter — secrets go in `SecretBuf::random`.
 
 *(0.7.3)* **The size of one call is capped.** `random_bytes` and `SecretBuf::random` give at most
@@ -714,8 +778,8 @@ pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotF
 |---|---|
 | `Io` | file or directory; *(0.9.0)* also a store file that `open_with_min_counter` with `min_counter` above 0 did not find |
 | `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening — never a verdict on the data; treated fail-closed. *(0.9.0)* Also a `SecretStore` write refused because the store's counter is at its maximum: rotate the store |
-| `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob, or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info`. *(0.9.0)* Not a krypto blob means shorter than its 4-byte magic, or not starting with `FAFN`. For a `SecretStore`: not a store file, an unknown version, an invalid structure, or *(0.9.0)* another version than the open names |
-| `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, a header cut short past the magic included *(0.9.0)*, and a key id in a `SecretStore` that does not match. *(0.9.0)* At the open of a v2 store file: the file is not what was written — cut short of its header, or the master key fits and something else was changed, added or removed |
+| `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob, or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info`. *(0.9.0)* Not a krypto blob means shorter than its 4-byte magic, or not starting with `FAFN`. *(0.9.0)* An input over its size limit, a blob over its limit included. For a `SecretStore`: not a store file, an unknown version, an invalid structure, or *(0.9.0)* another version than the open names, and a name that breaks the name rules at `get` or `delete` |
+| `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, a header cut short past the magic included *(0.9.0)*, that leaves the blob within its size limit *(0.9.0)*, and a key id in a `SecretStore` that does not match. *(0.9.0)* At the open of a v2 store file: the file is not what was written — cut short of its header, or the master key fits and something else was changed, added or removed |
 | `KeyNotFound` | the name does not exist in the store |
 | `WrongKey` | the key does not fit *(0.5.0)*. *(0.9.0)* At the open of a v2 store file: the master key does not fit the file; a changed salt or `key_check` gives the same answer, so a caller that knows its key is the right one treats it as a changed file. No blob function returns it: a blob opened with a key of another generation is `Auth`. It is also the answer for a caller's own code that routes blobs between key generations |
 | `Rollback { file_counter, min_counter }` | *(0.9.0)* only from `SecretStore::open_with_min_counter`: a v2 store file whose `counter` (`file_counter`) is below the caller's minimum (`min_counter`) — an older copy of the file may have been put back. Distinct from `Auth`, which means the content itself does not verify |
@@ -768,7 +832,7 @@ How the Rust forms read in Python:
 | `impl AsRef<Path>` | `str` or a path object |
 | `usize`, `u8`, `u64` | `int`; a negative number, or one too large for the Rust type, is Python's `OverflowError`, raised before krypto runs |
 | A function on a type without `self`: `SecretBuf::from_vec`, `MasterKey::from_bytes`, `SecretStore::open`, … | A static method on the class: `SecretBuf.from_vec(…)`, `MasterKey.from_bytes(…)`, `SecretStore.open(…)`, … |
-| `Result<T, Error>` | `T`, or an exception |
+| `Result<T, Error>` | `T`, or an exception; *(0.9.0)* so `hex.encode`, `base64.encode` and `base64.encode_nopad` return a `str` or raise |
 | `Error::Io`, `Hardening`, `Format`, `Auth`, `KeyNotFound`, `WrongKey`, `Rollback` *(0.9.0)* | `IoError`, `HardeningError`, `FormatError`, `AuthError`, `KeyNotFoundError`, `WrongKeyError`, `RollbackError`, all subclasses of `krypto_py.Error`, which is a subclass of `Exception`; they are at the module root and in `krypto_py.error`. `RollbackError` has the attributes `file_counter` and `min_counter` |
 | `VERSION` | `VERSION`, and the same value as `__version__` |
 | `SecretBuf::len`, `SecretString::len` | `len()`, and also Python's `len(secret)` |

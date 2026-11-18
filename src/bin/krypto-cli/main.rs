@@ -297,8 +297,10 @@ fn help_of(command: &str) -> &'static str {
              Checks a signature over stdin: exit 0 if it holds, 3 if it does not.\n\
              \n\
              \x20 --alg <alg>          ed25519, or p256 (ECDSA P-256 over SHA-256)\n\
-             \x20 --public <hex>       the public key: 32 bytes for ed25519, SEC1 for p256\n\
-             \x20 --signature <hex>    64 bytes for ed25519, DER for p256"
+             \x20 --public <hex>       the public key: 32 bytes for ed25519, SEC1 for p256;\n\
+             \x20                      at most 130 characters\n\
+             \x20 --signature <hex>    64 bytes for ed25519, DER for p256; at most 144\n\
+             \x20                      characters"
         }
         "bench" => {
             "usage: krypto-cli bench\n\
@@ -329,11 +331,11 @@ fn run(argv: Vec<String>) -> Result<(), Fail> {
             }
             Ok(())
         }
-        "keyid" => line(&hex::encode(
-            &master(&args)?.key_id().map_err(Fail::krypto)?,
-        )),
+        "keyid" => line(
+            &hex::encode(&master(&args)?.key_id().map_err(Fail::krypto)?).map_err(Fail::krypto)?,
+        ),
         "seal" | "open" | "mac" => aead(&args),
-        "sha256" => line(&hex::encode(&krypto::sha256(&read_stdin()?))),
+        "sha256" => line(&hex::encode(&krypto::sha256(&read_stdin()?)).map_err(Fail::krypto)?),
         "verify" => verify(&args),
         "bench" => bench(),
         _ => unreachable!("the command is checked in parse"),
@@ -375,9 +377,10 @@ fn aead(args: &Args) -> Result<(), Fail> {
             }
             open(&key, &input).map_err(Fail::krypto)?.expose(out)
         }
-        _ => line(&hex::encode(
-            &hmac_sha256(&key, &input).map_err(Fail::krypto)?,
-        )),
+        _ => line(
+            &hex::encode(&hmac_sha256(&key, &input).map_err(Fail::krypto)?)
+                .map_err(Fail::krypto)?,
+        ),
     }
 }
 
@@ -388,16 +391,31 @@ fn verify(args: &Args) -> Result<(), Fail> {
         "p256" => sign::ecdsa_p256_verify,
         _ => return Err(Fail::usage("--alg for verify is ed25519 or p256")),
     };
-    let public = hex_arg(args, "--public")?;
-    let signature = hex_arg(args, "--signature")?;
+    let public = hex_arg(args, "--public", MAX_PUBLIC_HEX)?;
+    let signature = hex_arg(args, "--signature", MAX_SIGNATURE_HEX)?;
     let message = read_stdin()?;
     check(&public, &message, &signature).map_err(Fail::from_args)?;
     line("the signature holds")
 }
 
-fn hex_arg(args: &Args, flag: &str) -> Result<Vec<u8>, Fail> {
-    hex::decode(args.need(flag)?)
-        .map_err(|e| Fail::usage(format!("{flag} must be lowercase hex: {e}")))
+/// The longest `--public` for `verify`, in characters: the hex of the largest
+/// public key, a 65-byte P-256 point (0.9.0).
+const MAX_PUBLIC_HEX: usize = 2 * sign::MAX_ECDSA_P256_PUBLIC_BYTES;
+
+/// The longest `--signature` for `verify`, in characters: the hex of the
+/// largest signature, a 72-byte P-256 DER signature (0.9.0).
+const MAX_SIGNATURE_HEX: usize = 2 * sign::MAX_ECDSA_P256_SIG_BYTES;
+
+/// The value of `flag` as hex, at most `max` characters; longer is a wrong
+/// call, refused before it is decoded (0.9.0).
+fn hex_arg(args: &Args, flag: &str, max: usize) -> Result<Vec<u8>, Fail> {
+    let value = args.need(flag)?;
+    if value.chars().count() > max {
+        return Err(Fail::usage(format!(
+            "{flag} takes at most {max} characters"
+        )));
+    }
+    hex::decode(value).map_err(|e| Fail::usage(format!("{flag} must be lowercase hex: {e}")))
 }
 
 /// Time per Argon2id preset, and per seal and open of 1 KiB, on this machine.

@@ -198,10 +198,10 @@ fn passwords_signatures_and_key_agreement_cross_both_ways() {
     assert_eq!(dir.read("python/sha256"), krypto::sha256(&message));
     assert_eq!(
         dir.read("python/hex"),
-        krypto::hex::encode(&message).as_bytes()
+        krypto::hex::encode(&message).unwrap().as_bytes()
     );
     assert_eq!(
         dir.read("python/base64"),
-        krypto::base64::encode(&message).as_bytes()
+        krypto::base64::encode(&message).unwrap().as_bytes()
     );
 }

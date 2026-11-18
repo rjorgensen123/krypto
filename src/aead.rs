@@ -14,19 +14,35 @@
 //! Data shorter than the 4-byte magic, or not starting with `FAFN`, is
 //! not a krypto blob: `Error::Format`. Any other change — the blob cut short
 //! of the 54-byte header, version, alg_id, key_id, nonce, ciphertext, tag —
-//! is `Error::Auth` (0.7.3; the cut-short header since 0.9.0).
+//! is `Error::Auth` (0.7.3; the cut-short header since 0.9.0). A blob longer
+//! than `MAX_DATA_BYTES` plus the header and the longest tag is
+//! `Error::Format`, checked first (0.9.0).
 //! The nonce field is a fixed 32 B; AES-256-GCM uses the first 12, XChaCha the
 //! first 24, AEGIS-256 all 32, the rest zero.
 
 use crate::error::Error;
 use crate::kdf::DerivedKey;
 use crate::secret::SecretBuf;
+use crate::util::{check_data_len, MAX_DATA_BYTES};
 
 const MAGIC: &[u8; 4] = b"FAFN";
 const FORMAT_VER: u8 = 1;
 const KEY_ID_LEN: usize = 16;
 const NONCE_FIELD: usize = 32;
 const HEADER_LEN: usize = 4 + 1 + 1 + KEY_ID_LEN + NONCE_FIELD; // 54
+/// The longest tag of the three algorithms: AEGIS-256's 32 bytes.
+const MAX_TAG_LEN: usize = 32;
+
+/// The largest blob the functions that read one take (0.9.0): the blob of a
+/// plaintext of [`MAX_DATA_BYTES`], with the 54-byte header and the longest
+/// tag, so a blob `seal` makes always opens.
+const MAX_BLOB_BYTES: usize = MAX_DATA_BYTES + HEADER_LEN + MAX_TAG_LEN;
+
+/// Refuses a plaintext longer than [`MAX_DATA_BYTES`] with `Error::Format`
+/// (0.9.0).
+fn check_plaintext_len(len: usize) -> Result<(), Error> {
+    check_data_len("plaintext", len)
+}
 
 /// Upper bound on the caller-supplied associated data of [`seal_with_aad`],
 /// [`open_with_aad`] and [`reseal_with_aad`] (0.9.0).
@@ -105,6 +121,9 @@ impl Alg {
 
 /// Encrypt `plaintext` into a self-describing blob. `key_id` is written into the
 /// header (identifies the master-key generation). The nonce is random per blob.
+///
+/// `plaintext` is at most [`MAX_DATA_BYTES`]; more is [`Error::Format`],
+/// refused before a nonce is drawn or the key is used (0.9.0).
 pub fn seal(
     key: &DerivedKey,
     key_id: &[u8; KEY_ID_LEN],
@@ -127,6 +146,7 @@ pub fn seal(
 ///
 /// `aad` is at most [`MAX_AAD_BYTES`] bytes; a longer one is
 /// [`Error::Format`], refused before a nonce is drawn or the key is used.
+/// So is a `plaintext` over [`MAX_DATA_BYTES`] (0.9.0).
 pub fn seal_with_aad(
     key: &DerivedKey,
     key_id: &[u8; KEY_ID_LEN],
@@ -135,6 +155,7 @@ pub fn seal_with_aad(
     aad: &[u8],
 ) -> Result<Vec<u8>, Error> {
     check_aad_len("aad", aad)?;
+    check_plaintext_len(plaintext.len())?;
     let mut nonce = [0u8; NONCE_FIELD];
     getrandom::fill(&mut nonce[..alg.nonce_len()])
         .map_err(|e| Error::Hardening(format!("getrandom failed: {e}")))?;
@@ -170,7 +191,16 @@ pub fn seal_with_aad(
 /// class is no longer the tamperer's choice. Past the magic, a version or an
 /// algorithm this krypto does not know is `Auth`, like every other change to
 /// a blob: a sealed blob that says otherwise has been altered.
+///
+/// A blob longer than `MAX_BLOB_BYTES` is `Format`, before the magic is looked
+/// at (0.9.0).
 fn read_header(blob: &[u8]) -> Result<(Alg, &[u8], &[u8]), Error> {
+    if blob.len() > MAX_BLOB_BYTES {
+        return Err(Error::Format(format!(
+            "blob is {} bytes — max {MAX_BLOB_BYTES}",
+            blob.len()
+        )));
+    }
     if blob.len() < 4 || &blob[..4] != MAGIC {
         return Err(Error::Format("wrong magic (not FAFN)".into()));
     }
@@ -188,6 +218,10 @@ fn read_header(blob: &[u8]) -> Result<(Alg, &[u8], &[u8]), Error> {
 /// Decrypt a blob. Verifies the header (as AAD) + the tag; `Error::Auth` on
 /// tampering or a wrong key, `Error::Format` if `blob` is not a krypto blob at
 /// all. Never panics on invalid input.
+///
+/// `blob` is at most [`MAX_DATA_BYTES`] plus 86 bytes (the 54-byte header and
+/// the longest tag, 32 bytes), so every blob [`seal`] makes opens; a longer
+/// one is `Error::Format`, before the magic is looked at (0.9.0).
 pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error> {
     open_with_aad(key, blob, &[])
 }
@@ -199,7 +233,8 @@ pub fn open(key: &DerivedKey, blob: &[u8]) -> Result<SecretBuf, Error> {
 /// produces.
 ///
 /// `aad` is at most [`MAX_AAD_BYTES`] bytes; a longer one is
-/// [`Error::Format`], refused before the blob is read or the key is used.
+/// [`Error::Format`], refused before the blob is read or the key is used. The
+/// blob's limit is the one [`open`] has (0.9.0).
 pub fn open_with_aad(key: &DerivedKey, blob: &[u8], aad: &[u8]) -> Result<SecretBuf, Error> {
     check_aad_len("aad", aad)?;
     let (alg, header, body) = read_header(blob)?;
@@ -236,6 +271,8 @@ pub fn open_with_aad(key: &DerivedKey, blob: &[u8], aad: &[u8]) -> Result<Secret
 /// blob (header as AAD + tag) with the old key — a wrong old key or a
 /// tampered blob is [`Error::Auth`]. The plaintext exists only inside a
 /// locked [`SecretBuf`] between the two operations.
+///
+/// The blob's limit is the one [`open`] has (0.9.0).
 pub fn reseal(
     old: &DerivedKey,
     new: &DerivedKey,
@@ -251,6 +288,7 @@ pub fn reseal(
 ///
 /// `old_aad` and `new_aad` are each at most [`MAX_AAD_BYTES`] bytes; a longer
 /// one is [`Error::Format`], refused before the blob is read or a key is used.
+/// The blob's limit is the one [`open`] has (0.9.0).
 pub fn reseal_with_aad(
     old: &DerivedKey,
     new: &DerivedKey,
@@ -281,7 +319,7 @@ pub fn reseal_with_aad(
 /// It reads the header as `open` does (0.7.3): `Format` if `blob` is not a
 /// krypto blob, `Auth` for a version or an algorithm this krypto does not know.
 /// A blob that starts with `FAFN` but is cut short of the 54-byte header is
-/// `Auth` here too (0.9.0).
+/// `Auth` here too (0.9.0). The blob's limit is the one [`open`] has (0.9.0).
 pub fn blob_key_id(blob: &[u8]) -> Result<[u8; KEY_ID_LEN], Error> {
     let (_, header, _) = read_header(blob)?;
     let mut out = [0u8; KEY_ID_LEN];
@@ -394,6 +432,23 @@ fn primitive_open(
             c.decrypt(n, Payload { msg: body, aad })
                 .map_err(|_| Error::Auth)
         }
+    }
+}
+
+#[cfg(test)]
+mod limits {
+    use super::*;
+
+    /// The check `seal` runs on the plaintext (0.9.0). A `SecretBuf` over the
+    /// limit would need 64 MiB of locked memory, so the check is shown on the
+    /// length it is given.
+    #[test]
+    fn plaintext_over_max_data_bytes_gives_format() {
+        assert!(check_plaintext_len(MAX_DATA_BYTES).is_ok());
+        assert!(matches!(
+            check_plaintext_len(MAX_DATA_BYTES + 1),
+            Err(Error::Format(_))
+        ));
     }
 }
 

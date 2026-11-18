@@ -130,15 +130,15 @@ fn inspect_tells_what_krypto_made() {
     };
     let m = master(3);
     let key = m.derive(b"c", b"s").unwrap();
-    let id = hex::encode(&m.key_id().unwrap());
+    let id = hex::encode(&m.key_id().unwrap()).unwrap();
     let secret = SecretBuf::from_vec(b"x".to_vec()).unwrap();
     let blob = krypto::seal(&key, &m.key_id().unwrap(), &secret, krypto::Alg::Aes256Gcm).unwrap();
 
     // A blob, as it is, in hex and in base64; a changed header is exit 3.
     for input in [
         blob.clone(),
-        hex::encode(&blob).into_bytes(),
-        krypto::base64::encode(&blob).into_bytes(),
+        hex::encode(&blob).unwrap().into_bytes(),
+        krypto::base64::encode(&blob).unwrap().into_bytes(),
     ] {
         let (code, r) = report(&input);
         assert_eq!(code, 0, "{r}");
@@ -281,7 +281,7 @@ fn inspect_reads_store_files_of_both_versions() {
         (out.code, text(&out))
     };
     let m = master(3);
-    let id = hex::encode(&m.key_id().unwrap());
+    let id = hex::encode(&m.key_id().unwrap()).unwrap();
     // The line of a report that starts with `name`, or the empty string.
     let line = |r: &str, name: &str| {
         r.lines()
@@ -426,7 +426,7 @@ fn inspect_tells_what_others_made() {
 fn inspect_shows_no_control_characters() {
     let string = |b: &[u8]| [&(b.len() as u32).to_be_bytes()[..], b].concat();
     let pem = |label: &str, body: Vec<u8>| {
-        let body = krypto::base64::encode(&body);
+        let body = krypto::base64::encode(&body).unwrap();
         format!("-----BEGIN {label}-----\n{body}\n-----END {label}-----\n").into_bytes()
     };
     let key = [string(b"ssh-ed25519"), string(&[7; 32])].concat();
@@ -449,7 +449,7 @@ fn inspect_shows_no_control_characters() {
         (
             format!(
                 "ssh-ed25519 {} comment",
-                krypto::base64::encode(&hostile_key)
+                krypto::base64::encode(&hostile_key).unwrap()
             )
             .into_bytes(),
             "[2 characters not shown]",
@@ -527,11 +527,16 @@ fn inspect_shows_no_control_characters() {
 fn inspect_reads_crafted_files_right_or_says_invalid() {
     let der = |h: &str| hex::decode(h).unwrap();
     let pem = |body: &[u8]| {
-        let body = krypto::base64::encode(body);
+        let body = krypto::base64::encode(body).unwrap();
         format!("-----BEGIN X-----\n{body}\n-----END X-----\n").into_bytes()
     };
     let ed25519 = der("300a300506032b6570030100");
-    let hex3 = hex::encode(hex::encode(hex::encode(&ed25519).as_bytes()).as_bytes());
+    let hex3 = hex::encode(
+        hex::encode(hex::encode(&ed25519).unwrap().as_bytes())
+            .unwrap()
+            .as_bytes(),
+    )
+    .unwrap();
     const TOO_DEEP: &str = "note        stopped at the limit of two levels of unwrapping";
     // A local zip header, encrypted with method 99, whose first extra field
     // holds the bytes 01 99 before the AES extra field with strength 3.
@@ -652,5 +657,63 @@ fn a_wrong_call_is_exit_2_and_help_works() {
     assert_eq!(
         (version.code, text(&version)),
         (0, krypto::VERSION.to_string())
+    );
+}
+
+/// `verify` takes `--public` of at most 130 characters and `--signature` of
+/// at most 144, the hex of a 65-byte P-256 point and a 72-byte P-256
+/// signature (0.9.0): at the limits a signature verifies, and one character
+/// more is a wrong call whose message names the flag and the limit. The help
+/// of `verify` gives both limits.
+#[test]
+fn verify_bounds_public_and_signature() {
+    let (private, public) = krypto::sign::ecdsa_p256_keypair().unwrap();
+    // About one signature in four has the longest DER form.
+    let (message, sig) = (0u32..256)
+        .map(|i| format!("message {i}").into_bytes())
+        .map(|m| {
+            let sig = krypto::sign::ecdsa_p256_sign(&private, &m).unwrap();
+            (m, sig)
+        })
+        .find(|(_, sig)| sig.len() == 72)
+        .expect("no signature of the longest form in 256 messages");
+    let public = hex::encode(&public).unwrap();
+    let sig = hex::encode(&sig).unwrap();
+    assert_eq!((public.len(), sig.len()), (130, 144));
+    let verify = |public: &str, sig: &str| {
+        let args = [
+            "verify",
+            "--alg",
+            "p256",
+            "--public",
+            public,
+            "--signature",
+            sig,
+        ];
+        run(&args, &message)
+    };
+
+    let out = verify(&public, &sig);
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    let out = verify(&format!("{public}0"), &sig);
+    assert_eq!(out.code, 2, "{}", out.stderr);
+    assert!(
+        out.stderr.contains("--public takes at most 130 characters"),
+        "{}",
+        out.stderr
+    );
+    let out = verify(&public, &format!("{sig}0"));
+    assert_eq!(out.code, 2, "{}", out.stderr);
+    assert!(
+        out.stderr
+            .contains("--signature takes at most 144 characters"),
+        "{}",
+        out.stderr
+    );
+
+    let help = text(&run(&["verify", "--help"], b""));
+    assert!(
+        help.contains("at most 130") && help.contains("at most 144"),
+        "{help}"
     );
 }

@@ -4,6 +4,7 @@
 use krypto::sign::{
     ecdsa_p256_keypair, ecdsa_p256_public, ecdsa_p256_sign, ecdsa_p256_verify, ed25519_keypair,
     ed25519_public, ed25519_sign, ed25519_verify, ed25519_verify_relaxed,
+    MAX_ECDSA_P256_PKCS8_BYTES, MAX_ECDSA_P256_PUBLIC_BYTES, MAX_ECDSA_P256_SIG_BYTES,
 };
 use krypto::{hex, Error, SecretBuf};
 
@@ -21,12 +22,12 @@ fn ed25519_rfc8032_test_1() {
     let seed = seed_from_hex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
     let public = ed25519_public(&seed).unwrap();
     assert_eq!(
-        hex::encode(&public),
+        hex::encode(&public).unwrap(),
         "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
     );
     let sig = ed25519_sign(&seed, b"").unwrap();
     assert_eq!(
-        hex::encode(&sig),
+        hex::encode(&sig).unwrap(),
         "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
     );
     ed25519_verify(&public, b"", &sig).unwrap();
@@ -39,13 +40,13 @@ fn ed25519_rfc8032_test_2() {
     let seed = seed_from_hex("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb");
     let public = ed25519_public(&seed).unwrap();
     assert_eq!(
-        hex::encode(&public),
+        hex::encode(&public).unwrap(),
         "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c"
     );
     let msg = hex::decode("72").unwrap();
     let sig = ed25519_sign(&seed, &msg).unwrap();
     assert_eq!(
-        hex::encode(&sig),
+        hex::encode(&sig).unwrap(),
         "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
     );
     ed25519_verify(&public, &msg, &sig).unwrap();
@@ -232,7 +233,7 @@ fn ecdsa_p256_rfc6979_sample() {
         .unwrap()
         .to_bytes();
     assert_eq!(
-        hex::encode(&fixed),
+        hex::encode(&fixed).unwrap(),
         "efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716\
          f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8"
     );
@@ -287,4 +288,55 @@ fn ecdsa_p256_signature_is_der() {
     let sig = ecdsa_p256_sign(&private, b"wire-check").unwrap();
     assert_eq!(sig[0], 0x30, "DER SEQUENCE tag");
     assert_eq!(sig[1] as usize, sig.len() - 2, "DER length byte");
+}
+
+/// Whether `r` is the `Format` a length check gives, whose message ends with
+/// the limit.
+fn refused_for_length<T>(r: Result<T, Error>, max: usize) -> bool {
+    matches!(r, Err(Error::Format(m)) if m.ends_with(&format!("max {max}")))
+}
+
+/// The P-256 keys and signature are bounded before they are parsed (0.9.0): a
+/// 65-byte public key and a 72-byte signature verify, a 512-byte PKCS#8 key
+/// reaches the parser, and one byte more than each is refused for its length.
+#[test]
+fn ecdsa_p256_inputs_over_their_limits_give_format() {
+    let (private, public) = ecdsa_p256_keypair().unwrap();
+    assert_eq!(public.len(), MAX_ECDSA_P256_PUBLIC_BYTES);
+    // About one signature in four has the longest DER form.
+    let (message, sig) = (0u32..256)
+        .map(|i| format!("message {i}").into_bytes())
+        .map(|m| {
+            let sig = ecdsa_p256_sign(&private, &m).unwrap();
+            (m, sig)
+        })
+        .find(|(_, sig)| sig.len() == MAX_ECDSA_P256_SIG_BYTES)
+        .expect("no signature of the longest form in 256 messages");
+    ecdsa_p256_verify(&public, &message, &sig).unwrap();
+
+    let long_public = [&public[..], &[0]].concat();
+    let long_sig = [&sig[..], &[0]].concat();
+    assert!(refused_for_length(
+        ecdsa_p256_verify(&long_public, &message, &sig),
+        MAX_ECDSA_P256_PUBLIC_BYTES
+    ));
+    assert!(refused_for_length(
+        ecdsa_p256_verify(&public, &message, &long_sig),
+        MAX_ECDSA_P256_SIG_BYTES
+    ));
+
+    let at_cap = SecretBuf::from_vec(vec![0u8; MAX_ECDSA_P256_PKCS8_BYTES]).unwrap();
+    let over = SecretBuf::from_vec(vec![0u8; MAX_ECDSA_P256_PKCS8_BYTES + 1]).unwrap();
+    for r in [ecdsa_p256_public(&at_cap), ecdsa_p256_sign(&at_cap, b"m")] {
+        assert!(matches!(r, Err(Error::Format(_))));
+        assert!(!refused_for_length(r, MAX_ECDSA_P256_PKCS8_BYTES));
+    }
+    assert!(refused_for_length(
+        ecdsa_p256_public(&over),
+        MAX_ECDSA_P256_PKCS8_BYTES
+    ));
+    assert!(refused_for_length(
+        ecdsa_p256_sign(&over, b"m"),
+        MAX_ECDSA_P256_PKCS8_BYTES
+    ));
 }

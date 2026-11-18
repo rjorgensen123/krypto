@@ -381,3 +381,30 @@ def test_encodings_and_utilities():
     with pytest.raises(k.FormatError):
         base64.decode("Zm9vYg")
     assert k.ct_eq(b"a", b"a") and not k.ct_eq(b"a", b"b") and not k.ct_eq(b"a", b"ab")
+
+
+def test_the_limits_are_rusts(tmp_path):
+    """The limits (0.9.0): the constants are Rust's, the encoders raise where
+    Rust gives `Err`, and an input over its limit, or a store name that breaks
+    the rules at lookup, raises `FormatError`."""
+    assert k.MAX_DATA_BYTES == 64 * 1024 * 1024
+    assert (password.MAX_PASSWORD_BYTES, password.MAX_PHC_BYTES) == (1024, 512)
+    assert (sign.MAX_ECDSA_P256_PUBLIC_BYTES, sign.MAX_ECDSA_P256_SIG_BYTES,
+            sign.MAX_ECDSA_P256_PKCS8_BYTES) == (65, 72, 512)
+    over = bytes(k.MAX_DATA_BYTES + 1)
+    for encode in (hex.encode, base64.encode, base64.encode_nopad):
+        with pytest.raises(k.FormatError):
+            encode(over)
+    del over
+    with pytest.raises(k.FormatError):
+        password.hash(k.SecretString.from_string("p" * (password.MAX_PASSWORD_BYTES + 1)), password.Preset.Interactive)
+    with pytest.raises(k.FormatError):
+        password.verify(k.SecretString.from_string("p"), "x" * (password.MAX_PHC_BYTES + 1))
+    key, public = sign.ecdsa_p256_keypair()
+    with pytest.raises(k.FormatError):
+        sign.ecdsa_p256_verify(public + b"\0", b"m", sign.ecdsa_p256_sign(key, b"m"))
+    s = k.SecretStore.open(str(tmp_path / "s.store"), master())
+    for call in (s.get, s.delete):
+        with pytest.raises(k.FormatError):
+            call("line\nbreak")
+    assert not s.contains("line\nbreak") and s.list("\n") == []

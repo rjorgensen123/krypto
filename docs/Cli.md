@@ -35,7 +35,10 @@ krypto-cli bench                                                           # Arg
 `krypto-cli --help` lists the commands and the exit codes, and `krypto-cli <command> --help`
 explains one command and its flags. Data goes in on stdin and out on stdout, and stdin is bounded
 at 64 MiB. `--context` and `--salt` are the values you would give `derive`. Each command takes only
-its own flags, and hex must be lowercase.
+its own flags, and hex must be lowercase. *(0.9.0)* `verify` takes `--public` of at most 130
+characters and `--signature` of at most 144, the hex of the largest P-256 public key (65 bytes)
+and signature (72 bytes); a longer one is a wrong call, exit `2`, and the message names the flag
+and the limit.
 
 The exit code tells the kinds of failure apart:
 

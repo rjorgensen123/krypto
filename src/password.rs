@@ -19,6 +19,26 @@ use crate::error::Error;
 use crate::kdf::MAX_DERIVE_INPUT_BYTES;
 use crate::secret::SecretString;
 
+/// The longest password [`hash`], [`verify`] and [`derive_key`] take, in bytes
+/// (0.9.0). A longer one is `Error::Format`, refused before Argon2 runs.
+pub const MAX_PASSWORD_BYTES: usize = 1024;
+
+/// The longest PHC string [`verify`] takes, in bytes (0.9.0). A longer one is
+/// `Error::Format`, refused before it is parsed.
+pub const MAX_PHC_BYTES: usize = 512;
+
+/// Refuses a password longer than [`MAX_PASSWORD_BYTES`] with `Error::Format`
+/// (0.9.0). The message carries only the lengths.
+fn check_password_len(password: &SecretString) -> Result<(), Error> {
+    if password.len() > MAX_PASSWORD_BYTES {
+        return Err(Error::Format(format!(
+            "password is {} bytes — max {MAX_PASSWORD_BYTES}",
+            password.len()
+        )));
+    }
+    Ok(())
+}
+
 /// Calibration preset. The floor follows SEC v10 (`m ≥ 64 MiB, t ≥ 2, p ≥ 1`),
 /// and [`verify`] refuses hashes below it (0.8.2).
 ///
@@ -65,7 +85,11 @@ const SCRUB_BYTES: usize = 128 * 1024;
 
 /// Hash a password → PHC string (includes salt + params). Use when creating
 /// or changing a password.
+///
+/// `password` is at most [`MAX_PASSWORD_BYTES`]; a longer one is
+/// `Error::Format`, refused before Argon2 runs (0.9.0).
 pub fn hash(password: &SecretString, preset: Preset) -> Result<String, Error> {
+    check_password_len(password)?;
     let res = password.expose_str(|pw| {
         // `hash_password` draws a fresh 16-byte salt from the OS CSPRNG.
         hasher(preset)
@@ -154,9 +178,20 @@ fn check_stored_hash(parsed: &PasswordHash) -> Result<(), Error> {
 /// used. Anything else, such as Argon2i, Argon2d, version 16, a `keyid` (a
 /// secret key krypto does not have) or parameters outside that range, is
 /// `Error::Format`, refused before argon2 runs.
+///
+/// `password` is at most [`MAX_PASSWORD_BYTES`] and `phc` at most
+/// [`MAX_PHC_BYTES`]; a longer one is `Error::Format`, checked in that order,
+/// before `phc` is parsed (0.9.0).
 pub fn verify(password: &SecretString, phc: &str) -> Result<(), Error> {
     use argon2::password_hash::Error as PhError;
 
+    check_password_len(password)?;
+    if phc.len() > MAX_PHC_BYTES {
+        return Err(Error::Format(format!(
+            "PHC string is {} bytes — max {MAX_PHC_BYTES}",
+            phc.len()
+        )));
+    }
     let parsed =
         PasswordHash::new(phc).map_err(|e| Error::Format(format!("invalid PHC string: {e}")))?;
     check_stored_hash(&parsed)?;
@@ -199,11 +234,17 @@ pub fn verify(password: &SecretString, phc: &str) -> Result<(), Error> {
 /// bytes (0.8.2); a salt outside that is `Error::Format`. It is stored in
 /// plaintext next to the ciphertext. It is not a secret — its job is to make
 /// precomputed tables useless, and it does that just as well in the open.
+///
+/// # The password
+///
+/// At most [`MAX_PASSWORD_BYTES`]; a longer one is `Error::Format`, checked
+/// before the salt and before Argon2 runs (0.9.0).
 pub fn derive_key(
     password: &SecretString,
     salt: &[u8],
     preset: Preset,
 ) -> Result<crate::secret::SecretBuf, Error> {
+    check_password_len(password)?;
     if salt.len() < 16 {
         return Err(Error::Format(format!(
             "argon2 salt must be at least 16 bytes, got {}",

@@ -1,12 +1,33 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Small utilities every consumer was rolling on its own: plain SHA-256,
 //! constant-time comparison, and randomness for values that are NOT secrets.
+//! Also the crate's shared limit on an amount of data, [`MAX_DATA_BYTES`].
 
 use crate::error::Error;
+
+/// The most data one input may hold, in bytes: 64 MiB (0.9.0). It bounds the
+/// plaintext of `seal`, a blob (plus its header and tag), the data of
+/// `hmac_sha256`, a message to sign or verify, the bytes `hex` and `base64`
+/// encode or decode to, and the content of `SecretBuf::from_vec` and
+/// `SecretString::from_string`. More is `Error::Format`.
+pub const MAX_DATA_BYTES: usize = 64 * 1024 * 1024;
+
+/// Refuses `len` above [`MAX_DATA_BYTES`] with `Error::Format` (0.9.0). `what`
+/// names the input; the message carries only the lengths.
+pub(crate) fn check_data_len(what: &str, len: usize) -> Result<(), Error> {
+    if len > MAX_DATA_BYTES {
+        return Err(Error::Format(format!(
+            "{what} is {len} bytes — max {MAX_DATA_BYTES}"
+        )));
+    }
+    Ok(())
+}
 
 /// Plain SHA-256 (FIPS 180-4). For fingerprints and content addressing —
 /// **not** for authentication (use [`crate::hmac_sha256`]) and **not** for
 /// passwords (use [`crate::password`]).
+///
+/// It has no size limit (0.9.0): it cannot fail and reserves no memory.
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
@@ -20,6 +41,8 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
 /// fingerprints against a pin, key ids) — a plain `==` can leak how many
 /// leading bytes matched through timing. Slices of different length compare
 /// unequal immediately; the *length* is treated as public.
+///
+/// It has no size limit (0.9.0): it cannot fail and reserves no memory.
 pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     use subtle::ConstantTimeEq;
     if a.len() != b.len() {
@@ -80,11 +103,11 @@ mod tests {
     #[test]
     fn sha256_known_answers() {
         assert_eq!(
-            crate::hex::encode(&sha256(b"abc")),
+            crate::hex::encode(&sha256(b"abc")).unwrap(),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
         assert_eq!(
-            crate::hex::encode(&sha256(b"")),
+            crate::hex::encode(&sha256(b"")).unwrap(),
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
     }

@@ -8,17 +8,31 @@
 //! used to carry its own hex helper can drop it (nettls had two).
 
 use crate::error::Error;
+use crate::util::{check_data_len, MAX_DATA_BYTES};
 
 const ALPHABET: &[u8; 16] = b"0123456789abcdef";
 
+/// The longest text [`decode`] takes, in bytes: the hex of
+/// [`MAX_DATA_BYTES`] bytes (0.9.0).
+const MAX_TEXT_BYTES: usize = 2 * MAX_DATA_BYTES;
+
 /// Encode bytes as lowercase hex.
-pub fn encode(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
+///
+/// `bytes` is at most [`MAX_DATA_BYTES`]; more is `Error::Format`, refused
+/// before any memory is reserved (0.9.0). The output string is reserved with
+/// `try_reserve_exact`: a failed reservation is `Error::Hardening` instead of
+/// an abort.
+pub fn encode(bytes: &[u8]) -> Result<String, Error> {
+    check_data_len("hex encode input", bytes.len())?;
+    let len = bytes.len() * 2;
+    let mut s = String::new();
+    s.try_reserve_exact(len)
+        .map_err(|_| Error::Hardening(format!("cannot allocate {len} bytes for hex encode")))?;
     for &b in bytes {
         s.push(ALPHABET[(b >> 4) as usize] as char);
         s.push(ALPHABET[(b & 0x0f) as usize] as char);
     }
-    s
+    Ok(s)
 }
 
 /// Decode canonical (lowercase) hex. Fail-closed: odd length, uppercase or
@@ -26,7 +40,16 @@ pub fn encode(bytes: &[u8]) -> String {
 /// is reserved with `try_reserve_exact`: a failed reservation is
 /// `Error::Hardening` instead of an abort (0.9.0); a length the system
 /// promises but cannot back still fills the memory.
+///
+/// The output is at most [`MAX_DATA_BYTES`], so `s` is at most twice that; a
+/// longer `s` is `Error::Format`, refused before anything else (0.9.0).
 pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
+    if s.len() > MAX_TEXT_BYTES {
+        return Err(Error::Format(format!(
+            "hex string is {} bytes — max {MAX_TEXT_BYTES}",
+            s.len()
+        )));
+    }
     if !s.len().is_multiple_of(2) {
         return Err(Error::Format(format!(
             "hex string has odd length {}",
@@ -70,14 +93,14 @@ mod tests {
     #[test]
     fn roundtrip() {
         let data = [0x00u8, 0x01, 0x7f, 0x80, 0xab, 0xff];
-        let s = encode(&data);
+        let s = encode(&data).unwrap();
         assert_eq!(s, "00017f80abff");
         assert_eq!(decode(&s).unwrap(), data);
     }
 
     #[test]
     fn empty_is_fine() {
-        assert_eq!(encode(&[]), "");
+        assert_eq!(encode(&[]).unwrap(), "");
         assert_eq!(decode("").unwrap(), Vec::<u8>::new());
     }
 

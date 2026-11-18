@@ -283,6 +283,52 @@ fn illegal_key_names_are_rejected() {
     }
 }
 
+/// The name rules apply at lookup too (0.9.0): `get` and `delete` give
+/// `Format` for a name that breaks them, and `delete` writes nothing;
+/// `contains` gives `false`, and `list` an empty list for a prefix longer than
+/// 512 bytes or outside printable ASCII. A legal name that is not there is
+/// `KeyNotFound` from `get` and `Ok` from `delete`, which writes nothing. 512
+/// bytes is legal, 513 is not.
+#[test]
+fn names_that_break_the_rules_at_lookup() {
+    let mk = master("lookup");
+    let path = store_path("lookup");
+    let mut s = SecretStore::open(&path, &mk).unwrap();
+    let longest = "n".repeat(512);
+    let too_long = "n".repeat(513);
+    s.put(&longest, &SecretBuf::from_vec(b"v".to_vec()).unwrap())
+        .unwrap();
+    let counter = s.counter();
+
+    for name in ["", "line\nbreak", "æøå", too_long.as_str()] {
+        assert!(matches!(s.get(name), Err(Error::Format(_))), "get {name:?}");
+        assert!(
+            matches!(s.delete(name), Err(Error::Format(_))),
+            "delete {name:?}"
+        );
+        assert!(!s.contains(name), "contains {name:?}");
+    }
+    assert_eq!(s.counter(), counter, "a refused delete writes nothing");
+
+    assert!(s.contains(&longest));
+    s.get(&longest).unwrap();
+    assert!(matches!(s.get("missing"), Err(Error::KeyNotFound)));
+    s.delete("missing").unwrap();
+    assert_eq!(
+        s.counter(),
+        counter,
+        "deleting a missing name writes nothing"
+    );
+
+    assert_eq!(s.list(""), [longest.as_str()]);
+    assert_eq!(s.list(&longest), [longest.as_str()]);
+    for prefix in [too_long.as_str(), "n\n", "æ"] {
+        assert!(s.list(prefix).is_empty(), "list {prefix:?}");
+    }
+    drop(s);
+    let _ = std::fs::remove_file(&path);
+}
+
 // --- rotate (0.6.0 — the rotation action) ---
 
 fn master_with(tag: &str, byte: u8) -> MasterKey {

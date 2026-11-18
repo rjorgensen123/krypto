@@ -100,8 +100,8 @@ for checking from a shell what they made; it is not a product.
 
 ## Test
 
-Two store tests hold secrets of 16 MiB and 6 MiB in locked memory and can run at the same time,
-so `cargo test` needs a locked-memory limit (`RLIMIT_MEMLOCK`, `ulimit -l`) above 22 MiB.
+One test holds a secret of 64 MiB in locked memory, so `cargo test` needs a locked-memory limit
+(`RLIMIT_MEMLOCK`, `ulimit -l`) of 65 MiB or more.
 
 ```sh
 cargo test                     # incl. official AEAD/signature/DH vectors, that the memory protection and

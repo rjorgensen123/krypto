@@ -31,8 +31,11 @@ how to use it is in the [README](README.md) and under [`docs/`](docs/Home.md).
 ## Input
 
 **Everything that comes in has an upper bound.** A function that takes data of variable length has
-a limit, named as a `MAX_*` constant, refuses more with `Format`, and states the limit in
-`docs/API.md`. A change that adds an input adds its limit in the same change.
+a limit, a `MAX_*` constant or a size that follows from one, refuses more with `Format`, and states
+the limit in `docs/API.md`. A change that adds an input adds its limit in the same change. The exceptions are
+`sha256` and `ct_eq`, which cannot fail and reserve no memory; paths, which the operating system
+bounds; and `random_bytes_with_limit` and `SecretBuf::random_with_limit`, whose limit is the
+caller's.
 
 **Input is validated before it is used,** from every source, a file krypto wrote itself included:
 type, length, range and character set. Unknown values are refused, not ignored. No input makes the

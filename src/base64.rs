@@ -13,12 +13,41 @@
 //! — two spellings of the same bytes must not be able to exist.
 
 use crate::error::Error;
+use crate::util::{check_data_len, MAX_DATA_BYTES};
 
 const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+/// The longest text [`decode`] takes, in bytes: the padded base64 of
+/// [`MAX_DATA_BYTES`] bytes (0.9.0).
+const MAX_TEXT_BYTES: usize = MAX_DATA_BYTES.div_ceil(3) * 4;
+
+/// The longest text [`decode_nopad`] takes, in bytes: the unpadded base64 of
+/// [`MAX_DATA_BYTES`] bytes (0.9.0).
+const MAX_NOPAD_TEXT_BYTES: usize = (4 * MAX_DATA_BYTES).div_ceil(3);
+
+/// Refuses text longer than `max` with `Error::Format` (0.9.0).
+fn check_text_len(s: &str, max: usize) -> Result<(), Error> {
+    if s.len() > max {
+        return Err(Error::Format(format!(
+            "base64 string is {} bytes — max {max}",
+            s.len()
+        )));
+    }
+    Ok(())
+}
+
 /// Encode bytes as STANDARD base64 **with** padding (PEM-style body form).
-pub fn encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+///
+/// `bytes` is at most [`MAX_DATA_BYTES`]; more is `Error::Format`, refused
+/// before any memory is reserved (0.9.0). The output string is reserved with
+/// `try_reserve_exact`: a failed reservation is `Error::Hardening` instead of
+/// an abort.
+pub fn encode(bytes: &[u8]) -> Result<String, Error> {
+    check_data_len("base64 encode input", bytes.len())?;
+    let len = bytes.len().div_ceil(3) * 4;
+    let mut out = String::new();
+    out.try_reserve_exact(len)
+        .map_err(|_| Error::Hardening(format!("cannot allocate {len} bytes for base64 encode")))?;
     for chunk in bytes.chunks(3) {
         let b0 = chunk[0] as u32;
         let b1 = *chunk.get(1).unwrap_or(&0) as u32;
@@ -37,17 +66,18 @@ pub fn encode(bytes: &[u8]) -> String {
             '='
         });
     }
-    out
+    Ok(out)
 }
 
 /// Encode bytes as STANDARD base64 **without** padding (the ssh fingerprint
-/// form `SHA256:<base64-no-pad>`).
-pub fn encode_nopad(bytes: &[u8]) -> String {
-    let mut s = encode(bytes);
+/// form `SHA256:<base64-no-pad>`). The limit and the errors are those of
+/// [`encode`] (0.9.0).
+pub fn encode_nopad(bytes: &[u8]) -> Result<String, Error> {
+    let mut s = encode(bytes)?;
     while s.ends_with('=') {
         s.pop();
     }
-    s
+    Ok(s)
 }
 
 /// Decode canonical padded base64. Fail-closed: whitespace, invalid
@@ -56,7 +86,12 @@ pub fn encode_nopad(bytes: &[u8]) -> String {
 /// `try_reserve_exact`: a failed reservation is `Error::Hardening` instead of
 /// an abort (0.9.0); a length the system promises but cannot back still fills
 /// the memory.
+///
+/// The output is at most [`MAX_DATA_BYTES`] (0.9.0): `s` longer than the
+/// padded base64 of that many bytes is `Error::Format`, refused before
+/// anything else, and so is an `s` of that length that would decode to more.
 pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
+    check_text_len(s, MAX_TEXT_BYTES)?;
     if !s.len().is_multiple_of(4) {
         return Err(Error::Format(format!(
             "base64 length {} is not a multiple of 4 (padded form required)",
@@ -77,7 +112,12 @@ pub fn decode(s: &str) -> Result<Vec<u8>, Error> {
 /// reserved with `try_reserve_exact`: a failed reservation is
 /// `Error::Hardening` instead of an abort (0.9.0); a length the system
 /// promises but cannot back still fills the memory.
+///
+/// The output is at most [`MAX_DATA_BYTES`] (0.9.0): `s` longer than the
+/// unpadded base64 of that many bytes is `Error::Format`, refused before
+/// anything else.
 pub fn decode_nopad(s: &str) -> Result<Vec<u8>, Error> {
+    check_text_len(s, MAX_NOPAD_TEXT_BYTES)?;
     if s.contains('=') {
         return Err(Error::Format(
             "unexpected '=' — decode_nopad takes the unpadded form".into(),
@@ -95,6 +135,14 @@ pub fn decode_nopad(s: &str) -> Result<Vec<u8>, Error> {
 /// Decode the alphabet body (no padding chars). Rejects invalid characters
 /// and non-zero discarded bits in the final quantum (canonical: one spelling).
 fn decode_body(s: &str) -> Result<Vec<u8>, Error> {
+    // The limit is on the output (0.9.0): a padded text of the longest length
+    // with one `=` or none would decode to one or two bytes more.
+    let out_len = s.len() / 4 * 3 + s.len() % 4 * 3 / 4;
+    if out_len > MAX_DATA_BYTES {
+        return Err(Error::Format(format!(
+            "base64 string decodes to {out_len} bytes — max {MAX_DATA_BYTES}"
+        )));
+    }
     // The output buffer is reserved with `try_reserve_exact`: a failed
     // reservation is `Error::Hardening` instead of an abort (0.9.0); a length
     // the system promises but cannot back still fills the memory.
@@ -156,9 +204,9 @@ mod tests {
             &b"foobar"[..],
             &[0x00, 0xff, 0x7f, 0x80][..],
         ] {
-            let p = encode(data);
+            let p = encode(data).unwrap();
             assert_eq!(decode(&p).unwrap(), data);
-            let n = encode_nopad(data);
+            let n = encode_nopad(data).unwrap();
             assert_eq!(decode_nopad(&n).unwrap(), data);
         }
     }
@@ -166,10 +214,10 @@ mod tests {
     #[test]
     fn rfc4648_vectors() {
         // RFC 4648 §10 — the published answers, not just a roundtrip.
-        assert_eq!(encode(b"foobar"), "Zm9vYmFy");
-        assert_eq!(encode(b"fooba"), "Zm9vYmE=");
-        assert_eq!(encode(b"foob"), "Zm9vYg==");
-        assert_eq!(encode_nopad(b"fooba"), "Zm9vYmE");
+        assert_eq!(encode(b"foobar").unwrap(), "Zm9vYmFy");
+        assert_eq!(encode(b"fooba").unwrap(), "Zm9vYmE=");
+        assert_eq!(encode(b"foob").unwrap(), "Zm9vYg==");
+        assert_eq!(encode_nopad(b"fooba").unwrap(), "Zm9vYmE");
     }
 
     #[test]

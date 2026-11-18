@@ -73,6 +73,9 @@ region, not in a variable that lives on.
 **Note:** the types cannot be copied and cannot be serialized, and printing them gives you
 `SecretBuf([REDACTED], len=32)`. That is not something you can turn off.
 
+*(0.9.0)* A secret made with `from_vec` or `from_string` holds at most `MAX_DATA_BYTES` (64 MiB);
+more gives `Format`, before any memory is locked, and the source is zeroized all the same.
+
 **Locked memory has a limit.** Each secret has memory pages of its own that are locked in RAM, so
 every non-empty secret alive at the same time counts at least one page (usually 4 KiB) against the
 process's locked-memory limit (`RLIMIT_MEMLOCK`, `ulimit -l`), decrypted plaintexts and derived
@@ -165,6 +168,10 @@ The blob format is unchanged — an empty AAD is exactly what `seal`/`open` have
 AAD is at most `MAX_AAD_BYTES` (1024) bytes; a longer one is `Error::Format`. It is public data to
 krypto — held in ordinary memory, not locked and not wiped — so nothing secret belongs in it.
 
+*(0.9.0)* The plaintext is at most `MAX_DATA_BYTES` (64 MiB), and a blob at most that plus 86 bytes
+(its header and the longest tag), so every blob `seal` makes opens. More gives `Error::Format`,
+before anything else is done with it.
+
 `key_id` is 16 bytes you choose yourself, carried in the blob in plaintext. It exists so you can
 see **which key generation** a blob belongs to, without opening it:
 
@@ -193,7 +200,8 @@ The whole blob header — version, algorithm, key id and nonce — is **authenti
 changes a single byte of it, or of what follows, you get `Error::Auth`. Only data that is not a
 krypto blob at all gives `Error::Format`. *(0.9.0)* That is data shorter than the 4-byte magic, or
 not starting with `FAFN`; a blob that starts with `FAFN` but is cut short of the 54-byte header
-gives `Auth` too. You **never** get wrong plaintext back instead.
+gives `Auth` too. Data longer than the blob limit above gives `Format`, whatever it starts with.
+You **never** get wrong plaintext back instead.
 
 That includes someone swapping the key id to trick you into the wrong key. That case has its own
 test in the crate.
@@ -339,7 +347,9 @@ after the fork, or use it in one process only.
 **Rules for names:** non-empty, at most 512 bytes, printable ASCII only (`[\x20-\x7e]`). Names are
 not secret — they are listed by `list()` and may end up in the caller's log. A name with a newline
 could have shifted lines in someone else's log, and an empty name is nothing you can look up
-again. Break the rules and you get `Format`.
+again. Break the rules and you get `Format`. *(0.9.0)* That holds when you look a name up too:
+`get` and `delete` give `Format` for a name that breaks the rules, and `delete` writes nothing;
+`contains` gives `false`; and `list` gives an empty list for a prefix that no name can start with.
 
 **When not to use the store:** if your secrets live in a database rather than in a file, build
 directly on `derive` + `seal`/`open` instead. The store solves the file problem; it is not a
@@ -377,6 +387,10 @@ such as an Argon2i or Argon2d hash from another tool, version 16, a hash made wi
 (`keyid=`, which krypto does not have), or numbers outside that range, also gives `Error::Format`,
 before Argon2 runs. A stored string therefore cannot make one check use more memory or time than
 that.
+
+*(0.9.0)* A password is at most `password::MAX_PASSWORD_BYTES` (1024) bytes, in `hash`, `verify`
+and `derive_key`, and the stored string at most `password::MAX_PHC_BYTES` (512) bytes; a longer one
+gives `Format`, before Argon2 runs.
 
 ### Give me the key this password unlocks (encryption at rest)
 
@@ -421,7 +435,8 @@ let seal = krypto::hmac_sha256(&log_key, line.as_bytes())?;
 
 Without the key nobody can produce a valid seal, and therefore nobody can change the line
 unnoticed. The usual pattern is to include the previous line's seal in the next computation — then
-the whole log hangs together as a chain.
+the whole log hangs together as a chain. *(0.9.0)* The data is at most `MAX_DATA_BYTES` (64 MiB);
+more gives `Format`.
 
 *In Python: [Putting a seal on something](Python.md#putting-a-seal-on-something).*
 
@@ -448,6 +463,9 @@ sign::ecdsa_p256_verify(&sec1_public, message, &der)?;
 
 Private keys live in `SecretBuf` like everything else secret. A malformed key/signature gives
 `Format`; a signature that does not hold gives `Auth` — the same split as everywhere else.
+*(0.9.0)* A message is at most `MAX_DATA_BYTES` (64 MiB), and for P-256 the public key at most 65
+bytes, the signature 72 and the PKCS#8 private key 512 (`sign::MAX_ECDSA_P256_*`); more gives
+`Format`.
 
 *(0.8.2)* **Which Ed25519 verifier to use:** `ed25519_verify`. It refuses the weak public keys —
 the few keys of small order, for which anyone can make signatures that hold, without a private
@@ -483,7 +501,7 @@ point that would force a predictable secret is rejected with `Auth`.
 ```rust
 let fp    = krypto::sha256(cert_der);                 // fingerprint (FIPS 180-4)
 let equal = krypto::ct_eq(&fp, &expected);            // constant-time comparison
-let hexs  = krypto::hex::encode(&fp);                 // lowercase — one canonical form
+let hexs  = krypto::hex::encode(&fp)?;                // lowercase — one canonical form
 let raw   = krypto::hex::decode(&hexs)?;              // fail-closed: rejects UPPERCASE
 let salt  = krypto::random_bytes(16)?;                // for NON-secrets (salts, ids)
 ```
@@ -493,6 +511,11 @@ let salt  = krypto::random_bytes(16)?;                // for NON-secrets (salts,
 Both give at most 1 MiB in one call (`MAX_RANDOM_BYTES`); asking for more is `Format`. If your
 program really needs more in one call, say so with your own cap: `random_bytes_with_limit(len,
 limit)` or `SecretBuf::random_with_limit(len, limit)`. The cap is per call, not a setting.
+
+*(0.9.0)* `hex::encode` and the `base64` encoders return a `Result`: they take at most
+`MAX_DATA_BYTES` (64 MiB), and the decoders give at most that many bytes, so a decoder takes
+whatever its encoder makes. More gives `Format`. `sha256` and `ct_eq` have no limit: they cannot
+fail and reserve no memory.
 
 *In Python: [The small utilities](Python.md#the-small-utilities).*
 
@@ -530,7 +553,7 @@ None of them carry key material or plaintext. You can log them as they are.
 
 | Version | What arrived |
 |---|---|
-| **0.9.0** | **Store file format v2** (`spec/SPEC-secretstore.md`): the whole file is authenticated (`container_mac`), the master key is checked at `open` (`key_check`; `WrongKey` when it does not fit), and a write counter enables rollback detection (`open_with_min_counter`, `Error::Rollback`) · new stores are v2, an opened file keeps its version · an open that names a version (`open_with_version`, and `open_with_min_counter` for v2) accepts only that version · `upgrade()` (v1 → v2, one-way), `version()`, `counter()`, `key_id()`, `key_id_from_file()` · `rotate` keeps the version and resets the counter on v2 · a blob cut short of its 54-byte header past the `FAFN` magic now gives `Auth`, not `Format` · `SecretStore::put` checks the 16 MiB cap on the prospective file size before sealing · caller-supplied AAD on blobs: `seal_with_aad`/`open_with_aad`/`reseal_with_aad` — the blob format is unchanged, an empty AAD is the old behaviour; the AAD is capped at `MAX_AAD_BYTES` (1024) · ⚠ krypto before 0.9.0 cannot read a v2 store file; name version 1 where older readers must keep working · a write to a store whose counter is at its maximum fails with `Hardening`: rotate the store · `hex::decode`, `base64::decode` and `base64::decode_nopad` give `Hardening` when the output buffer cannot be reserved · `krypto-cli`: a blob cut short in its header gives exit 3 from `open` (it was 1) and from `inspect` (it was 0) |
+| **0.9.0** | **Store file format v2** (`spec/SPEC-secretstore.md`): the whole file is authenticated (`container_mac`), the master key is checked at `open` (`key_check`; `WrongKey` when it does not fit), and a write counter enables rollback detection (`open_with_min_counter`, `Error::Rollback`) · new stores are v2, an opened file keeps its version · an open that names a version (`open_with_version`, and `open_with_min_counter` for v2) accepts only that version · `upgrade()` (v1 → v2, one-way), `version()`, `counter()`, `key_id()`, `key_id_from_file()` · `rotate` keeps the version and resets the counter on v2 · a blob cut short of its 54-byte header past the `FAFN` magic now gives `Auth`, not `Format` · `SecretStore::put` checks the 16 MiB cap on the prospective file size before sealing · caller-supplied AAD on blobs: `seal_with_aad`/`open_with_aad`/`reseal_with_aad` — the blob format is unchanged, an empty AAD is the old behaviour; the AAD is capped at `MAX_AAD_BYTES` (1024) · ⚠ krypto before 0.9.0 cannot read a v2 store file; name version 1 where older readers must keep working · a write to a store whose counter is at its maximum fails with `Hardening`: rotate the store · `hex::decode`, `base64::decode` and `base64::decode_nopad` give `Hardening` when the output buffer cannot be reserved · ⚠ every input has an upper bound, and more is `Format`, also where it was accepted before (a blob over the limit sealed by an older krypto does not open, and a password over 1024 bytes is refused): `MAX_DATA_BYTES` (64 MiB) for the plaintext, a blob, HMAC data, a message to sign or verify, what `hex` and `base64` encode and decode, and a secret made with `from_vec`/`from_string`; `password::MAX_PASSWORD_BYTES` and `MAX_PHC_BYTES`; the P-256 key and signature sizes · ⚠ `hex::encode`, `base64::encode` and `base64::encode_nopad` return a `Result` · ⚠ `SecretStore::get` and `delete` give `Format` for a name that breaks the name rules (`get` gave `KeyNotFound`, `delete` gave `Ok`) · `krypto-cli`: a blob cut short in its header gives exit 3 from `open` (it was 1) and from `inspect` (it was 0); `verify` bounds `--public` and `--signature` |
 | **0.8.2** | ⚠ `ed25519_verify` refuses weak keys, and `ed25519_verify_relaxed` is new · ⚠ `password::verify` accepts only the hashes krypto makes · ⚠ `password::derive_key` caps the salt at 1024 bytes · `SecretStore`: a write that fails after the rename says so, the lock file is not followed through a link, and what is at the store path must be a regular file · `seal`, `open`, `hmac_sha256` and `derive` overwrite the key material they leave on the stack · `hex` and `base64` decode errors no longer show the input · `krypto-cli inspect` shows only printable ASCII, and reads crafted DER, PEM, OpenPGP and zip input right or says it is invalid · krypto-py declares that it needs the GIL · the README and Home say who has reviewed krypto |
 | **0.8.1** | No functional change: the documentation is corrected where it said more than the code does, a test file no longer names the machine it was made on, and the Python packages carry no paths from the machine that built them |
 | **0.8.0** | **Python: `krypto-py`.** The same API from Python, built from the same code: what one seals, the other opens; one API reference, with the guarantees that differ set apart · `MasterKey::key_id` in the library, the value `krypto-cli` has always used · the repository is a workspace of `krypto` and `krypto-py` · `krypto-cli` is a small helper with nine commands |

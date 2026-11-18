@@ -241,7 +241,8 @@ fn message(packets: &[Packet]) -> Option<Finding> {
                     _ => continue,
                 };
                 let who = if version == 3 {
-                    format!(" to key {}", krypto::hex::encode(body.get(1..9)?))
+                    let id = krypto::hex::encode(body.get(1..9)?).unwrap_or_else(|e| e.to_string());
+                    format!(" to key {id}")
                 } else {
                     String::new()
                 };

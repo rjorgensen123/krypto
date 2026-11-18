@@ -154,6 +154,41 @@ constraints, and the rules, each with the test that guards it where there is one
 everything that comes in has an upper bound, each failure has its own answer, what is stored is
 frozen, and the specification comes before the code. The README links to it.
 
+### ⚠ Changed — every input has an upper bound *(2026-11-18)*
+
+Everything a public function takes has a limit now, and more is `Format`:
+
+- `MAX_DATA_BYTES` (64 MiB): the plaintext of `seal`, a blob (86 bytes more, for its header and
+  tag), the data of `hmac_sha256`, a message to sign or verify, what `hex` and `base64` encode
+  and decode, and the content of `SecretBuf::from_vec` and `SecretString::from_string`.
+- `password::MAX_PASSWORD_BYTES` (1024) for a password, and `password::MAX_PHC_BYTES` (512) for
+  the PHC string of `verify`.
+- `sign::MAX_ECDSA_P256_PUBLIC_BYTES` (65), `MAX_ECDSA_P256_SIG_BYTES` (72) and
+  `MAX_ECDSA_P256_PKCS8_BYTES` (512).
+- `krypto-cli verify`: `--public` at most 130 characters and `--signature` at most 144.
+
+This breaks what was accepted before: a blob over the limit that an older krypto sealed does
+not open, and a password over 1024 bytes is refused. A blob over its limit is `Format` whatever
+it starts with. `sha256` and `ct_eq` have no limit: they cannot fail and reserve no memory. The
+constants are in krypto-py too.
+
+### ⚠ Changed — `hex::encode`, `base64::encode` and `base64::encode_nopad` return a `Result` *(2026-11-18)*
+
+They refuse input over `MAX_DATA_BYTES` with `Format`, and answer `Hardening` when the memory
+for the result cannot be had, where the process was aborted before. In krypto-py they raise.
+
+### ⚠ Changed — `SecretStore::get` and `delete` give `Format` for a name that breaks the name rules *(2026-11-18)*
+
+A name that is empty, longer than 512 bytes or not printable ASCII cannot be in a store. `get`
+gave `KeyNotFound` for it and `delete` gave `Ok`; both give `Format` now. `contains` gives
+`false` and `list` an empty list, as before.
+
+### Changed — the tests need a locked-memory limit of 65 MiB *(2026-11-18)*
+
+One test holds a secret of 64 MiB in locked memory, to show that `seal` refuses a plaintext over
+the limit. `cargo test` needs a locked-memory limit of 65 MiB or more; it was 22 MiB. The README
+says so.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*

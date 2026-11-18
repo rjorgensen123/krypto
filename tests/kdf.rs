@@ -147,7 +147,7 @@ fn key_id_is_frozen() {
     let key = krypto::SecretBuf::from_vec((0u8..32).collect()).unwrap();
     let mk = MasterKey::from_bytes(key).unwrap();
     assert_eq!(
-        krypto::hex::encode(&mk.key_id().unwrap()),
+        krypto::hex::encode(&mk.key_id().unwrap()).unwrap(),
         "e5b56819c0e7cf09e3fc10357542f41c"
     );
 }

@@ -62,7 +62,9 @@ The secret itself lives in Rust's locked memory, as in Rust. Two things are Pyth
   Expose only where you must, and do not keep what you get.
 
 Printing gives `SecretBuf([REDACTED], len=32)`. The locked-memory limit counts in the Python
-process: [Secrets in memory](Usage.md#secrets-in-memory).
+process: [Secrets in memory](Usage.md#secrets-in-memory). *(0.9.0)* `from_vec` and `from_string`
+take at most `krypto.MAX_DATA_BYTES` (64 MiB); more raises `FormatError`, and a `bytearray` is
+zeroed then too.
 
 ---
 
@@ -109,7 +111,8 @@ back = krypto.open_with_aad(log_key, aad_blob, b"record/42")
 
 The AAD is at most `krypto.MAX_AAD_BYTES` (1024) bytes; a longer one raises `FormatError`. It is
 public data to krypto — held in ordinary memory, not locked and not wiped — so nothing secret
-belongs in it.
+belongs in it. *(0.9.0)* The plaintext is at most `krypto.MAX_DATA_BYTES` (64 MiB) and a blob at
+most that plus 86 bytes; more raises `FormatError`.
 
 A changed blob, or the wrong key, raises `AuthError`:
 
@@ -123,7 +126,8 @@ except krypto.AuthError:
 
 *(0.9.0)* A blob that starts with `FAFN` but is cut short of its 54-byte header raises
 `AuthError` too, not `FormatError` — the alarm class is no longer the tamperer's choice. Only data
-that cannot carry the magic (shorter than 4 bytes, or not starting with `FAFN`) is `FormatError`.
+that cannot carry the magic (shorter than 4 bytes, or not starting with `FAFN`) is `FormatError`,
+and data longer than the blob limit above, whatever it starts with.
 
 The algorithms and the tampering rules: [Encrypt and decrypt](Usage.md#encrypt-and-decrypt).
 
@@ -142,6 +146,10 @@ store.list("api-")            # all names with this prefix
 store.delete("api-token")
 store.key_id()                # the store's key_id, 16 bytes, not secret (0.9.0)
 ```
+
+*(0.9.0)* A name that breaks the name rules raises `FormatError` from `get` and `delete` as it does
+from `put`; `contains` gives `False` for it, and `list` gives `[]` for a prefix no name can start
+with.
 
 In Rust the store borrows the master key; here it keeps the `MasterKey` object alive for as long as
 it lives. One handle per file holds as in Rust, with the same limits: a second `open` of the same
@@ -234,6 +242,9 @@ secret key (`keyid=`), raises `FormatError`, before Argon2 runs.
 `password.derive_key` takes a salt of at least 16 bytes and, *(0.8.2)*, at most 1024; outside that
 it raises `FormatError`.
 
+*(0.9.0)* The password is at most `password.MAX_PASSWORD_BYTES` (1024) bytes and the stored string
+at most `password.MAX_PHC_BYTES` (512); a longer one raises `FormatError`, before Argon2 runs.
+
 ---
 
 ## Putting a seal on something
@@ -241,6 +252,8 @@ it raises `FormatError`.
 ```python
 seal = krypto.hmac_sha256(log_key, b"a log line")
 ```
+
+*(0.9.0)* The data is at most `krypto.MAX_DATA_BYTES` (64 MiB); more raises `FormatError`.
 
 How a chain of seals works: [Putting a seal on something](Usage.md#putting-a-seal-on-something).
 
@@ -265,6 +278,10 @@ make signatures, is an `AuthError`, and a public key that is not canonically enc
 `FormatError`. `sign.ed25519_verify_relaxed` takes the same arguments and only checks that the
 signature equation holds, so it accepts weak keys; use it only when you must accept such keys,
 never to check who signed with a public key you got from someone else.
+
+*(0.9.0)* A message is at most `krypto.MAX_DATA_BYTES` (64 MiB), and for P-256 the public key at
+most `sign.MAX_ECDSA_P256_PUBLIC_BYTES` (65), the signature `sign.MAX_ECDSA_P256_SIG_BYTES` (72) and
+the private key `sign.MAX_ECDSA_P256_PKCS8_BYTES` (512) bytes; more raises `FormatError`.
 
 The key forms, and which verifier to use: [Signing and verifying](Usage.md#signing-and-verifying).
 
@@ -293,10 +310,15 @@ Why the material is not a key: [Agreeing on a key with a peer](Usage.md#agreeing
 ```python
 fp = krypto.sha256(b"certificate bytes")    # fingerprint
 equal = krypto.ct_eq(fp, fp)                # constant-time comparison
-hexs = krypto.hex.encode(fp)                # lowercase, one canonical form
+hexs = krypto.hex.encode(fp)                # lowercase, one canonical form; may raise (0.9.0)
 raw = krypto.hex.decode(hexs)               # rejects uppercase
 salt = krypto.random_bytes(16)              # for values that are NOT secrets
 ```
+
+*(0.9.0)* `hex.encode`, `base64.encode` and `base64.encode_nopad` take at most
+`krypto.MAX_DATA_BYTES` (64 MiB) and raise `FormatError` over it, or `HardeningError` when the
+output cannot be reserved; the decoders give at most that many bytes. `sha256` and `ct_eq` have no
+limit.
 
 The caps on random bytes, and your own cap: [The small utilities](Usage.md#the-small-utilities).
 

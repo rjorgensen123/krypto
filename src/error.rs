@@ -24,18 +24,22 @@ pub enum Error {
     Hardening(String),
     /// The input has the wrong shape: not a krypto blob, or a malformed key,
     /// signature, PHC string, encoding or parameter, such as an empty `info`
-    /// (0.7.3). Not a krypto blob means shorter than its 4-byte magic, or not
-    /// starting with `FAFN` (0.9.0; before that, shorter than the 54-byte
-    /// header, or not starting with `FAFN`). For a `SecretStore`: not a store
-    /// file, a store version krypto does not know or other than the one the
-    /// open names, or an invalid entry structure, which in a v2 file whose
-    /// container MAC holds means it was written that way.
+    /// (0.7.3). An input longer than its limit is `Format` too; from 0.9.0
+    /// every input has one, with the exceptions `docs/API.md` names, and a
+    /// store name that breaks the name rules is `Format` from `get` and
+    /// `delete` as well as from `put`. Not a krypto blob means shorter than its
+    /// 4-byte magic, or not starting with `FAFN` (0.9.0; before that, shorter
+    /// than the 54-byte header, or not starting with `FAFN`). For a
+    /// `SecretStore`: not a store file, a store version krypto does not know or
+    /// other than the one the open names, or an invalid entry structure, which
+    /// in a v2 file whose container MAC holds means it was written that way.
     Format(String),
     /// Authentication failed: a blob, signature or password that does not hold —
     /// tampering, or the wrong key or password. Any change to a blob past its
     /// `FAFN` magic is `Auth`, a version or algorithm krypto does not know
     /// included (0.7.3), a header cut short included (0.9.0), and never a
-    /// mis-decrypt (the key-id swap test). At the open of a v2 store file it
+    /// mis-decrypt (the key-id swap test); a blob made longer than its size
+    /// limit is `Format` (0.9.0). At the open of a v2 store file it
     /// means the file is not what was written, whatever the cause: it is cut
     /// short of its header, or the master key fits and something else in the
     /// file was changed, added or removed.

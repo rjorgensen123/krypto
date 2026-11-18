@@ -150,7 +150,8 @@ impl SecretBuf {
 impl SecretBuf {
     /// Copies `v` into locked memory. A `bytearray` is zeroed afterwards, as
     /// Rust zeroizes the source; a `bytes` object cannot be, so it stays as
-    /// Python keeps it.
+    /// Python keeps it. More than `MAX_DATA_BYTES` bytes is `FormatError`
+    /// (0.9.0).
     #[staticmethod]
     fn from_vec(v: &Bound<'_, PyAny>) -> PyResult<Self> {
         let data = if let Ok(ba) = v.cast::<PyByteArray>() {
@@ -220,6 +221,7 @@ struct SecretString {
 #[pymethods]
 impl SecretString {
     /// Copies `s` into locked memory. The Python `str` stays as Python keeps it.
+    /// More than `MAX_DATA_BYTES` bytes is `FormatError` (0.9.0).
     #[staticmethod]
     fn from_string(s: String) -> PyResult<Self> {
         krypto::SecretString::from_string(s)
@@ -793,9 +795,11 @@ fn x25519_shared(secret: &SecretBuf, peer_public: &[u8]) -> PyResult<SecretBuf> 
 // hex, base64
 // --------------------------------------------------------------------------- //
 
+/// `krypto::hex::encode`: raises `FormatError` over `MAX_DATA_BYTES`, and
+/// `HardeningError` when the output cannot be reserved (0.9.0).
 #[pyfunction(name = "encode")]
-fn hex_encode(bytes: &[u8]) -> String {
-    krypto::hex::encode(bytes)
+fn hex_encode(bytes: &[u8]) -> PyResult<String> {
+    krypto::hex::encode(bytes).map_err(err)
 }
 
 #[pyfunction(name = "decode")]
@@ -804,14 +808,17 @@ fn hex_decode<'py>(py: Python<'py>, s: &str) -> PyResult<Bound<'py, PyBytes>> {
     Ok(PyBytes::new(py, &b))
 }
 
+/// `krypto::base64::encode`: raises `FormatError` over `MAX_DATA_BYTES`, and
+/// `HardeningError` when the output cannot be reserved (0.9.0).
 #[pyfunction(name = "encode")]
-fn b64_encode(bytes: &[u8]) -> String {
-    krypto::base64::encode(bytes)
+fn b64_encode(bytes: &[u8]) -> PyResult<String> {
+    krypto::base64::encode(bytes).map_err(err)
 }
 
+/// `krypto::base64::encode_nopad`: raises as `encode` does (0.9.0).
 #[pyfunction(name = "encode_nopad")]
-fn b64_encode_nopad(bytes: &[u8]) -> String {
-    krypto::base64::encode_nopad(bytes)
+fn b64_encode_nopad(bytes: &[u8]) -> PyResult<String> {
+    krypto::base64::encode_nopad(bytes).map_err(err)
 }
 
 #[pyfunction(name = "decode")]
@@ -869,6 +876,7 @@ fn krypto_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("MAX_STORE_BYTES", krypto::MAX_STORE_BYTES)?;
     m.add("MAX_RANDOM_BYTES", krypto::MAX_RANDOM_BYTES)?;
     m.add("MAX_AAD_BYTES", krypto::MAX_AAD_BYTES)?;
+    m.add("MAX_DATA_BYTES", krypto::MAX_DATA_BYTES)?;
     add_errors(m)?;
     m.add_class::<SecretBuf>()?;
     m.add_class::<SecretString>()?;
@@ -901,6 +909,8 @@ fn krypto_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
         s.add_function(wrap_pyfunction!(drop_filesystem, s)?)
     })?;
     submodule(m, "password", |s| {
+        s.add("MAX_PASSWORD_BYTES", krypto::password::MAX_PASSWORD_BYTES)?;
+        s.add("MAX_PHC_BYTES", krypto::password::MAX_PHC_BYTES)?;
         s.add_class::<Preset>()?;
         s.add_function(wrap_pyfunction!(password_hash, s)?)?;
         s.add_function(wrap_pyfunction!(password_verify, s)?)?;
@@ -910,6 +920,18 @@ fn krypto_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
         s.add("ED25519_SEED_LEN", krypto::sign::ED25519_SEED_LEN)?;
         s.add("ED25519_PUBLIC_LEN", krypto::sign::ED25519_PUBLIC_LEN)?;
         s.add("ED25519_SIG_LEN", krypto::sign::ED25519_SIG_LEN)?;
+        s.add(
+            "MAX_ECDSA_P256_PUBLIC_BYTES",
+            krypto::sign::MAX_ECDSA_P256_PUBLIC_BYTES,
+        )?;
+        s.add(
+            "MAX_ECDSA_P256_SIG_BYTES",
+            krypto::sign::MAX_ECDSA_P256_SIG_BYTES,
+        )?;
+        s.add(
+            "MAX_ECDSA_P256_PKCS8_BYTES",
+            krypto::sign::MAX_ECDSA_P256_PKCS8_BYTES,
+        )?;
         s.add_function(wrap_pyfunction!(ed25519_keypair, s)?)?;
         s.add_function(wrap_pyfunction!(ed25519_public, s)?)?;
         s.add_function(wrap_pyfunction!(ed25519_sign, s)?)?;

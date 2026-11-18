@@ -23,6 +23,10 @@ pub struct SecretBuf {
 
 impl SecretBuf {
     /// Takes ownership of `v`, copies it into locked memory and zeroizes the source.
+    ///
+    /// `v` is at most [`crate::MAX_DATA_BYTES`]; more is `Error::Format`,
+    /// refused before any memory is locked, and `v` is zeroized then too
+    /// (0.9.0).
     pub fn from_vec(mut v: Vec<u8>) -> Result<Self, Error> {
         // The source is wiped on EVERY path, the error path included. An
         // `mlock` failure is precisely the moment a secret would otherwise be
@@ -31,10 +35,12 @@ impl SecretBuf {
         //
         // The buffer becomes a `SecretBuf` before it is filled, the same shape
         // as `random`: `Drop` (zeroize + unmap) owns it from the first instant.
-        let out = ffi::LockedPages::new(v.len()).map(|pages| {
-            let mut s = SecretBuf { pages };
-            s.pages.as_mut_slice().copy_from_slice(&v);
-            s
+        let out = crate::util::check_data_len("secret", v.len()).and_then(|()| {
+            ffi::LockedPages::new(v.len()).map(|pages| {
+                let mut s = SecretBuf { pages };
+                s.pages.as_mut_slice().copy_from_slice(&v);
+                s
+            })
         });
         v.zeroize();
         out
@@ -123,6 +129,10 @@ pub struct SecretString {
 
 impl SecretString {
     /// Takes ownership of `s`, stores it in locked memory and zeroizes the source.
+    ///
+    /// `s` is at most [`crate::MAX_DATA_BYTES`] bytes; more is `Error::Format`,
+    /// refused before any memory is locked, and `s` is zeroized then too
+    /// (0.9.0).
     pub fn from_string(s: String) -> Result<Self, Error> {
         // into_bytes() reuses the String allocation; from_vec zeroizes it
         // after copying into locked memory.

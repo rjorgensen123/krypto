@@ -428,12 +428,16 @@ impl<'a> SecretStore<'a> {
 
     /// Fetch a secret. `KeyNotFound` if the name does not exist.
     ///
+    /// (0.9.0) A name that breaks the rules `put` checks (non-empty, at most
+    /// 512 bytes, printable ASCII) is [`Error::Format`], checked first.
+    ///
     /// A blob that does not hold is [`Error::Auth`]: tampered, sealed under
     /// another key, or carrying another key id than the store's (0.7.3). A
     /// store holds one key generation, and `rotate` replaces it whole, so a
     /// different key id inside a store is never routing; before 0.7.3 it gave
     /// [`Error::WrongKey`].
     pub fn get(&self, name: &str) -> Result<SecretBuf, Error> {
+        validate_name(name)?;
         let blob = self.entries.get(name).ok_or(Error::KeyNotFound)?;
         // The key id in the blob and in the store header must agree; a change to
         // either is tampering. Neither is authenticated on its own (the blob's is
@@ -445,7 +449,12 @@ impl<'a> SecretStore<'a> {
         aead::open(&dek, blob)
     }
 
-    /// Delete a secret. Not an error if the name does not exist.
+    /// Delete a secret. Not an error if the name does not exist: then nothing
+    /// is written.
+    ///
+    /// (0.9.0) A name that breaks the rules `put` checks (non-empty, at most
+    /// 512 bytes, printable ASCII) is [`Error::Format`], checked first, and
+    /// nothing is written.
     ///
     /// (0.8.2) If only the sync of the directory after the rename fails,
     /// `delete` returns [`Error::Io`] although the entry is gone from the file,
@@ -454,6 +463,7 @@ impl<'a> SecretStore<'a> {
     /// (0.9.0) On a v2 store the write counter is bumped by 1, like on `put`,
     /// and a counter at its maximum refuses the write the same way.
     pub fn delete(&mut self, name: &str) -> Result<(), Error> {
+        validate_name(name)?;
         let Some(old) = self.entries.remove(name) else {
             return Ok(());
         };
@@ -482,12 +492,23 @@ impl<'a> SecretStore<'a> {
     }
 
     /// Whether a name exists (without decrypting).
+    ///
+    /// (0.9.0) A name that breaks the rules `put` checks (non-empty, at most
+    /// 512 bytes, printable ASCII) gives `false`, checked first.
     pub fn contains(&self, name: &str) -> bool {
-        self.entries.contains_key(name)
+        validate_name(name).is_ok() && self.entries.contains_key(name)
     }
 
-    /// Sorted key names with the given prefix (names are not secret).
+    /// Sorted key names with the given prefix (names are not secret). An
+    /// empty prefix lists every name.
+    ///
+    /// (0.9.0) A prefix longer than 512 bytes, or with a character outside
+    /// printable ASCII, gives an empty list, checked first: no name can start
+    /// with it.
     pub fn list(&self, prefix: &str) -> Vec<String> {
+        if prefix.len() > MAX_NAME_LEN || prefix.chars().any(|c| !(' '..='~').contains(&c)) {
+            return Vec::new();
+        }
         let mut v: Vec<String> = self
             .entries
             .keys()
@@ -1167,11 +1188,8 @@ fn atomic_write(path: &Path, data: &[u8]) -> Result<(), WriteError> {
     let mut nonce = [0u8; 8];
     getrandom::fill(&mut nonce)
         .map_err(|e| WriteError::NotReplaced(Error::Hardening(format!("getrandom: {e}"))))?;
-    let tmp = dir.join(format!(
-        ".tmp-{}-{}-{fname}",
-        std::process::id(),
-        crate::hex::encode(&nonce)
-    ));
+    let nonce_hex = crate::hex::encode(&nonce).map_err(WriteError::NotReplaced)?;
+    let tmp = dir.join(format!(".tmp-{}-{nonce_hex}-{fname}", std::process::id()));
 
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create_new(true);

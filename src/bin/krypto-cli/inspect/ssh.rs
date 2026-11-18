@@ -25,10 +25,10 @@ fn key_type(blob: &[u8]) -> Option<String> {
 }
 
 fn fingerprint(blob: &[u8]) -> String {
-    format!(
-        "SHA256:{}",
-        krypto::base64::encode_nopad(&krypto::sha256(blob))
-    )
+    match krypto::base64::encode_nopad(&krypto::sha256(blob)) {
+        Ok(b64) => format!("SHA256:{b64}"),
+        Err(e) => e.to_string(),
+    }
 }
 
 const KEY_TYPES: [&str; 9] = [

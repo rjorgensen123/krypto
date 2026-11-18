@@ -40,6 +40,20 @@ fn empty_buffer() {
     assert_eq!(format!("{s:?}"), "SecretBuf([REDACTED], len=0)");
 }
 
+/// The content is bounded (0.9.0): one byte over `MAX_DATA_BYTES` is `Format`,
+/// refused before any memory is locked, so the test needs no locked memory.
+#[test]
+fn content_over_max_data_bytes_gives_format() {
+    assert!(matches!(
+        SecretBuf::from_vec(vec![0u8; krypto::MAX_DATA_BYTES + 1]),
+        Err(krypto::Error::Format(_))
+    ));
+    assert!(matches!(
+        SecretString::from_string("s".repeat(krypto::MAX_DATA_BYTES + 1)),
+        Err(krypto::Error::Format(_))
+    ));
+}
+
 #[test]
 fn secretstring_roundtrip_and_redacted() {
     // Non-ASCII on purpose: len() counts bytes, not characters.

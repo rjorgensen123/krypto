@@ -18,19 +18,19 @@ fn x25519_rfc7748_vectors() {
     let alice_pub = x25519_public(&alice).unwrap();
     let bob_pub = x25519_public(&bob).unwrap();
     assert_eq!(
-        hex::encode(&alice_pub),
+        hex::encode(&alice_pub).unwrap(),
         "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a"
     );
     assert_eq!(
-        hex::encode(&bob_pub),
+        hex::encode(&bob_pub).unwrap(),
         "de9edb7d7b7dc1b4d35b61c2ece435373f8343c85b78674dadfc7e146f882b4f"
     );
 
     let shared_a = x25519_shared(&alice, &bob_pub).unwrap();
     let shared_b = x25519_shared(&bob, &alice_pub).unwrap();
     let expected = "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742";
-    shared_a.expose(|a| assert_eq!(hex::encode(a), expected));
-    shared_b.expose(|b| assert_eq!(hex::encode(b), expected));
+    shared_a.expose(|a| assert_eq!(hex::encode(a).unwrap(), expected));
+    shared_b.expose(|b| assert_eq!(hex::encode(b).unwrap(), expected));
 }
 
 #[test]

@@ -251,7 +251,7 @@ fn blob(input: &[u8]) -> Option<Finding> {
         Ok(id) => found
             .fact("format", input[4].to_string())
             .fact("algorithm", alg_name(input[5]))
-            .fact("key id", hex::encode(&id))
+            .fact("key id", hex::encode(&id).unwrap_or_else(|e| e.to_string()))
             .fact("bytes", input.len().to_string()),
         Err(krypto::Error::Auth) => {
             let mut found = found.fact(
@@ -310,9 +310,10 @@ fn store(input: &[u8]) -> Option<Finding> {
         found.changed = ver == 2;
         return Some(found);
     }
-    let mut found = found
-        .fact("format", ver.to_string())
-        .fact("key id", hex::encode(&input[21..37]));
+    let mut found = found.fact("format", ver.to_string()).fact(
+        "key id",
+        hex::encode(&input[21..37]).unwrap_or_else(|e| e.to_string()),
+    );
     if ver == 2 {
         let counter = u64::from_le_bytes(input[69..77].try_into().unwrap());
         found = found
