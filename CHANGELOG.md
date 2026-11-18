@@ -206,6 +206,12 @@ that have no upper bound on their length. `docs/Cli.md` and `docs/Inspect.md` gi
 as they are. A comment on `drop_filesystem` said random bytes never come from `/dev/urandom`; it
 now says when they do. No code that runs is changed.
 
+### Fixed — `SecretStore::open` reads a store file on a read-only file system whatever its mode *(2026-11-18)*
+
+`open` sets mode 0600 on a store file that has another mode. Where it may not change the mode,
+it leaves the file as it is and goes on. That held for a file the process does not own; on a
+read-only file system `open` failed with `Io` instead. It now leaves the file as it is there too.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than
