@@ -79,7 +79,7 @@ their own variant. Here is what actually runs, with a reference for each:
 
 | Purpose | Algorithm | Reference |
 |---|---|---|
-| Encryption (AEAD) — **default** | AEGIS-256 | [IETF CFRG draft (AEGIS)](https://datatracker.ietf.org/doc/draft-irtf-cfrg-aegis-aead/) |
+| Encryption (AEAD) — **default** | AEGIS-256 | [RFC 10032](https://www.rfc-editor.org/rfc/rfc10032) |
 | Encryption (AEAD) — variant | XChaCha20-Poly1305 | [XChaCha draft](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-xchacha) · basis: [RFC 8439](https://www.rfc-editor.org/rfc/rfc8439) |
 | Encryption (AEAD) — interop | AES-256-GCM | [NIST SP 800-38D](https://csrc.nist.gov/pubs/sp/800-38d/final) |
 | Key derivation | HKDF (with SHA-256) | [RFC 5869](https://www.rfc-editor.org/rfc/rfc5869) |

@@ -394,6 +394,13 @@ only a lower bound of 16 bytes, where every other input to krypto has a cap;
 can no longer be derived; a salt of 16 to 1024 bytes gives the same key as
 before.
 
+### Changed — AEGIS-256 is referred to as RFC 10032 *(2026-11-18)*
+
+AEGIS was published as RFC 10032 in September 2026. `docs/Home.md` and
+`docs/API.md` named the draft it came from, and now name the RFC. The two
+AEGIS-256 test vectors are those of RFC 10032, Appendix A.3, with the same
+values as before; their tests and comments say so. No code that runs is changed.
+
 ## [0.8.1] — 2026-11-15
 
 *No functional change. The documentation is corrected where it said more than

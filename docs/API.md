@@ -348,7 +348,7 @@ magic "FAFN" (4) | format_ver (1) | alg_id (1) | key_id (16) | nonce (32) | ciph
   one lets an attacker read the XOR of two plaintexts and forge blobs. krypto keeps no count — the
   caller knows its volume. AEGIS-256 (32-byte nonce) and XChaCha (24-byte) have no limit that matters
   in practice.
-- **Verified against official vectors** (0.5.0): AEGIS-256 against `draft-irtf-cfrg-aegis-aead`,
+- **Verified against official vectors** (0.5.0): AEGIS-256 against RFC 10032 (Appendix A.3),
   XChaCha against draft-arciszewski A.1, AES-256-GCM against NIST CAVS.
 
 ---
