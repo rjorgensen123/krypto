@@ -233,6 +233,13 @@ The documentation says which is which, and recommends the Linux kernel setting
 Under Miri that cost gigabytes of memory and a long run, and showed nothing a small buffer does
 not. Miri no longer runs the test; the other CI jobs run it as before.
 
+### Fixed — the store's unit tests no longer leak their master key *(2026-11-18)*
+
+A helper in the unit tests of `src/store.rs` left its master key in memory on purpose, so the
+key was never dropped and its locked memory never wiped and released. AddressSanitizer reported
+it as a leak, and the ASan job in CI failed. The tests now own the key and lend it to the
+helper. Only test code is changed.
+
 ## [0.8.2]
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*

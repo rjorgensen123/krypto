@@ -1239,13 +1239,15 @@ fn write_then_rename(
 mod tests {
     use super::*;
 
-    fn test_store(version: u8) -> SecretStore<'static> {
-        let mk: &'static MasterKey = Box::leak(Box::new(
-            MasterKey::from_bytes(SecretBuf::from_vec(vec![7u8; 32]).unwrap()).unwrap(),
-        ));
+    /// The master key the unit tests own and lend to `test_store`.
+    fn test_master_key() -> MasterKey {
+        MasterKey::from_bytes(SecretBuf::from_vec(vec![7u8; 32]).unwrap()).unwrap()
+    }
+
+    fn test_store(master: &MasterKey, version: u8) -> SecretStore<'_> {
         SecretStore {
             path: PathBuf::from("/tmp/krypto-store-unittest.store"),
-            master: mk,
+            master,
             salt: [1u8; SALT_LEN],
             key_id: [2u8; KEY_ID_LEN],
             version,
@@ -1257,8 +1259,9 @@ mod tests {
 
     #[test]
     fn header_len_matches_the_file_version() {
-        assert_eq!(test_store(STORE_VER_V1).header_len(), 37);
-        assert_eq!(test_store(STORE_VER_V2).header_len(), 109);
+        let mk = test_master_key();
+        assert_eq!(test_store(&mk, STORE_VER_V1).header_len(), 37);
+        assert_eq!(test_store(&mk, STORE_VER_V2).header_len(), 109);
     }
 
     /// 0.9.0: the cap is computed on the prospective file size (header
@@ -1266,7 +1269,8 @@ mod tests {
     /// anything.
     #[test]
     fn prospective_len_counts_header_entries_and_replacement() {
-        let mut s = test_store(STORE_VER_V2);
+        let mk = test_master_key();
+        let mut s = test_store(&mk, STORE_VER_V2);
         s.entries.insert("a".to_string(), vec![0u8; 10]); // 109 + (2+1+4+10) = 126
         assert_eq!(s.prospective_file_len("a", 10), 126, "replace same size");
         assert_eq!(
@@ -1274,7 +1278,7 @@ mod tests {
             126 + (2 + 1 + 4 + 100),
             "add new entry"
         );
-        let mut s1 = test_store(STORE_VER_V1);
+        let mut s1 = test_store(&mk, STORE_VER_V1);
         s1.entries.insert("a".to_string(), vec![0u8; 10]);
         assert_eq!(s1.prospective_file_len("a", 10), 37 + 17, "v1 header is 37");
     }
@@ -1285,7 +1289,8 @@ mod tests {
     /// that the refusal came before that step.
     #[test]
     fn put_refuses_over_the_cap_before_sealing() {
-        let mut s = test_store(STORE_VER_V2);
+        let mk = test_master_key();
+        let mut s = test_store(&mk, STORE_VER_V2);
         // A file exactly at the cap: the v2 header and one entry named "big".
         let fill = MAX_STORE_BYTES - V2_HEADER_LEN - (2 + 3 + 4);
         s.entries.insert("big".to_string(), vec![0u8; fill]);
@@ -1338,7 +1343,8 @@ mod tests {
     /// `Alg::Aegis256`: the value's length plus the overhead.
     #[test]
     fn aegis256_blob_overhead_matches_seal() {
-        let s = test_store(STORE_VER_V2);
+        let mk = test_master_key();
+        let s = test_store(&mk, STORE_VER_V2);
         let dek = s.dek_for("a").unwrap();
         for len in [0, 1, 32, 1000] {
             let value = SecretBuf::from_vec(vec![5u8; len]).unwrap();
