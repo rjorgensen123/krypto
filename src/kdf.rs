@@ -35,8 +35,9 @@ const HMAC_SCRUB_BYTES: usize = 2 * 1024;
 #[cfg(debug_assertions)]
 const HMAC_SCRUB_BYTES: usize = 16 * 1024;
 
-/// Upper bound on a master-key file. A key is 32–64 bytes; 4 KiB is generous
-/// slack and prevents OOM on `/dev/zero`/a bloated file (bounded input).
+/// Upper bound on a master key, from a file or from bytes. A key is 32–64
+/// bytes in practice; 4 KiB is generous slack and prevents OOM on
+/// `/dev/zero`/a bloated file (bounded input).
 pub const MAX_MASTER_KEY_BYTES: usize = 4096;
 
 /// Upper bound on `info` and `salt` handed to [`MasterKey::derive`].

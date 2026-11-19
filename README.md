@@ -31,8 +31,8 @@ own is implemented**.
 - **Docs (ship with the crate):** overview [`docs/Home.md`](docs/Home.md) · usage guide
   [`docs/Usage.md`](docs/Usage.md) (Rust) and [`docs/Python.md`](docs/Python.md) (Python) ·
   **API contract** [`docs/API.md`](docs/API.md), one for both — every public name; `tests/docs.rs`
-  checks that it names the root exports, the functions, constants and types of the public modules,
-  and the methods of `SecretStore` (names only) · the test tool `krypto-cli`
+  builds a list of the public declarations from the Rust code blocks of `docs/API.md` and one from
+  the source, and the two must be equal · the test tool `krypto-cli`
   [`docs/Cli.md`](docs/Cli.md), where the same test checks that every command is named, and what
   its `inspect` recognizes [`docs/Inspect.md`](docs/Inspect.md) · how the code is laid out and the
   rules a change follows [`DEVELOPMENT.md`](DEVELOPMENT.md)

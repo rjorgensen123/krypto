@@ -36,7 +36,7 @@ bind whoever *changes* the surface:
 ## Root
 
 ```rust
-pub const VERSION: &str;  // new in 0.6.0 — the crate version (mirrors Cargo.toml), for About pages
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");  // new in 0.6.0 — the crate version (mirrors Cargo.toml), for About pages
 
 pub use secret::{SecretBuf, SecretString};
 pub use kdf::{MasterKey, DerivedKey, hmac_sha256, MAX_MASTER_KEY_BYTES, MAX_DERIVE_INPUT_BYTES};
@@ -187,7 +187,7 @@ pub const MAX_MASTER_KEY_BYTES: usize = 4096;
 pub const MAX_DERIVE_INPUT_BYTES: usize = 1024;   // 0.7.0
 
 impl MasterKey {
-    pub fn from_secret_file(path: impl AsRef<Path>) -> Result<Self, Error>;
+    pub fn from_secret_file(path: impl AsRef<std::path::Path>) -> Result<Self, Error>;
     pub fn from_bytes(key: SecretBuf) -> Result<Self, Error>;   // consumes the buffer
     pub fn derive(&self, info: &[u8], salt: &[u8]) -> Result<DerivedKey, Error>; // empty info: Format (0.7.3)
     pub fn key_id(&self) -> Result<[u8; 16], Error>;   // 0.8.0
@@ -379,8 +379,8 @@ impl<'a> SecretStore<'a> {
     pub fn counter(&self) -> u64;   // 0.9.0: the write counter, 0 on a v1 store
     pub fn key_id(&self) -> [u8; 16];   // 0.9.0: the store's key_id, not secret
     pub fn key_id_from_file(path: impl AsRef<Path>) -> Result<[u8; 16], Error>;   // 0.9.0: without the master key; not authenticated
-    pub fn upgrade(self) -> Result<SecretStore<'a>, Error>;   // 0.9.0: v1 → v2, one-way
-    pub fn rotate(self, new_master: &MasterKey) -> Result<SecretStore<'_>, Error>;  // 0.6.0
+    pub fn upgrade(self) -> Result<Self, Error>;   // 0.9.0: v1 → v2, one-way
+    pub fn rotate<'b>(self, new_master: &'b MasterKey) -> Result<SecretStore<'b>, Error>;  // 0.6.0
 }
 ```
 
@@ -701,9 +701,9 @@ pub const MAX_ECDSA_P256_PUBLIC_BYTES: usize = 65;    // 0.9.0
 pub const MAX_ECDSA_P256_SIG_BYTES: usize = 72;       // 0.9.0
 pub const MAX_ECDSA_P256_PKCS8_BYTES: usize = 512;    // 0.9.0
 
-pub fn ed25519_keypair() -> Result<(SecretBuf, [u8; 32]), Error>;
-pub fn ed25519_public(seed: &SecretBuf) -> Result<[u8; 32], Error>;
-pub fn ed25519_sign(seed: &SecretBuf, message: &[u8]) -> Result<[u8; 64], Error>;
+pub fn ed25519_keypair() -> Result<(SecretBuf, [u8; ED25519_PUBLIC_LEN]), Error>;
+pub fn ed25519_public(seed: &SecretBuf) -> Result<[u8; ED25519_PUBLIC_LEN], Error>;
+pub fn ed25519_sign(seed: &SecretBuf, message: &[u8]) -> Result<[u8; ED25519_SIG_LEN], Error>;
 pub fn ed25519_verify(public: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Error>;   // strict (0.8.2)
 pub fn ed25519_verify_relaxed(public: &[u8], message: &[u8], signature: &[u8]) -> Result<(), Error>;   // 0.8.2
 
@@ -755,8 +755,8 @@ that feature both accept such an S if its top three bits are clear.
 ```rust
 pub const X25519_KEY_LEN: usize = 32;
 
-pub fn x25519_keypair() -> Result<(SecretBuf, [u8; 32]), Error>;
-pub fn x25519_public(secret: &SecretBuf) -> Result<[u8; 32], Error>;
+pub fn x25519_keypair() -> Result<(SecretBuf, [u8; X25519_KEY_LEN]), Error>;
+pub fn x25519_public(secret: &SecretBuf) -> Result<[u8; X25519_KEY_LEN], Error>;
 pub fn x25519_shared(secret: &SecretBuf, peer_public: &[u8]) -> Result<SecretBuf, Error>;
 ```
 
@@ -932,7 +932,7 @@ soon as it is released; another allocator, or other settings, can keep it in the
 ## `error` — `Error`
 
 ```rust
-pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotFound, WrongKey, Rollback { file_counter: u64, min_counter: u64 } }   // Rollback: 0.9.0
+pub enum Error { Io(std::io::Error), Hardening(String), Format(String), Auth, KeyNotFound, WrongKey, Rollback { file_counter: u64, min_counter: u64 } }   // Rollback: 0.9.0
 ```
 `#[non_exhaustive]`. Implements `Display`, `std::error::Error` (its `source()` is the inner
 `io::Error` for `Io`, and `None` for the others) and `From<std::io::Error>`.

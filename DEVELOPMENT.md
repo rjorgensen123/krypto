@@ -63,9 +63,12 @@ that frame.
 
 ## The public surface
 
-**`docs/API.md` is the contract.** Every public name is in it, with what it does, its limits and
-its errors, and nothing in it is untrue of the code. Guard, for the names:
-`every_public_name_is_in_the_reference_docs`, `every_cli_command_is_in_its_document`.
+**`docs/API.md` is the contract.** Every public name is in it, with what it does, its limits and its
+errors, and nothing in it is untrue of the code. Guards: a list of the public declarations built
+from the Rust code blocks of `docs/API.md` and one built from the source must be equal,
+`api_document_and_source_have_the_same_declarations`; every `krypto-cli` command is in
+`docs/Cli.md`, `every_cli_command_is_in_its_document`. What the text says about behaviour has no
+guard: it is read against the code.
 
 **Rust and Python have the same surface.** A name on one side is on the other. Guard:
 `the_python_api_is_the_rust_api`.

@@ -9,14 +9,15 @@ krypto-cli inspect < something
 ```
 
 Part 1 is what krypto makes; part 2 is what other tools make. Anything wrapped in PEM or hex is
-unwrapped, hex in upper or lower case, and base64 when what it holds is recognized; PEM, hex and
-base64 are unwrapped at most two levels deep, counted together. Below that, a PEM block is told by
-its label, and read only where the label names a format of its own: OpenSSH private keys, SSH
-signatures, RSA public keys and PGP armor. Where the limit stops the unwrapping, the report ends
-with a `note` that says so *(0.8.2)*. What is inside is told, with the wrapping. Anything it cannot
-place is `not recognized`, with its length and whether it looks like text, random bytes or other
-binary data. Random bytes cannot be told apart: encrypted data, compressed data and key material
-all look the same.
+unwrapped, hex in upper, lower or mixed case, and base64 when what it holds is recognized. Hex is an
+even number of hex digits and nothing else: white space around the text is removed, but white space
+inside it, or a leading `0x`, means it is not hex. PEM, hex and base64 are unwrapped at most two
+levels deep, counted together. Below that, a PEM block is told by its label, and read only where the
+label names a format of its own: OpenSSH private keys, SSH signatures, RSA public keys and PGP
+armor. Where the limit stops the unwrapping, the report ends with a `note` that says so *(0.8.2)*.
+What is inside is told, with the wrapping. Anything it cannot place is `not recognized`, with its
+length and whether it looks like text, random bytes or other binary data. Random bytes cannot be
+told apart: encrypted data, compressed data and key material all look the same.
 
 The exit code is `0` when it has said what something is, also `not recognized`; `3` for a krypto
 blob whose header names a format version or an algorithm krypto does not know, *(0.9.0)* for one
@@ -61,6 +62,16 @@ specified in [SPEC-blob](../spec/SPEC-blob.md) and [SPEC-secretstore](../spec/SP
 
 The names in a store file are shown because they are not secret; anything in them that is not
 printable ASCII is left out and counted, as everywhere in the report. *(0.8.2)*
+
+In an Argon2id password hash the parameters may come in any order, and those other than `m`, `t` and
+`p`, such as `keyid` or `data`, are skipped and not shown. Without a `v=` field, without `m`, `t` or
+`p`, with a value for one of them that is not a number that fits in 32 bits, or with a parameter
+that has no `=`, the string is not recognized as a password hash; where a parameter comes twice, the
+last one counts. The version is shown as it stands; the salt and the hash are not read, so a string
+without them is still told. A string `inspect` tells may still be refused by `password::verify`, for
+example for a `keyid`, a version other than 19 or parameters outside its range, and one it does not
+tell may be accepted: `verify` reads a string without `t` or `p` with Argon2's defaults. See
+[API](API.md#password--passwords).
 
 ---
 

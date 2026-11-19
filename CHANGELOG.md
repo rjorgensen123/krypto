@@ -282,6 +282,18 @@ The message for a stored hash of another algorithm names it, as before. The name
 the letters a to z, digits and hyphens, at most 32 characters; the spec now says so, and a test
 holds the bound. No behaviour changes.
 
+### Added — tests for gaps a review pointed at, and a guard between `docs/API.md` and the code *(2026-11-19)*
+
+New tests: `Error::source`, the bounds of a master key file, every low-order X25519 point, and
+Rust against Python for AAD and the store's 0.9.0 additions. `tests/docs.rs` now builds one list
+of the public declarations from `docs/API.md` and one from the source, and the two must be equal;
+ten lines of `docs/API.md` were corrected to the code.
+
+### Changed — documentation corrections *(2026-11-19)*
+
+`docs/Inspect.md` says what `inspect` requires of an Argon2id string and of hex. A comment and a
+spec row now say that a master key is 32 to 64 bytes in practice, as the limit of 4096 allows more.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`

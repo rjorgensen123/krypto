@@ -2,10 +2,10 @@
 //! The Python API is the Rust API (0.8.0): the same names in the same places,
 //! both ways.
 //!
-//! The Rust side is read from the crate's source, the same way
-//! `tests/docs.rs` does it: the root's `pub mod`, `pub const` and `pub use`,
-//! the `pub` items of the public modules, the `pub fn` of each public type, and
-//! the variants of its enums. The Python side is what `krypto_py` shows under
+//! The Rust side is read from the crate's source, line by line: the root's
+//! `pub mod`, `pub const` and `pub use`, the `pub` items of the public
+//! modules, the `pub fn` of each public type, and the variants of its enums.
+//! The Python side is what `krypto_py` shows under
 //! the Python that `PYO3_PYTHON` names, with `krypto_py` installed
 //! (`maturin develop`). A name on one side only fails the test, unless it is
 //! in `PYTHON_ONLY` with its reason.

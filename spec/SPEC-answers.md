@@ -109,7 +109,7 @@ are already in protected memory, up to 64 MiB, when their own limit is checked.
 
 | What | Limit | Why this size |
 |---|---|---|
-| A master key | 32 to 4096 bytes | A key is 32 to 64 bytes; the ceiling leaves room and keeps an oversized file, or an endless device, from taking memory without bound |
+| A master key | 32 to 4096 bytes | A key is 32 to 64 bytes in practice; the ceiling leaves room and keeps an oversized file, or an endless device, from taking memory without bound |
 | A context, and a salt, for key derivation | at most 1024 bytes each; a context is never empty | They come from command lines and configuration, and an unbounded one is work an attacker sizes. krypto's longest context is 16 + 512 bytes. An empty context would give two purposes one key |
 | A salt for a key from a password | 16 to 1024 bytes | |
 | Associated data for a blob | at most 1024 bytes | The same as for a context; to bind something larger, bind its hash |

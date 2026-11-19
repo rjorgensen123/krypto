@@ -65,6 +65,42 @@ fn oversized_master_key_file_is_rejected() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// A key file holds 32 to `MAX_MASTER_KEY_BYTES` bytes, both bounds included:
+/// one byte under is `Format` and says how many bytes it got, the cap is
+/// accepted, and one byte over is `Format`, too big.
+#[test]
+fn master_key_file_bounds_hold_on_both_sides() {
+    use krypto::{Error, MAX_MASTER_KEY_BYTES};
+    let dir = kdf_dir("file-bounds");
+    let path = dir.join("bounds.key");
+
+    std::fs::write(&path, [7u8; 31]).unwrap();
+    match MasterKey::from_secret_file(&path) {
+        Err(Error::Format(m)) => {
+            assert!(
+                m.contains("at least 32 bytes, got 31"),
+                "unexpected message: {m}"
+            )
+        }
+        other => panic!("expected Format, got {:?}", other.map(|_| ())),
+    }
+
+    std::fs::write(&path, vec![7u8; MAX_MASTER_KEY_BYTES]).unwrap();
+    assert!(
+        MasterKey::from_secret_file(&path).is_ok(),
+        "a key file at the cap must pass"
+    );
+
+    std::fs::write(&path, vec![7u8; MAX_MASTER_KEY_BYTES + 1]).unwrap();
+    match MasterKey::from_secret_file(&path) {
+        Err(Error::Format(m)) => {
+            assert!(m.contains("too big"), "unexpected message: {m}")
+        }
+        other => panic!("expected Format, got {:?}", other.map(|_| ())),
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `info` and `salt` are bounded, like every other input the crate takes.
 ///
 /// Both reach the API from command lines and config files (`krypto-cli`'s
@@ -111,6 +147,23 @@ fn oversized_master_key_from_bytes_is_rejected() {
         matches!(MasterKey::from_bytes(over), Err(Error::Format(_))),
         "a key one byte over the cap was accepted"
     );
+}
+
+/// The lower bound holds on `from_bytes` too: a key one byte short of 32 is
+/// `Format`, and the message says how many bytes it got.
+#[test]
+fn short_master_key_from_bytes_is_rejected() {
+    use krypto::{Error, SecretBuf};
+    let short = SecretBuf::from_vec(vec![7u8; 31]).unwrap();
+    match MasterKey::from_bytes(short) {
+        Err(Error::Format(m)) => {
+            assert!(
+                m.contains("at least 32 bytes, got 31"),
+                "unexpected message: {m}"
+            )
+        }
+        other => panic!("expected Format, got {:?}", other.map(|_| ())),
+    }
 }
 
 /// Empty `info` must be rejected: it IS the purpose separation in HKDF.

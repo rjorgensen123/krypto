@@ -66,6 +66,69 @@ fn every_error_says_what_went_wrong_and_nothing_secret() {
     }
 }
 
+/// `source()` from `std::error::Error` is the inner `io::Error` for `Io`, and
+/// `None` for every other class.
+#[test]
+fn only_an_io_error_has_a_source() {
+    use std::error::Error as _;
+    let m = master(0x5a);
+    let key = m.derive(b"ctx/v1", b"salt").unwrap();
+    let secret = SecretBuf::from_vec(PLAINTEXT.as_bytes().to_vec()).unwrap();
+    let blob = krypto::seal(&key, &m.key_id().unwrap(), &secret, Alg::Aegis256).unwrap();
+    let other = master(0xa5);
+    let dir = std::env::temp_dir().join(format!("krypto-errors-source-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // `err()`: a MasterKey has no Debug, on purpose.
+    let io = MasterKey::from_secret_file(dir.join("no-such-key"))
+        .err()
+        .unwrap();
+    let inner = io
+        .source()
+        .expect("an Io error has no source")
+        .downcast_ref::<std::io::Error>()
+        .expect("the source of an Io error is not an io::Error");
+    assert_eq!(inner.kind(), std::io::ErrorKind::NotFound);
+
+    let path = dir.join("s.store");
+    let store = SecretStore::open(&path, &m).unwrap();
+    let not_found = store.get("no-such-name").unwrap_err();
+    drop(store);
+    // `err()`: a SecretStore has no Debug either.
+    let wrong_key = SecretStore::open(&path, &other).err().unwrap();
+    let rollback = SecretStore::open_with_min_counter(&path, &m, 1)
+        .err()
+        .unwrap();
+    let others = [
+        krypto::random_bytes_with_limit(usize::MAX, usize::MAX).unwrap_err(),
+        krypto::open(&key, b"not a blob").unwrap_err(),
+        krypto::open(&other.derive(b"ctx/v1", b"salt").unwrap(), &blob).unwrap_err(),
+        not_found,
+        wrong_key,
+        rollback,
+    ];
+    std::fs::remove_dir_all(&dir).unwrap();
+
+    assert!(
+        matches!(
+            &others,
+            [
+                Error::Hardening(_),
+                Error::Format(_),
+                Error::Auth,
+                Error::KeyNotFound,
+                Error::WrongKey,
+                Error::Rollback { .. },
+            ]
+        ),
+        "not one error of each class: {others:?}"
+    );
+    for e in &others {
+        assert!(e.source().is_none(), "{e:?} has a source");
+    }
+}
+
 /// `hex` and `base64` decoding (0.8.2): the message about an invalid character
 /// names neither the character nor its position, since the input may be a key.
 /// Each probe is the invalid character as the input has it, or as a message
