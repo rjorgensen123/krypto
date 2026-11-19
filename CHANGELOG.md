@@ -243,6 +243,12 @@ Python rows, the P-256 key forms, what hardening does outside Linux, and the exi
 was released, and its marker in the documents is `(0.8.2)`. `docs/Inspect.md` says exit `1` comes
 when the reader of a pipe is gone, not when stdout is closed.
 
+### Added — three more reviews in the README and Home *(2026-11-19)*
+
+The list of reviews in the README and `docs/Home.md` has three more rows, all of 0.9.0 before
+release and all dated 2026-11-18: a security audit by MiMo V2.6 Flash, a read-only code review by
+Mistral Vibe, and a bug hunt by Mistral Vibe.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`
