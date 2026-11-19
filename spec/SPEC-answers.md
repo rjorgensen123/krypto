@@ -33,8 +33,9 @@ formats are.
   salt, or the hash value of a stored password hash, and a decoder never names the character
   it refused or its position, because the text may be a key. A message may name a detail that
   is not secret: a size and its limit, an unsupported version number, the illegal character of
-  a store name, shown in quotes with control characters escaped, or a parameter of a password
-  hash krypto does not accept.
+  a store name, shown in quotes with control characters escaped, a parameter of a password hash
+  krypto does not accept, or the name of that hash's algorithm, which holds at most 32
+  characters: the letters a to z in lower case, digits and hyphens.
 - **Answers are in English,** in the library, the binding and the tool alike.
 - **krypto never logs.** The answer is the only thing it gives back, and every answer is made
   to be recorded as it is. Recording is the caller's job.

@@ -276,6 +276,12 @@ While the call waits for a key delivered through a pipe, other Python threads no
 Before, the whole interpreter stood still. A pipe is an accepted source of the key, and the
 documentation now says so.
 
+### Changed — the spec says that `password::verify` may name a refused algorithm *(2026-11-19)*
+
+The message for a stored hash of another algorithm names it, as before. The name can only hold
+the letters a to z, digits and hyphens, at most 32 characters; the spec now says so, and a test
+holds the bound. No behaviour changes.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`

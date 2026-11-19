@@ -120,7 +120,8 @@ const MIN_P: u32 = 1;
 /// `High` preset plus a margin (m + 25 %, t + 1, p + 1), so a stored string
 /// cannot make one call use much more memory or time than krypto's own hashes
 /// do. The messages say which field is refused, and never carry the salt or
-/// the hash.
+/// the hash; a refused algorithm is named, and the parser admits there only
+/// the letters a to z in lower case, digits and hyphens, at most 32 characters.
 fn check_stored_hash(parsed: &PasswordHash) -> Result<(), Error> {
     if parsed.algorithm.as_str() != Algorithm::Argon2id.as_str() {
         return Err(Error::Format(format!(

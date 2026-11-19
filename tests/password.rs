@@ -94,7 +94,8 @@ fn argon2_phc(algorithm: Algorithm, version: Version, m_kib: u32, t: u32, p: u32
 
 /// Asserts that `verify` refuses `phc` with `Format` given the right password,
 /// and that the message carries neither the password nor the salt and hash.
-fn assert_refused(phc: &str) {
+/// Returns the message.
+fn assert_refused(phc: &str) -> String {
     let pw = SecretString::from_string(RANGE_PASSWORD.to_string()).unwrap();
     match password::verify(&pw, phc) {
         Err(Error::Format(msg)) => {
@@ -108,6 +109,7 @@ fn assert_refused(phc: &str) {
                     "message carries the salt or hash: {msg}"
                 );
             }
+            msg
         }
         other => panic!("expected Format for {phc}, got {other:?}"),
     }
@@ -123,6 +125,50 @@ fn argon2i_hash_gives_format() {
 fn argon2d_hash_gives_format() {
     let phc = argon2_phc(Algorithm::Argon2d, Version::V0x13, 65_536, 2, 1);
     assert_refused(&phc);
+}
+
+/// The message names a refused algorithm only when the parser has held the
+/// name to 1 to 32 characters of a to z in lower case, digits and hyphens.
+/// Any other name is refused by the parser, and the message does not carry
+/// the name. The strings are refused before argon2 runs.
+#[test]
+fn refused_algorithm_is_named_only_within_the_parser_bound() {
+    let phc_for = |name: &str| format!("${name}$v=19$m=65536,t=2,p=1${SALT_AND_HASH}");
+    let longest = "example-algorithm-name-012345678";
+    assert_eq!(longest.len(), 32);
+
+    for name in ["argon2i", "argon2d", "scrypt", longest] {
+        let msg = assert_refused(&phc_for(name));
+        assert_eq!(
+            msg,
+            format!("PHC algorithm {name} is not accepted, only argon2id")
+        );
+    }
+
+    // The character that broke the bound is checked on its own where it
+    // cannot occur in an ordinary message.
+    let too_long = format!("{longest}9");
+    let outside = [
+        (too_long.as_str(), None),
+        ("argon2Id", None),
+        ("argon2\u{1b}id", Some('\u{1b}')),
+        ("argon2\u{e9}d", Some('\u{e9}')),
+        ("argon 2id", None),
+        ("", None),
+    ];
+    for (name, character) in outside {
+        let msg = assert_refused(&phc_for(name));
+        assert!(msg.starts_with("invalid PHC string: "), "{name:?}: {msg:?}");
+        if !name.is_empty() {
+            assert!(!msg.contains(name), "message carries {name:?}: {msg:?}");
+        }
+        if let Some(character) = character {
+            assert!(
+                !msg.contains(character),
+                "message carries {character:?}: {msg:?}"
+            );
+        }
+    }
 }
 
 #[test]
