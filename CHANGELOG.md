@@ -249,6 +249,13 @@ The list of reviews in the README and `docs/Home.md` has three more rows, all of
 release and all dated 2026-11-18: a security audit by MiMo V2.6 Flash, a read-only code review by
 Mistral Vibe, and a bug hunt by Mistral Vibe.
 
+### Added — the README and Home say that a person has read parts of krypto *(2026-11-19)*
+
+The reviews section of the README and `docs/Home.md` says that a person with long experience in
+cryptography has read parts of the code and the design and given comments, that this was not a
+full review and is not an endorsement, and that the store file format version 2 comes directly
+from those comments. `spec/THREAT-MODEL.md` says the same in its own words.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`

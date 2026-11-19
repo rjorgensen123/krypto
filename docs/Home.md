@@ -147,6 +147,11 @@ Earlier versions were also reviewed by DeepSeek, Qwen, Gemini and Fable.
 The MiMo security audits used Cloudflare's
 [`security-audit`](https://github.com/cloudflare/security-audit-skill) skill.
 
+A person with long experience in cryptography has also read parts of the code and the design and
+given comments. That was not a full review, and it is not an endorsement. The store file format
+version 2 comes directly from those comments: they pointed at the same weakness in version 1 that
+several of the reviews above had pointed at over time.
+
 Each finding is assessed against the code, and the ones that hold are fixed;
 the CHANGELOG records the fixes.
 

@@ -260,7 +260,8 @@ work in ordinary memory.
 - **AEGIS-256, the cipher the store always uses, is the youngest of the three,** an
   Informational RFC of a research group (RFC 10032), not an IETF standard; the store cannot
   leave it without a change to krypto (SPEC-krypto).
-- **krypto has been reviewed by AI models and by a person, not audited by a security firm.**
+- **krypto has been reviewed by AI models, and a person has read parts of it and commented; it has
+  not been audited by a security firm.**
 
 ## 8. References
 
