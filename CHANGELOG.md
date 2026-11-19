@@ -256,6 +256,12 @@ cryptography has read parts of the code and the design and given comments, that 
 full review and is not an endorsement, and that the store file format version 2 comes directly
 from those comments. `spec/THREAT-MODEL.md` says the same in its own words.
 
+### ⚠ Changed — `close_inherited_fds` refuses while a `SecretStore` is open *(2026-11-19)*
+
+While a store in the process holds its lock, `close_inherited_fds` fails with `Hardening` and
+closes nothing. Before, it closed the lock, and a write could then be lost without an error.
+Call it before opening a store.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`

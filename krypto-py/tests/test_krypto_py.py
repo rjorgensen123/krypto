@@ -288,6 +288,22 @@ def test_secretstore_key_id_and_wrong_key(tmp_path):
         k.SecretStore.key_id_from_file(str(tmp_path / "not-a-store"))
 
 
+def test_close_inherited_fds_refuses_while_a_store_is_open(tmp_path):
+    """With a store open, close_inherited_fds raises HardeningError and closes
+    nothing, so the store still works (0.9.0). In a child, so pytest's own
+    descriptors stay open should the call ever succeed."""
+    code = ("import sys, krypto_py as k\n"
+            "s = k.SecretStore.open(sys.argv[1], k.MasterKey.from_bytes(k.SecretBuf.from_vec(bytes(32))))\n"
+            "try:\n"
+            "    k.close_inherited_fds()\n"
+            "    sys.exit('close_inherited_fds did not refuse')\n"
+            "except k.HardeningError as e:\n"
+            "    assert 'a SecretStore is open in this process' in str(e), e\n"
+            "s.put('a', k.SecretBuf.from_vec(b'value'))\n"
+            "assert s.get('a').expose(bytes) == b'value'\n")
+    subprocess.run([sys.executable, "-I", "-c", code, str(tmp_path / "s.store")], check=True)
+
+
 # --------------------------------------------------------------------------- #
 # password, sign, exchange, hex, base64, utilities
 # --------------------------------------------------------------------------- #

@@ -26,6 +26,7 @@
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::aead::{self, Alg};
 use crate::error::Error;
@@ -99,6 +100,9 @@ fn validate_name(name: &str) -> Result<(), Error> {
 /// writes the whole file back, so two handles on one file would overwrite each
 /// other's writes. The caller is responsible for not opening a file twice at
 /// once; krypto also guards against it, with a lock taken in [`SecretStore::open`].
+/// (0.9.0) While a handle in the process holds its lock,
+/// [`close_inherited_fds`](crate::close_inherited_fds) refuses, so the lock
+/// cannot be closed under the handle.
 pub struct SecretStore<'a> {
     path: PathBuf,
     master: &'a MasterKey,
@@ -115,8 +119,9 @@ pub struct SecretStore<'a> {
     /// The lock that keeps this file to this handle, held while it lives
     /// (0.7.2). `None` only when the file system is read-only, or when there
     /// is no lock file and the process may not create one in the directory
-    /// (0.8.2), where a write could not create its tmp file either.
-    lock: Option<std::fs::File>,
+    /// (0.8.2), where a write could not create its tmp file either. A lock
+    /// that is held is counted, for `close_inherited_fds` (0.9.0).
+    lock: Option<HeldLock>,
 }
 
 impl<'a> SecretStore<'a> {
@@ -713,7 +718,7 @@ impl<'a> SecretStore<'a> {
         master: &'a MasterKey,
         data: &[u8],
         named_version: Option<u8>,
-        lock: Option<std::fs::File>,
+        lock: Option<HeldLock>,
     ) -> Result<Self, Error> {
         if data.len() < 5 {
             return Err(Error::Format("store header truncated".into()));
@@ -1023,10 +1028,14 @@ fn dir_and_name(path: &Path) -> (PathBuf, &str) {
 /// `None` only when the file system is read-only, or when there is no lock
 /// file and the process may not create one in the directory, where a write
 /// could not create its tmp file either.
-fn take_lock(path: &Path) -> Result<Option<std::fs::File>, Error> {
+///
+/// (0.9.0) The lock file is opened, locked and counted under the guard on
+/// [`HELD_LOCKS`], so `close_inherited_fds` cannot run between those steps.
+fn take_lock(path: &Path) -> Result<Option<HeldLock>, Error> {
     use std::fs::TryLockError;
     let (dir, fname) = dir_and_name(path);
     let lock_path = dir.join(format!(".{fname}.lock"));
+    let mut held = held_locks();
     for _ in 0..3 {
         let Some(f) = open_lock_file(&lock_path)? else {
             return Ok(None);
@@ -1045,12 +1054,73 @@ fn take_lock(path: &Path) -> Result<Option<std::fs::File>, Error> {
         // replaced or removed it meanwhile, another handle could lock the new
         // one, so take the lock again.
         if is_same_file(&f, &lock_path)? {
-            return Ok(Some(f));
+            return Ok(Some(HeldLock::new(f, &mut held)));
         }
     }
     Err(Error::Io(std::io::Error::other(
         "the store's lock file keeps being replaced",
     )))
+}
+
+/// How many store handles in the process hold their lock (0.9.0). Its guard
+/// is held while a lock is taken and counted, while one is released and
+/// counted out, and while `close_inherited_fds` checks the count and closes,
+/// so these never run between each other's steps.
+static HELD_LOCKS: Mutex<usize> = Mutex::new(0);
+
+/// The guard on [`HELD_LOCKS`]. A poisoned guard is taken over as it is: the
+/// count changes in one step, after the work that can fail, so a panic under
+/// the guard cannot leave it out of step with the locks that are held.
+fn held_locks() -> MutexGuard<'static, usize> {
+    HELD_LOCKS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The lock of one store file, held by one handle (0.9.0): the locked lock
+/// file, counted in [`HELD_LOCKS`] from when it is locked until its descriptor
+/// is closed. `rotate` and `upgrade` move it to the new handle, which leaves
+/// the count as it is.
+struct HeldLock {
+    /// The locked lock file. `None` only while `drop` runs.
+    file: Option<std::fs::File>,
+}
+
+impl HeldLock {
+    /// Count `file` as held. `held` is the count under its guard, which the
+    /// caller also held while it opened and locked `file`.
+    fn new(file: std::fs::File, held: &mut usize) -> Self {
+        // Cannot overflow: each count is a descriptor that is open.
+        *held += 1;
+        HeldLock { file: Some(file) }
+    }
+}
+
+impl Drop for HeldLock {
+    fn drop(&mut self) {
+        let mut held = held_locks();
+        // Closing the descriptor releases the lock. It is counted out after
+        // that, under the same guard, so `close_inherited_fds` never finds it
+        // open and not counted.
+        drop(self.file.take());
+        // Cannot underflow: `new` counted this lock, and `drop` runs once.
+        *held -= 1;
+    }
+}
+
+/// Run `close` while no store handle in the process holds its lock, with the
+/// guard on [`HELD_LOCKS`] held so that no lock is taken meanwhile (0.9.0).
+/// While one is held, refuse with [`Error::Hardening`] and run nothing:
+/// `close_inherited_fds` would close those locks, and a second `open` of the
+/// file would then succeed beside the handle.
+pub(crate) fn with_no_lock_held(close: impl FnOnce() -> Result<(), Error>) -> Result<(), Error> {
+    let held = held_locks();
+    if *held > 0 {
+        return Err(Error::Hardening(
+            "a SecretStore is open in this process, and close_inherited_fds would close its \
+             lock: call it before a store is opened, or after every open store is dropped"
+                .into(),
+        ));
+    }
+    close()
 }
 
 /// Open or create the lock file. On unix it is opened with `O_NOFOLLOW` and

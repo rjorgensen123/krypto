@@ -270,10 +270,13 @@ pub(crate) fn no_new_privs() -> Result<(), Error> {
 
 /// Close every file descriptor above stderr (`close_range(3, MAX)`).
 /// Needs Linux 5.9+; an unavailable syscall is a hard error, not a fallback.
+/// The caller (harden.rs) runs it only while no store holds its lock (0.9.0).
 #[cfg(all(target_os = "linux", not(miri)))]
 pub(crate) fn close_inherited_fds() -> Result<(), Error> {
     // SAFETY: close_range takes only integers, and closing descriptors
-    // above stderr cannot invalidate any memory this crate holds.
+    // above stderr cannot invalidate any memory this crate holds. The caller
+    // holds the guard on the count of store locks and has found none, so no
+    // store's lock file is closed under its handle (0.9.0).
     let rc = unsafe { libc::close_range(3, libc::c_uint::MAX, 0) };
     if rc == 0 {
         Ok(())

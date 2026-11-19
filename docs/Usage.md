@@ -43,9 +43,10 @@ its file, and randomness comes from the kernel's `getrandom` call, except where 
 unavailable or blocked; there krypto reads `/dev/urandom` on most Linux systems, which it cannot
 open after the chroot if it had not opened it before. And `close_inherited_fds` also closes
 sockets you inherited *on purpose* (e.g. socket activation) — which is why it is its own choice
-and not part of `harden_process`. It closes the lock of a [store](#a-small-encrypted-store-on-disk)
-you have already opened too, after which a second `open` of that file succeeds, so call it before
-opening a store. What each step leaves open is in [API](API.md#harden--process-hardening).
+and not part of `harden_process`. *(0.9.0)* While a [store](#a-small-encrypted-store-on-disk) you
+have opened holds its lock, it refuses with `Hardening` and closes nothing, so call it before
+opening a store, or after every open store is dropped. What each step leaves open is in
+[API](API.md#harden--process-hardening).
 
 *In Python: [Getting started](Python.md#getting-started).*
 
@@ -362,12 +363,12 @@ never gets stuck. The same file opened through another name, such as a link, tak
 a regular file, such as a FIFO, is not used as the lock: `open` fails with `Io` either way, and a
 FIFO there does not make it wait. There is no lock only on a read-only file system, or when there
 is no lock file and you may not create one in the directory. The lock does not keep out someone
-who can write in the directory: they can remove or replace the lock file. Nor does it hold in two
-cases inside your program, and neither gives an error. `close_inherited_fds` closes it, after
-which a second `open` succeeds: call it before opening a store. After a `fork` without `exec`,
-parent and child share the lock, and it is held until both copies of the handle are gone. Both can
-write through their copies, and the last to write overwrites what the other wrote: open the store
-after the fork, or use it in one process only.
+who can write in the directory: they can remove or replace the lock file. *(0.9.0)*
+`close_inherited_fds` does not close it: while a handle holds the lock, the call refuses with
+`Hardening`. Nor does the lock hold in one case inside your program, and it gives no error: after
+a `fork` without `exec`, parent and child share the lock, and it is held until both copies of the
+handle are gone. Both can write through their copies, and the last to write overwrites what the
+other wrote: open the store after the fork, or use it in one process only.
 
 **Rules for names:** non-empty, at most 512 bytes, printable ASCII only (`[\x20-\x7e]`). Names are
 not secret — they are listed by `list()` and may end up in the caller's log. A name with a newline

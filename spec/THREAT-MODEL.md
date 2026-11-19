@@ -156,9 +156,10 @@ memory after hashing or checking, helps recover the password or the derived key.
 
 **The hardening steps leave things open** (SPEC-memory): a later change of user or group id
 undoes the mark that turning off dumps sets, and crash handlers inside the process are not
-reached; closing inherited descriptors also closes an open store's lock; leaving the file
-system does not hold against a process that keeps the privilege to change its root, and leaves
-descriptors opened earlier usable.
+reached; closing inherited descriptors also closes descriptors libraries hold, and refuses
+while an open store holds its lock rather than close it; leaving the file system does not hold
+against a process that keeps the privilege to change its root, and leaves descriptors opened
+earlier usable.
 
 ### 4.5 Against another user or process on the machine (T5)
 
@@ -170,8 +171,8 @@ descriptors opened earlier usable.
   does not hold against a writer that does not use krypto, anyone who can write in the
   directory, another name for the same file, or a network file system, and whoever can open
   the lock file can hold it and make every open fail with `Io`. It is absent on a read-only
-  file system and where no lock file exists and the directory cannot be written, and closing
-  inherited descriptors drops it.
+  file system and where no lock file exists and the directory cannot be written; closing
+  inherited descriptors refuses while it is held.
 - **Memory.** Until turning off dumps has run, a process of the same user can read the
   caller's memory as far as the kernel allows; after it, other unprivileged processes cannot.
 - **Timing and cache behaviour,** as other programs on the machine observe them, are not

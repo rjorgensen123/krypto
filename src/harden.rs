@@ -43,20 +43,28 @@ pub fn no_new_privs() -> Result<(), Error> {
 /// A descriptor leaked from the parent — a log file, a socket, someone
 /// else's pipe — is both an information leak and an attack surface.
 ///
-/// Two things to know before calling it:
+/// What to know before calling it:
 ///
 /// - It also closes descriptors the service inherited *on purpose* (e.g.
 ///   systemd socket activation). That is why this is a separate call and
 ///   not part of [`harden_process`] — the service decides.
-/// - Call it early, before the service opens its own files and sockets.
-/// - It also closes the lock of a [`SecretStore`](crate::SecretStore) that
-///   is already open, after which a second `open` of that file succeeds:
-///   call it before opening a store.
+/// - Call it early, before the service opens its own files and sockets, and
+///   before it starts other threads: a descriptor another thread has open at
+///   that moment is closed under it.
+/// - (0.9.0) While a [`SecretStore`](crate::SecretStore) in the process
+///   holds its lock, it refuses with [`Error::Hardening`] and closes
+///   nothing, since closing the lock would let a second `open` of that file
+///   succeed beside the handle: call it before opening a store, or after
+///   every open store is dropped. A store opened without a lock, on a
+///   read-only file system or where no lock file could be made, does not
+///   count. A store that takes its lock at the same time in another thread
+///   either counts before the check, and the call refuses, or takes the
+///   lock after the closing.
 ///
 /// Requires Linux 5.9+; on an older kernel the call fails — fail-closed,
 /// like everything in this module.
 pub fn close_inherited_fds() -> Result<(), Error> {
-    ffi::close_inherited_fds()
+    crate::store::with_no_lock_held(ffi::close_inherited_fds)
 }
 
 /// Make the filesystem disappear for this process: `chroot` into `dir` —

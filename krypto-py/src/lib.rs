@@ -634,9 +634,9 @@ fn no_new_privs() -> PyResult<()> {
 }
 
 /// Closes every descriptor above stderr in the calling process — the Python
-/// interpreter's own included, and the lock of a `SecretStore` that is
-/// already open, after which a second `open` of that file succeeds: call it
-/// before opening one.
+/// interpreter's own included. (0.9.0) While a `SecretStore` in the process
+/// holds its lock, it raises `HardeningError` and closes nothing: call it
+/// before opening a store, or after every open store is gone.
 #[pyfunction]
 fn close_inherited_fds() -> PyResult<()> {
     krypto::close_inherited_fds().map_err(err)

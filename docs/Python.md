@@ -37,8 +37,8 @@ krypto.close_inherited_fds()            # the interpreter's own descriptors too:
 krypto.drop_filesystem("/var/empty")    # irreversible; needs privileges
 ```
 
-`close_inherited_fds` also closes the lock of a `SecretStore` that is already open, after which a
-second `open` of that file succeeds: call it before opening a store.
+*(0.9.0)* While a `SecretStore` holds its lock, `close_inherited_fds` raises `HardeningError` and
+closes nothing: call it before opening a store, or after every open store is gone.
 
 Why, and in what order: [Getting started](Usage.md#getting-started).
 
@@ -154,12 +154,12 @@ with.
 In Rust the store borrows the master key; here it keeps the `MasterKey` object alive for as long as
 it lives. One handle per file holds as in Rust, with the same limits: a second `open` of the same
 file through the same path fails with `IoError` while the first lives, and the lock goes when the
-handle does (`del store`). The lock does not protect against two things, and neither gives an
-error. `close_inherited_fds` closes it, after which a second `open` succeeds; call it before
-opening a store. After `os.fork()`, also in `multiprocessing` with the fork start method, parent
-and child share the lock, and it is held until both copies of the handle are gone. Both can write
-through their copies, and the last to write overwrites what the other wrote. Open the store after
-the fork, or use it in one process only.
+handle does (`del store`). *(0.9.0)* While the handle holds the lock, `close_inherited_fds` raises
+`HardeningError` and closes nothing. The lock does not protect against one thing, and it gives no
+error. After `os.fork()`, also in `multiprocessing` with the fork start method, parent and child
+share the lock, and it is held until both copies of the handle are gone. Both can write through
+their copies, and the last to write overwrites what the other wrote. Open the store after the
+fork, or use it in one process only.
 
 `rotate` returns the new handle and consumes the old one:
 

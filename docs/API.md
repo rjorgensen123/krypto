@@ -585,12 +585,13 @@ the process may not create one in the directory, where a write could not create 
 either. The lock does not keep out someone who can write in the directory: they can remove or
 replace the lock file. Whoever can open the lock file, also only for reading, can hold the lock
 and make every `open` fail with `Io`. On a network filesystem the lock may not hold between
-machines. Nor does the guard hold in two cases inside the program, and neither gives an error.
-`close_inherited_fds` closes the lock, after which a second `open` of the file succeeds: call it
-before opening a store.
-After a `fork` without `exec`, parent and child share the lock, and it is held until both copies of
-the handle are gone. Both can write through their copies, and the last to write overwrites what the
-other wrote: open the store after the fork, or use it in one process only.
+machines. *(0.9.0)* `close_inherited_fds` does not close the lock: while a store in the process
+holds its lock, it refuses with `Error::Hardening` and closes nothing, so call it before opening a
+store, or after every open store is dropped. Nor does the guard hold in one case inside the
+program, and it gives no error: after a `fork` without `exec`, parent and child share the lock, and
+it is held until both copies of the handle are gone. Both can write through their copies, and the
+last to write overwrites what the other wrote: open the store after the fork, or use it in one
+process only.
 
 `rotate` *(0.6.0)* re-encrypts the whole store under a new master key: everything is decrypted
 with the old one FIRST (if anything fails, the file is untouched), and a completely new file
@@ -860,6 +861,7 @@ directory; `harden_process` only sets the core-dump limit to zero and reports su
 with `Hardening` only if it cannot set that limit. Each step
 is its own deliberate choice. Recommended order: `harden_process()` and
 `no_new_privs()` first in `main` · `close_inherited_fds()` early, before opening your own files
+and before starting other threads, since a descriptor another thread has open is closed under it
 (NB: it also kills deliberately inherited sockets, e.g. socket activation — hence a separate
 call) · `drop_filesystem(dir)` **after** key material is read — irreversible, needs privileges
 (root or `CAP_SYS_CHROOT`), and the directory must be empty (verified before the chroot).
@@ -877,16 +879,23 @@ AEAD, KDF, signing and passwords touch no files. A directory that is missing or 
 or read is `Io`; one that is not a directory or is not empty, and any failure from the step into
 it up to the change of root, are `Hardening`.
 
-`close_inherited_fds` also closes the lock of a
-[`SecretStore`](#secretstore--encrypted-store-on-file) that is already open, after which a second
-`open` of that file succeeds: call it before opening a store, and before anything has asked for
-random bytes (see what the steps leave open, below).
+*(0.9.0)* While a [`SecretStore`](#secretstore--encrypted-store-on-file) in the process holds its
+lock, `close_inherited_fds` refuses with `Hardening` and closes nothing, since closing the lock
+would let a second `open` of that file succeed: call it before opening a store, or after every
+open store is dropped. A store opened without a lock, on a read-only file system or where no lock
+file can be made, does not count. Call it before anything has asked for random bytes, too (see
+what the steps leave open, below).
 
 What the steps leave open: a later change of user or group id resets the mark `harden_process`
 sets to the machine's setting, so call it again after one, and crash handlers inside the process
 are not reached by it. `close_inherited_fds` also closes descriptors libraries hold, and the
 `/dev/urandom` descriptor where the `getrandom` crate has fallen back to it, after which later
-random bytes are read from whatever is opened next under that number. `drop_filesystem` does not
+random bytes are read from whatever is opened next under that number. Where
+`close_inherited_fds` works at all (Linux 5.9 and later), the kernel has the `getrandom` call
+(Linux 3.17), so that fallback is in use in two cases: where a seccomp filter blocks the call
+(`ENOSYS` or `EPERM`), and in a program linked statically against glibc, where the `getrandom`
+crate does not find the function at run time. krypto does not detect either, so the call must
+still come before anything has asked for random bytes. `drop_filesystem` does not
 hold against a process that keeps the privilege to change its root, so giving that up afterwards
 is yours, and descriptors opened before it stay usable. The steps, and what each leaves open, are
 in [SPEC-memory](../spec/SPEC-memory.md).
@@ -916,7 +925,7 @@ pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotF
 | Variant | Means |
 |---|---|
 | `Io` | file or directory: also a store that is already open through another handle, a lock file that is a symbolic link or not a regular file, and a store write whose file is replaced but whose directory could not be synced afterwards, so the change is in the file; *(0.9.0)* also a store file that `open_with_min_counter` with `min_counter` above 0 did not find |
-| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening, Argon2 failing in `password::hash`, and an internal step no input can cause — never a verdict on the data; treated fail-closed. *(0.9.0)* Also a `SecretStore` write refused because the store's counter is at its maximum: rotate the store |
+| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening, Argon2 failing in `password::hash`, and an internal step no input can cause — never a verdict on the data; treated fail-closed. *(0.9.0)* Also a `SecretStore` write refused because the store's counter is at its maximum: rotate the store. *(0.9.0)* Also `close_inherited_fds` while a `SecretStore` in the process holds its lock: call it before opening a store |
 | `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob, or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info`. *(0.9.0)* Not a krypto blob means shorter than its 4-byte magic, or not starting with `FAFN`. *(0.9.0)* An input over its size limit, a blob over its limit included. For a `SecretStore`: not a store file, an unknown version, an invalid structure, or *(0.9.0)* another version than the open names, and a name that breaks the name rules at `get` or `delete` |
 | `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, a header cut short past the magic included *(0.9.0)*, that leaves the blob within its size limit *(0.9.0)*, and a key id in a `SecretStore` that does not match. *(0.9.0)* At the open of a v2 store file: the file is not what was written — cut short of its header, or the master key fits and something else was changed, added or removed |
 | `KeyNotFound` | the name does not exist in the store |
