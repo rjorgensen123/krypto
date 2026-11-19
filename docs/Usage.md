@@ -284,7 +284,7 @@ the header — a `key_check` (the master key, proven at `open`), a write `counte
 when the master key does not fit, and with `Auth` when the file is not what was written: cut
 short, or an entry removed, swapped or injected. A changed salt or key check gives
 `WrongKey` too, so if you know your key is the right one, treat `WrongKey` as a changed file. The
-normative format is [`spec/SPEC-secretstore.md`](../spec/SPEC-secretstore.md).
+format is specified in [`spec/SPEC-secretstore.md`](../spec/SPEC-secretstore.md).
 
 Writes keep the version the file was opened in (sticky): a v1 file stays v1, a v2 file stays v2.
 `open` reads both, and creates a new store as v2. krypto before 0.9.0 cannot read a v2 file

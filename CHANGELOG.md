@@ -294,6 +294,12 @@ ten lines of `docs/API.md` were corrected to the code.
 `docs/Inspect.md` says what `inspect` requires of an Argon2id string and of hex. A comment and a
 spec row now say that a master key is 32 to 64 bytes in practice, as the limit of 4096 allows more.
 
+### Changed — the specification is tidied *(2026-11-19)*
+
+The spec files no longer carry a status; `spec/README.md` says which document is settled.
+SPEC-krypto says why AEGIS-256 was chosen, and SPEC-secretstore refers to the other documents
+and says where no lock is taken.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`

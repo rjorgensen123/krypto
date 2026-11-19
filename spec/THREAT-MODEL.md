@@ -1,6 +1,6 @@
 # THREAT-MODEL — what krypto protects, against whom, and what it leaves to the caller
 
-**Status:** draft · **Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
+**Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
 
 This document says what krypto is meant to withstand, so that the design can be judged and not
 only the code: what is protected, who is on the other side, what krypto promises against each
@@ -262,9 +262,8 @@ work in ordinary memory.
   krypto gives no more random bytes in that process. The check does not cover other code in
   the program that reads random bytes, nor a file another thread opens between the closing
   and the check (SPEC-primitives).
-- **AEGIS-256, the cipher the store always uses, is the youngest of the three,** an
-  Informational RFC of a research group (RFC 10032), not an IETF standard; the store cannot
-  leave it without a change to krypto (SPEC-krypto).
+- **AEGIS-256, the cipher the store always uses, is the youngest of the three** (RFC 10032);
+  the store cannot leave it without a change to krypto (SPEC-krypto).
 - **krypto has been reviewed by AI models, and a person has read parts of it and commented; it has
   not been audited by a security firm.**
 
@@ -283,4 +282,4 @@ Outside krypto:
 
 | Spec version | Date | What changed |
 |---|---|---|
-| 0.1 | 2026-11-18 | First draft |
+| 0.1 | 2026-11-18 | First version |

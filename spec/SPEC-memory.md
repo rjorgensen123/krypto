@@ -1,6 +1,6 @@
 # SPEC-memory — secrets in memory, and hardening of the process
 
-**Status:** draft · **Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
+**Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
 
 This document specifies how krypto holds a secret while a program runs, what that costs,
 where a secret is at each moment, what the protection does not reach, and the steps krypto
@@ -190,4 +190,4 @@ Outside krypto, in the Linux manual pages: `mmap(2)`, `mprotect(2)`, `mlock(2)`,
 
 | Spec version | Date | What changed |
 |---|---|---|
-| 0.1 | 2026-11-18 | First draft |
+| 0.1 | 2026-11-18 | First version |

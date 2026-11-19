@@ -16,17 +16,20 @@ to understand a stored format; and **SPEC-answers** to know what an answer means
 
 ## The documents
 
-| Document | What it specifies | Status |
-|---|---|---|
-| [SPEC-krypto](SPEC-krypto.md) | what krypto is, its principles, how the parts fit, the main choices and why, how correctness is established | draft |
-| [THREAT-MODEL](THREAT-MODEL.md) | what is protected, against whom, what is promised and under which conditions, what is the caller's | draft |
-| [SPEC-memory](SPEC-memory.md) | secrets in memory, and hardening of the process | draft |
-| [SPEC-keys](SPEC-keys.md) | the master key, working keys, the master key's id, replacing a key, passwords | draft |
-| [SPEC-blob](SPEC-blob.md) | the sealed blob: layout, ciphers, what is authenticated | draft |
-| [SPEC-secretstore](SPEC-secretstore.md) | the store file: its two format versions, reading, writing, rollback detection | normative |
-| [SPEC-primitives](SPEC-primitives.md) | signatures, key agreement, hash, keyed hash, encodings, random bytes | draft |
-| [SPEC-answers](SPEC-answers.md) | the answers krypto gives, and the limits on what it takes | draft |
-| [SPEC-interfaces](SPEC-interfaces.md) | the library, the Python binding and the command-line tool | draft |
+| Document | What it specifies |
+|---|---|
+| [SPEC-krypto](SPEC-krypto.md) | what krypto is, its principles, how the parts fit, the main choices and why, how correctness is established |
+| [THREAT-MODEL](THREAT-MODEL.md) | what is protected, against whom, what is promised and under which conditions, what is the caller's |
+| [SPEC-memory](SPEC-memory.md) | secrets in memory, and hardening of the process |
+| [SPEC-keys](SPEC-keys.md) | the master key, working keys, the master key's id, replacing a key, passwords |
+| [SPEC-blob](SPEC-blob.md) | the sealed blob: layout, ciphers, what is authenticated |
+| [SPEC-secretstore](SPEC-secretstore.md) | the store file: its two format versions, reading, writing, rollback detection |
+| [SPEC-primitives](SPEC-primitives.md) | signatures, key agreement, hash, keyed hash, encodings, random bytes |
+| [SPEC-answers](SPEC-answers.md) | the answers krypto gives, and the limits on what it takes |
+| [SPEC-interfaces](SPEC-interfaces.md) | the library, the Python binding and the command-line tool |
+
+SPEC-secretstore is settled. The other documents are first versions and are still being
+worked through.
 
 ## How the documents fit together
 
@@ -38,9 +41,6 @@ them. THREAT-MODEL says what all of it is for, and where its promises stop.
 
 ## Conventions
 
-- **Status.** A *normative* document is settled: it is the authority for what it specifies, and
-  the code follows it. A *draft* is a document that has not been settled yet; where a draft
-  and the code disagree on a fact, the draft is corrected.
 - **Versions.** A document's *spec version* is its own and changes with the design. It is not
   the version of krypto, nor a *format version*, which is a number inside stored data.
   **Applies from** names the first version of krypto a document describes.

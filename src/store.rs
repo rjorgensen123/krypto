@@ -21,7 +21,7 @@
 //! one-way. `open` reads both versions; an open that names a version accepts
 //! only that one. What is protected is the contents, and in version 2 the
 //! file as a whole; who may write to it is still the caller's to decide. The
-//! normative description is `spec/SPEC-secretstore.md`.
+//! format is specified in `spec/SPEC-secretstore.md`.
 
 use std::collections::HashMap;
 use std::io::Write;

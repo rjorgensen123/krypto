@@ -1,6 +1,6 @@
 # SPEC-secretstore — the on-disk format of `SecretStore`
 
-**Status:** normative · **Spec version:** 2.0 (2026-11-17) · **Applies from:** krypto 0.9.0; store files of version 1 remain readable
+**Spec version:** 2.0 (2026-11-17) · **Applies from:** krypto 0.9.0; store files of version 1 remain readable
 
 This document specifies the on-disk format of krypto's `SecretStore` — file format
 versions 1 and 2 — and the rules for reading, writing, upgrading and rotating store
@@ -147,8 +147,12 @@ relies on what version 2 adds names version 2.
 - After the rename, memory follows the file: a failed directory sync after the rename
   is reported as an I/O error and is not rolled back.
 - One handle per file: `open` takes an exclusive `flock` on `.<name>.lock` beside the
-  store for the handle's lifetime. A symlink at the lock name is never followed; a
-  non-regular file there is rejected.
+  store for the handle's lifetime. A handle reads the whole file and writes the whole file
+  back, so two handles on one file would overwrite each other; the lock is the guard
+  against that. Where the store cannot be written, on a read-only file system or in a
+  directory that cannot be written and holds no lock file, no lock is taken: the store can
+  still be read there, and no write could succeed. A symlink at the lock name is never
+  followed; a non-regular file there is rejected.
 
 ## 6. Upgrade and rotation
 
@@ -210,8 +214,12 @@ another name.
 
 Inside krypto:
 
-- The FAFN blob that holds each entry. It is krypto's own format and has no spec file
-  of its own yet; until it has one, it is described in `docs/API.md`, "The blob format".
+- `spec/SPEC-blob.md` — the FAFN blob that holds each entry.
+- `spec/SPEC-keys.md` — how a key is derived from the master key, and its length.
+- `spec/SPEC-answers.md` — what each answer means, and the limits with the reason for each.
+- `spec/SPEC-memory.md` — what rotation costs in protected memory.
+- `spec/SPEC-krypto.md` — the main choices, and why.
+- `spec/THREAT-MODEL.md` — what a store file protects against, and what it does not.
 
 Outside krypto:
 

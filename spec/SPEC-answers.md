@@ -1,6 +1,6 @@
 # SPEC-answers — the answers krypto gives, and the limits on what it takes
 
-**Status:** draft · **Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
+**Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
 
 This document specifies how krypto answers: the rules every answer follows, the classes of
 failure and what each means, where the line between them runs for each format, and the limits
@@ -151,4 +151,4 @@ Outside krypto: none.
 
 | Spec version | Date | What changed |
 |---|---|---|
-| 0.1 | 2026-11-18 | First draft |
+| 0.1 | 2026-11-18 | First version |

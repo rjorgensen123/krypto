@@ -1,6 +1,6 @@
 # SPEC-krypto — what krypto is, how it is built, and why
 
-**Status:** draft · **Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
+**Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
 
 This is the top document of krypto's specification. It says what krypto is for, the
 principles it is built on, how its parts fit together, why the main choices were made, and how
@@ -129,15 +129,16 @@ The Python binding is built under the same rule, with two marked exceptions of i
 
 ## 4. The main choices, and why
 
-**AEGIS-256 first, with two ciphers beside it.** AEGIS-256 is the first choice: it is fast, has
-a 256-bit key, and its nonce and tag are large enough that random nonces and forgery are no
-practical concern. Its costs: it is the youngest of the three, specified in RFC 10032, an
-Informational RFC of the IRTF's Crypto Forum Research Group and not an IETF standard; its
-implementation is compiled from C and does not wipe its own state, so only the stack overwrite
-acts on it (SPEC-memory); and it is checked against published test vectors only, not against an
-independent implementation. XChaCha20-Poly1305 shares the blob format as the way out, and
-AES-256-GCM is there for a peer whose library offers only that. A blob names its cipher, so all
-three live side by side, and blobs leave a cipher by being sealed again under another. The
+**AEGIS-256 first, with two ciphers beside it.** AEGIS-256 is a deliberate choice. krypto weighs
+open standards highly, the RFCs and the work of the IETF and the IRTF above all, and AEGIS-256
+is specified there: RFC 10032, an Informational RFC of the IRTF's Crypto Forum Research Group,
+with its test vectors. It is fast, has a 256-bit key, and its nonce and tag are large enough
+that random nonces and forgery are no practical concern. Its costs: it is the youngest of the
+three; its implementation is compiled from C and does not wipe its own state, so only the stack
+overwrite acts on it (SPEC-memory); and it is checked against published test vectors only, not
+against an independent implementation. XChaCha20-Poly1305 shares the blob format as the way out,
+and AES-256-GCM is there for a peer whose library offers only that. A blob names its cipher, so
+all three live side by side, and blobs leave a cipher by being sealed again under another. The
 store has no way out today: it always seals with AEGIS-256, and leaving it would take a change
 to krypto.
 
@@ -248,4 +249,4 @@ Outside krypto:
 
 | Spec version | Date | What changed |
 |---|---|---|
-| 0.1 | 2026-11-18 | First draft |
+| 0.1 | 2026-11-18 | First version |

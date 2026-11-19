@@ -1,6 +1,6 @@
 # SPEC-interfaces — the library, the Python binding and the command-line tool
 
-**Status:** draft · **Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
+**Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
 
 This document specifies the three ways into krypto: what they share, how far each reaches,
 where they differ, and why there are three.
@@ -105,4 +105,4 @@ Outside krypto: none.
 
 | Spec version | Date | What changed |
 |---|---|---|
-| 0.1 | 2026-11-18 | First draft |
+| 0.1 | 2026-11-18 | First version |

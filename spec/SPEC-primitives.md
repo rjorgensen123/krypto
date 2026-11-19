@@ -1,6 +1,6 @@
 # SPEC-primitives — signatures, key agreement, hash, keyed hash, encodings and random bytes
 
-**Status:** draft · **Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
+**Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
 
 This document specifies the parts of krypto that stand beside sealing and storing:
 signatures, key agreement, the hash, the keyed hash and constant-time comparison, the text
@@ -177,4 +177,4 @@ Outside krypto:
 
 | Spec version | Date | What changed |
 |---|---|---|
-| 0.1 | 2026-11-18 | First draft |
+| 0.1 | 2026-11-18 | First version |

@@ -15,8 +15,8 @@ Everything that can fail returns `Result<_, Error>`. The crate does not panic on
 
 **This document is the contract** for the surface: every public type and function, and what each
 answers in every case. It ships with the module. Why krypto is built as it is, what it protects
-against, and its stored formats are in the [specification](../spec/README.md). Two normative rules
-bind whoever *changes* the surface:
+against, and its stored formats are in the [specification](../spec/README.md). Two rules bind
+whoever *changes* the surface:
 
 - **Verify input and output.** Input is validated (type, range, character set and length —
   fail-closed; unknown values are rejected, not ignored), and output never carries secrets or
@@ -421,7 +421,7 @@ the store is `KeyNotFound` from `get`. An entry whose blob is not a krypto blob 
 in the store returns `Ok`, writes nothing and leaves the counter where it was. `list` gives the
 names sorted, and an empty prefix lists them all.
 
-*(0.9.0)* **The store file: format versions 1 and 2.** The normative description is
+*(0.9.0)* **The store file: format versions 1 and 2.** The format is specified in
 [`spec/SPEC-secretstore.md`](../spec/SPEC-secretstore.md); what follows is the contract in brief.
 The 4 bytes at offset 0 are the magic `FST1` in every version, and the byte at offset 4 is the
 format version. An entry is `name_len (u16 LE) | name | blob_len (u32 LE) | blob`, where `blob` is

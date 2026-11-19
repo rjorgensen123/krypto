@@ -1,6 +1,6 @@
 # SPEC-keys — keys, key derivation, the master key's id, and passwords
 
-**Status:** draft · **Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
+**Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
 
 This document specifies the keys krypto works with: what a master key must be, how working
 keys are derived from it, how a key generation is named, how a key is replaced, and how
@@ -214,4 +214,4 @@ Outside krypto:
 
 | Spec version | Date | What changed |
 |---|---|---|
-| 0.1 | 2026-11-18 | First draft |
+| 0.1 | 2026-11-18 | First version |

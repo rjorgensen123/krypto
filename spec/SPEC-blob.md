@@ -1,6 +1,6 @@
 # SPEC-blob — the sealed blob (`FAFN`)
 
-**Status:** draft · **Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
+**Spec version:** 0.1 (2026-11-18) · **Applies from:** krypto 0.9.0
 
 This document specifies krypto's sealed blob: the bytes that authenticated encryption of one
 plaintext produces, what in them is authenticated, and how a blob is read. It is exact enough
@@ -191,4 +191,4 @@ Outside krypto:
 
 | Spec version | Date | What changed |
 |---|---|---|
-| 0.1 | 2026-11-18 | First draft |
+| 0.1 | 2026-11-18 | First version |
