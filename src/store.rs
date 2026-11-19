@@ -1144,7 +1144,7 @@ fn is_same_file(_f: &std::fs::File, _path: &Path) -> Result<bool, Error> {
 /// calls it only after the file has been read as a store, and it works on the
 /// opened file, not on the path (0.8.2). A file this process may not change
 /// is left as it is, and reading it must still work: one it does not own,
-/// or one on a read-only file system (0.9.0).
+/// or one on a read-only file system (0.8.2).
 #[cfg(unix)]
 fn make_private(file: &std::fs::File) -> Result<(), Error> {
     use std::os::unix::fs::PermissionsExt;

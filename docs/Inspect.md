@@ -21,12 +21,13 @@ all look the same.
 The exit code is `0` when it has said what something is, also `not recognized`; `3` for a krypto
 blob whose header names a format version or an algorithm krypto does not know, *(0.9.0)* for one
 that starts with `FAFN` but is cut short of its 54-byte header, as for `open`, and *(0.9.0)* for a
-version 2 store file cut short of its 109-byte header; `1` when stdin cannot be read; and `2` when
-stdin is more than 64 MiB. Other changes to a blob still give a report and exit `0`; it takes
-`open`, with the key, to find them. A store file of a version krypto does not know, and a version 1
-store file cut short of its 37-byte header, are reported with exit `0`: `SecretStore::open` answers
-`Format` for them, not `Auth`. `inspect` reads a store file with its own reader, not the
-library's.
+version 2 store file cut short of its 109-byte header; `1` when stdin cannot be read or stdout
+cannot be written, as when the reader of a pipe is gone; and `2` when stdin is more than 64 MiB, or
+for a wrong call: `inspect` takes no arguments, apart from `--help` and `-h`, which print the help.
+Other changes to a blob still give a report and exit `0`; it takes `open`, with the key, to find
+them. A store file of a version krypto does not know, and a version 1 store file cut short of its
+37-byte header, are reported with exit `0`: `SecretStore::open` answers `Format` for them, not
+`Auth`. `inspect` reads a store file with its own reader, not the library's.
 
 The report shows only printable ASCII. Any other character, such as a control character or a letter
 outside ASCII in a label or a name taken from the input, is left out, and the line ends with how

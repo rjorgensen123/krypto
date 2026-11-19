@@ -135,12 +135,6 @@ and notes on how things were in earlier versions, are removed. `docs/Usage.md` h
 0.8.2 and a complete row for 0.9.0. The README install line says `krypto = "0.9"`, and
 `SECURITY.md` lists 0.9.x as the supported version.
 
-### Fixed — `SecretStore::open` reads a store file on a read-only file system whatever its mode *(2026-11-17)*
-
-`open` sets mode 0600 on a store file that has another mode. Where it may not change the mode,
-it leaves the file as it is and goes on. That held for a file the process does not own; on a
-read-only file system `open` failed with `Io` instead. It now leaves the file as it is there too.
-
 ### ⚠ Changed — `krypto-cli inspect` gives exit 3 for a version 2 store file cut short of its header *(2026-11-17)*
 
 A version 2 store file that is cut short of its 109-byte header is a changed file:
@@ -240,7 +234,21 @@ key was never dropped and its locked memory never wiped and released. AddressSan
 it as a leak, and the ASan job in CI failed. The tests now own the key and lend it to the
 helper. Only test code is changed.
 
-## [0.8.2]
+### Changed — the 0.8.2 documentation corrections are carried into the 0.9.0 documents *(2026-11-19)*
+
+The 0.8.2 release corrected `docs/` against the 0.8.2 code. Merged here, the 0.9.0 text stands,
+and takes from those corrections what is true of 0.9.0 and was not already said: among others the
+Python rows, the P-256 key forms, what hardening does outside Linux, and the exit codes of
+`krypto-cli`. The fix for a store file on a read-only file system is listed under 0.8.2, where it
+was released, and its marker in the documents is `(0.8.2)`. `docs/Inspect.md` says exit `1` comes
+when the reader of a pipe is gone, not when stdout is closed.
+
+## [0.8.2] — 2026-11-18
+
+*Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`
+accepts only the hashes krypto makes, `password::derive_key` caps its salt, and the stack is
+overwritten after more operations. `SecretStore` and `krypto-cli inspect` are corrected in
+several places, and the documentation is checked against the code.*
 
 ### Added — the README and Home say who has reviewed krypto *(2026-11-15)*
 
@@ -430,6 +438,27 @@ AEGIS was published as RFC 10032 in September 2026. `docs/Home.md` and
 `docs/API.md` named the draft it came from, and now name the RFC. The two
 AEGIS-256 test vectors are those of RFC 10032, Appendix A.3, with the same
 values as before; their tests and comments say so. No code that runs is changed.
+
+### Changed — the documentation is checked against the code for 0.8.2 *(2026-11-18)*
+
+`docs/` was checked against the code both ways before the release, and corrected where it said
+more or less than the code does. `docs/API.md` now states its version as 0.8.2. It names the
+error each refusal gives, describes the store file format and what `open`, `get`, `delete` and
+`list` do with a name or a file that is not right, says what `blob_key_id` does not notice and
+what `password::verify` accepts, and says what hardening does outside Linux. It lists the inputs
+that have no upper bound on their length. `docs/Cli.md` and `docs/Inspect.md` give the exit codes
+as they are. A comment on `drop_filesystem` said random bytes never come from `/dev/urandom`; it
+now says when they do. No code that runs is changed.
+
+### Fixed — `SecretStore::open` reads a store file on a read-only file system whatever its mode *(2026-11-18)*
+
+`open` sets mode 0600 on a store file that has another mode. Where it may not change the mode,
+it leaves the file as it is and goes on. That held for a file the process does not own; on a
+read-only file system `open` failed with `Io` instead. It now leaves the file as it is there too.
+
+### Changed — the wording of four comments is tidied *(2026-11-18)*
+
+Four comments, one in `krypto-cli` and three in its tests, are tidied. No code is changed.
 
 ## [0.8.1] — 2026-11-15
 

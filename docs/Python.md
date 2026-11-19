@@ -242,7 +242,8 @@ string, such as an Argon2i hash from another tool or one made with a secret key 
 `FormatError`, before Argon2 runs.
 
 `password.derive_key` takes a salt of at least 16 bytes and, *(0.8.2)*, at most 1024; outside that
-it raises `FormatError`.
+it raises `FormatError`. The salt must be `bytes`: a `bytearray` or a `memoryview` raises
+`TypeError`, so the salt cannot change while Argon2 runs.
 
 *(0.9.0)* The password is at most `password.MAX_PASSWORD_BYTES` (1024) bytes and the stored string
 at most `password.MAX_PHC_BYTES` (512); a longer one raises `FormatError`, before Argon2 runs.
@@ -355,6 +356,8 @@ when the operation itself failed) is a `ValueError`; an argument of the wrong ty
 
 A panic in the Rust code surfaces as `pyo3_runtime.PanicException`. It derives from
 `BaseException`, not `Exception`, so neither `except krypto.Error` nor `except Exception` catches it.
+
+When each kind comes, and what it means: [Errors you can get](Usage.md#errors-you-can-get).
 
 ---
 

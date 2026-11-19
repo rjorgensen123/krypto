@@ -224,7 +224,8 @@ blobs carrying it belong to one master key, also across installations.
 
 ### `DerivedKey`
 
-A working key of 32 bytes. Opaque — no public methods. Used by `seal`, `open` and `hmac_sha256`.
+A working key of 32 bytes. Opaque — no public methods. Used by `seal`, `open`, `reseal`, their
+`_with_aad` variants and `hmac_sha256`.
 
 ### `hmac_sha256`
 
@@ -389,7 +390,7 @@ with the next counter. The next write
 uses that counter again, so two different states of a v2 store can carry one counter, and whoever
 can write in the directory can put the leftover file in place past an anchor at that counter.
 *(0.7.2)* An existing file with any other mode gets 0600 when opened. If the process may
-not change it — it does not own the file, or *(0.9.0)* the file system is read-only — the file is
+not change it — it does not own the file, or *(0.8.2)* the file system is read-only — the file is
 left as it is and `open` goes on. *(0.8.2)* The mode is changed only once `open` has read the file
 as a store, so a file that is not a store keeps its mode.
 *(0.8.2)* If what is at the store path can be opened but is not a regular file, such as a FIFO, a
@@ -421,7 +422,9 @@ names sorted, and an empty prefix lists them all.
 The 4 bytes at offset 0 are the magic `FST1` in every version, and the byte at offset 4 is the
 format version. An entry is `name_len (u16 LE) | name | blob_len (u32 LE) | blob`, where `blob` is
 a FAFN blob — identical in both versions, as are the per-name key context `krypto/store/v1|` +
-name and the blob's AAD: its 54-byte header, which carries the store's `key_id`.
+name and the blob's AAD: its 54-byte header, which carries the store's `key_id`. krypto seals each
+blob with `Alg::Aegis256` under the entry's key (derived with the store's salt), and writes the
+entries sorted by name.
 
 | Offset | Size | Version 1 (frozen) | Version 2 *(0.9.0)* |
 |---|---|---|---|
@@ -570,9 +573,11 @@ file through the same path, in this or another process, fails at once with `Erro
 (`WouldBlock`). You can rely on that guard, or keep to one handle in your own code as well — your
 choice. The lock is the kernel's (`flock`) on an empty `.<name>.lock` beside the path given to
 `open`: it goes with the handle or the process, also after a crash, so it never goes stale. The
-same file opened through another name, such as a link, takes another lock. If the store's file
-name is not valid UTF-8, the lock file is `.store.lock`, so two such stores in one directory, or
-one beside a store named `store`, share one lock. *(0.8.2)* A symbolic link at the lock file's
+same file opened through another name, such as a link, takes another lock. If the path has no
+file name, or its file name is not valid UTF-8, the lock file is `.store.lock`, so two such stores
+in one directory, or one beside a store named `store`, share one lock. If the lock file is replaced
+or removed each time right after `open` has locked it, `open` gives up after three tries with
+`Error::Io`. *(0.8.2)* A symbolic link at the lock file's
 name is not followed, and something there that is not a regular file, such as a FIFO, is not used
 as the lock: `open` fails with `Error::Io` either way, and a FIFO there does not make it wait.
 `open` goes ahead without a lock only on a read-only file system, or when there is no lock file and
@@ -628,16 +633,19 @@ pub fn derive_key(password: &SecretString, salt: &[u8], preset: Preset)
 - `verify` is constant-time. `Auth` means the password does not match: a **wrong password**, or a
   PHC string that can be read but was cut short or altered. `Format` means the PHC string cannot
   be read or is foreign. Do not merge them.
+- `hash` gives a PHC string for Argon2id, version 19 (`v=19`), with the preset's parameters, a
+  random salt of 16 bytes and a hash of 32 bytes.
 - *(0.8.2)* `verify` accepts **Argon2id, version 19** with the `v=19` field present, and parameters
   between the floor and a ceiling a little above `High`: `65 536 ≤ m ≤ 327 680` KiB (64–320 MiB),
   `2 ≤ t ≤ 5`, `1 ≤ p ≤ 5`. The ceiling is `High` plus a margin (m + 25 %, t + 1, p + 1) and moves
   with it. That is wider than what krypto writes: the parameters may come in any order, a string
   that leaves out `t` or `p` is read with Argon2's defaults (`t=2`, `p=1`), the salt may be 8 to 48
   bytes and the hash 10 to 64 bytes, and the length of the stored hash is the length of the output
-  compared. Associated data (`data=`) is accepted and given to Argon2; krypto never writes it.
-  Anything else — Argon2i, Argon2d, version 16, a string without `v=`, a `keyid` (it names a
-  secret key krypto does not have), parameters outside the range — is `Format`, refused before
-  Argon2 runs, so a stored string cannot make one call use more memory or time than that.
+  compared. Associated data (`data=`) of up to 32 bytes is accepted and given to Argon2; krypto
+  never writes it. Anything else — Argon2i, Argon2d, version 16, a string without `v=`, a `keyid`
+  (it names a secret key krypto does not have), parameters outside the range — is `Format`,
+  refused before Argon2 runs, so a stored string cannot make one call use more memory or time than
+  that.
 - When the working memory of Argon2 cannot be had, `hash` and, *(0.9.0)*, `derive_key` answer
   `Hardening`, while `verify` answers `Format`; when Argon2 fails in another way, `hash` answers
   `Hardening`, and `verify` and `derive_key` answer `Format`.
@@ -677,8 +685,8 @@ parameter-dependent** — a preset adjustment changes the key it yields.
 
 Ed25519 with **raw** keys (32-byte seed/public, 64-byte signature) and ECDSA P-256 with a
 **PKCS#8** private key, a **SEC1** public point (65 bytes, leading `0x04`; verification also takes
-the compressed form, 33 bytes) and an **ASN.1 DER** signature over SHA-256 — the same wire form as
-`ring`'s `ECDSA_P256_SHA256_ASN1`.
+the 33-byte forms: compressed, leading `0x02` or `0x03`, and compact, leading `0x05`) and an
+**ASN.1 DER** signature over SHA-256 — the same wire form as `ring`'s `ECDSA_P256_SHA256_ASN1`.
 
 ```rust
 pub const ED25519_SEED_LEN: usize = 32;
@@ -700,9 +708,14 @@ pub fn ecdsa_p256_sign(pkcs8: &SecretBuf, message: &[u8]) -> Result<Vec<u8>, Err
 pub fn ecdsa_p256_verify(public_sec1: &[u8], message: &[u8], sig_der: &[u8]) -> Result<(), Error>;
 ```
 
-A signature that does not hold → `Auth`. Malformed key/signature → `Format`. Signing is RFC 6979
-deterministic; the verifier also accepts randomized signatures (same wire form). Tested against
-RFC 8032 (TEST 1+2) and RFC 6979 A.2.5.
+A signature that does not hold → `Auth`. For Ed25519, a public key that is not 32 bytes or not a
+point on the curve, and a signature that is not 64 bytes, are `Format`; in a signature of 64 bytes,
+an S that is not below the group order or an R that is not the canonical encoding of a point is
+`Auth` (see below). For P-256, a public key is `Format` unless it is a point on the curve other than
+the identity, given as 65 bytes starting with `0x04` or as 33 bytes starting with `0x02`, `0x03` or
+`0x05`; and a signature is `Format` unless it is ASN.1 DER of two integers r and s, each from 1 to
+below the group order. Signing is RFC 6979 deterministic; the verifier also accepts randomized
+signatures (same wire form). Tested against RFC 8032 (TEST 1+2) and RFC 6979 A.2.5.
 
 An ECDSA signature is given as RFC 6979 computes it, with no rule on S, and `ecdsa_p256_verify`
 accepts both (r, s) and (r, n − s): anyone can make a second valid signature from a first, so the
@@ -720,9 +733,10 @@ signature in that order; `ecdsa_p256_sign` the message, then the key.
 verifiers.** `ed25519_verify` is strict: a public key of small order (a *weak* key) or an R of
 small order in the signature → `Auth`, and a public key that is not the canonical 32-byte encoding
 of its point → `Format`. So `Ok` means the signature was made with the private key that belongs to
-that public key. `ed25519_verify_relaxed` only checks that the signature equation holds: it does
-not refuse weak keys, an R of small order or non-canonical key encodings, and for a weak key anyone
-can make signatures that hold, without a private key. Use it only where such keys must be
+that public key. `ed25519_verify_relaxed` checks that the signature equation holds and, as
+`ed25519_verify` does, refuses with `Auth` an R that is not the canonical encoding of a point; it
+does not refuse weak keys, an R of small order or non-canonical key encodings, and for a weak key
+anyone can make signatures that hold, without a private key. Use it only where such keys must be
 accepted, never to check who signed with a public key that came from someone else. Keys from
 `ed25519_keypair` and signatures from `ed25519_sign` verify with both. Both refuse, with `Auth`,
 an S that is not below the group order, as long as no crate in your build turns on the
@@ -763,7 +777,8 @@ pub fn decode(s: &str) -> Result<Vec<u8>, Error>;      // fail-closed: [0-9a-f] 
 
 One canonical form: `decode` rejects UPPERCASE on purpose — two spellings of the same bytes must
 not be able to exist in signed forms and fingerprint comparisons. What `decode` rejects is
-`Error::Format`. *(0.9.0)* The output buffer is reserved with `try_reserve_exact`: a failed
+`Error::Format`; *(0.8.2)* the message for an invalid character names neither the character nor
+where it is. *(0.9.0)* The output buffer is reserved with `try_reserve_exact`: a failed
 reservation is `Error::Hardening` instead of an abort; a length the system promises but cannot back
 still fills the memory.
 
@@ -788,7 +803,8 @@ pub fn decode_nopad(s: &str) -> Result<Vec<u8>, Error>;      // fail-closed, rej
 ```
 
 Same philosophy as `hex`: one spelling — whitespace, wrong padding and non-canonical trailing
-bits are rejected, as `Error::Format`. Keys and signatures on the wire are still HEX; base64 exists
+bits are rejected, as `Error::Format`. *(0.8.2)* The message for an invalid character names
+neither the character nor where it is. Keys and signatures on the wire are still HEX; base64 exists
 only for formats that ARE base64 by nature (`SHA256:<base64-no-pad>` fingerprints, PEM).
 *(0.9.0)* `decode` and `decode_nopad` reserve the output buffer with `try_reserve_exact`: a failed
 reservation is `Error::Hardening` instead of an abort; a length the system promises but cannot back
@@ -831,16 +847,17 @@ promises but cannot back still fills the memory.
 ## `harden` — process hardening
 
 ```rust
-pub fn harden_process() -> Result<(), Error>;       // core dumps off + non-dumpable
+pub fn harden_process() -> Result<(), Error>;       // core dumps off + non-dumpable (Linux)
 pub fn no_new_privs() -> Result<(), Error>;         // never gain privileges (PR_SET_NO_NEW_PRIVS)
 pub fn close_inherited_fds() -> Result<(), Error>;  // closes EVERYTHING above stderr (close_range, Linux 5.9+)
 pub fn drop_filesystem(dir: impl AsRef<Path>) -> Result<(), Error>; // chroot into an EMPTY dir, the process inside it
 ```
 
 On Linux, the platform krypto supports, all of them are **fail-closed**: if the call cannot
-deliver, you get `Err` — never silent degradation. On other systems `no_new_privs`,
-`close_inherited_fds` and `drop_filesystem` fail with `Hardening`, and `harden_process` only sets
-the core-dump limit to zero and reports success. Each step
+deliver, you get `Err` — never silent degradation. On other systems `no_new_privs` and
+`close_inherited_fds` fail with `Hardening`, and so does `drop_filesystem` once it has checked the
+directory; `harden_process` only sets the core-dump limit to zero and reports success, and fails
+with `Hardening` only if it cannot set that limit. Each step
 is its own deliberate choice. Recommended order: `harden_process()` and
 `no_new_privs()` first in `main` · `close_inherited_fds()` early, before opening your own files
 (NB: it also kills deliberately inherited sockets, e.g. socket activation — hence a separate
@@ -851,16 +868,19 @@ directory that was checked, and the root changes as the last step, with the proc
 inside; on `Err` the root has not changed and the process stands where it stood, unless stepping
 back out of the directory fails too; then it stays in the directory, and the error says so. After
 the chroot krypto needs no filesystem, with two exceptions. An open `SecretStore` can no longer
-write its file, since writes go by path. And randomness comes from the `getrandom` syscall (Linux
-3.17 and later), but where that call is unavailable or blocked (`ENOSYS`, or `EPERM` from a
-seccomp filter), the `getrandom` crate reads `/dev/urandom` instead, through a descriptor it keeps
-open; if it had not opened it before the chroot, random calls fail with `Hardening`. AEAD, KDF,
-signing and passwords touch no files. A directory that is missing or cannot be opened is `Io`; one
-that is not a directory or is not empty, and a chroot that fails, are `Hardening`.
+write its file, since writes go by path and the path now resolves inside the new root. And
+randomness comes from the `getrandom` syscall (Linux 3.17 and later), but where that call is
+unavailable or blocked (`ENOSYS`, or `EPERM` from a seccomp filter), the `getrandom` crate reads
+`/dev/urandom` instead on most Linux targets, x86-64 and AArch64 among them, through a descriptor
+it keeps open; if it had not opened it before the chroot, random calls fail with `Hardening`.
+AEAD, KDF, signing and passwords touch no files. A directory that is missing or cannot be opened
+or read is `Io`; one that is not a directory or is not empty, and any failure from the step into
+it up to the change of root, are `Hardening`.
 
 `close_inherited_fds` also closes the lock of a
 [`SecretStore`](#secretstore--encrypted-store-on-file) that is already open, after which a second
-`open` of that file succeeds: call it before opening a store.
+`open` of that file succeeds: call it before opening a store, and before anything has asked for
+random bytes (see what the steps leave open, below).
 
 What the steps leave open: a later change of user or group id resets the mark `harden_process`
 sets to the machine's setting, so call it again after one, and crash handlers inside the process
@@ -890,12 +910,13 @@ soon as it is released; another allocator, or other settings, can keep it in the
 ```rust
 pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotFound, WrongKey, Rollback { file_counter: u64, min_counter: u64 } }   // Rollback: 0.9.0
 ```
-`#[non_exhaustive]`. Implements `Display`, `std::error::Error` and `From<std::io::Error>`.
+`#[non_exhaustive]`. Implements `Display`, `std::error::Error` (its `source()` is the inner
+`io::Error` for `Io`, and `None` for the others) and `From<std::io::Error>`.
 
 | Variant | Means |
 |---|---|
 | `Io` | file or directory: also a store that is already open through another handle, a lock file that is a symbolic link or not a regular file, and a store write whose file is replaced but whose directory could not be synced afterwards, so the change is in the file; *(0.9.0)* also a store file that `open_with_min_counter` with `min_counter` above 0 did not find |
-| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening, and Argon2 failing in `password::hash` — never a verdict on the data; treated fail-closed. *(0.9.0)* Also a `SecretStore` write refused because the store's counter is at its maximum: rotate the store |
+| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening, Argon2 failing in `password::hash`, and an internal step no input can cause — never a verdict on the data; treated fail-closed. *(0.9.0)* Also a `SecretStore` write refused because the store's counter is at its maximum: rotate the store |
 | `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob, or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info`. *(0.9.0)* Not a krypto blob means shorter than its 4-byte magic, or not starting with `FAFN`. *(0.9.0)* An input over its size limit, a blob over its limit included. For a `SecretStore`: not a store file, an unknown version, an invalid structure, or *(0.9.0)* another version than the open names, and a name that breaks the name rules at `get` or `delete` |
 | `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, a header cut short past the magic included *(0.9.0)*, that leaves the blob within its size limit *(0.9.0)*, and a key id in a `SecretStore` that does not match. *(0.9.0)* At the open of a v2 store file: the file is not what was written — cut short of its header, or the master key fits and something else was changed, added or removed |
 | `KeyNotFound` | the name does not exist in the store |
@@ -967,20 +988,21 @@ How the Rust forms read in Python:
 | A value taken by value: `MasterKey::from_bytes(SecretBuf)`, `SecretStore::rotate(self, …)`, `SecretStore::upgrade(self)` | The object is consumed, also when the operation itself fails, and also when `upgrade` on a v2 store writes nothing; using it afterwards is a `ValueError`. An argument of the wrong type is rejected with `TypeError` before anything is consumed |
 | `expose(\|b\| …)`, `expose_str(\|s\| …)` | `expose(f)`, `expose_str(f)`: `f` is called with a copy, and what it returns is returned |
 | `SecretStore<'a>` borrows the `MasterKey` | `SecretStore` keeps the `MasterKey` object alive |
-| `Debug` (redacted, where the type has it) | `repr()` on every class, never the contents: `SecretBuf([REDACTED], len=N)`, `SecretString([REDACTED], len=N)`, `MasterKey([REDACTED])`, `DerivedKey([REDACTED])`, `SecretStore` |
+| `Debug` (redacted, where the type has it) | `repr()` on every class, and so printing, never the contents: `SecretBuf([REDACTED], len=N)` (`SecretBuf(<consumed>)` once consumed), `SecretString([REDACTED], len=N)`, `MasterKey([REDACTED])`, `DerivedKey([REDACTED])`, `SecretStore` |
 
 ### What is guaranteed, and where Python differs
 
 | | Rust | Python |
 |---|---|---|
-| `SecretBuf`, `SecretString`, `MasterKey`, `DerivedKey`, and in a `SecretStore` the keys and the plaintext it returns | In locked memory, kept out of core dumps, guard pages, wiped on drop; a store's names and sealed blobs are in ordinary memory | The same: the objects hold Rust memory |
+| `SecretBuf`, `SecretString`, `MasterKey`, `DerivedKey`, and in a `SecretStore` the keys and the plaintext it returns | In locked memory, kept out of core dumps on Linux, guard pages, wiped on drop; a store's names and sealed blobs are in ordinary memory | The same: the objects hold Rust memory |
 | What goes in | Moved in, or zeroized by `from_vec` | Copied in. The `bytes` or `str` passed stays as Python keeps it, neither locked nor wiped; a `bytearray` given to `SecretBuf.from_vec` is zeroed, also when the call fails |
 | What comes out | Seen inside the closure, in locked memory | `expose` and `expose_str` hand `f` a Python copy, neither locked nor wiped. `open` and `get` return a `SecretBuf`, so plaintext stays locked until exposed |
 | Locked memory | Counted against `RLIMIT_MEMLOCK` of the process | The same, in the Python process |
 | `fork` | The child's copies of locked pages are not locked | The same |
 | `harden` | Applies to the process | Applies to the Python process; `close_inherited_fds` closes the interpreter's own descriptors too |
-| Long calls | — | `password::hash`, `verify` and `derive_key` release the GIL, so threads that run them at once each take Argon2's memory, 64 to 320 MiB per call |
-| A panic inside krypto | Unwinds to the caller | Becomes `pyo3_runtime.PanicException` |
+| The GIL | — | *(0.8.2)* The module declares that it needs the GIL (`gil_used = true`): krypto-py is built and tested only with Python that has the GIL, not on a free-threaded Python |
+| Long calls | — | `password::hash`, `verify` and `derive_key` release the GIL, so threads that run them at once each take Argon2's memory, 64 to 320 MiB per call; the salt of `derive_key` must be `bytes` (a `bytearray` or `memoryview` is a `TypeError`), so it cannot change while Argon2 runs |
+| A panic inside krypto | Unwinds to the caller | Becomes `pyo3_runtime.PanicException`, which derives from `BaseException`, so `except Exception` does not catch it |
 
 ---
 

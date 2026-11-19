@@ -23,7 +23,7 @@ krypto-cli bench                                                           # Arg
 | Command | In → out |
 |---|---|
 | `version` | → the krypto version |
-| `inspect` | a file or dump on stdin → what it is and how it was made, without a key; **[Inspect](Inspect.md)** lists what it recognizes |
+| `inspect` | a file or dump on stdin → what it is and how it was made, without a key; exit 3 for a krypto blob whose header names a format version or an algorithm krypto does not know or is cut short, and for a version 2 store file cut short of its header; **[Inspect](Inspect.md)** lists what it recognizes |
 | `keyid --key-file <f>` | → the key id of a master key (hex) |
 | `seal --key-file <f> --context <s> --salt <s> [--alg aegis256\|xchacha20\|aes256gcm]` | plaintext → blob; `aegis256` when `--alg` is left out |
 | `open --key-file <f> --context <s> --salt <s>` | blob → plaintext |
@@ -47,7 +47,7 @@ The exit code tells the kinds of failure apart:
 | `0` | ok | |
 | `1` | I/O, input the command cannot take (a krypto `Format` error, such as data that is not a blob or a key file that is too short), or an internal error | look at the message |
 | `2` | the call is wrong: also stdin over 64 MiB, and a value on the command line that krypto refuses, such as an empty `--context`, a `--context` or `--salt` over 1024 bytes, or a `--public` or `--signature` that is not a key or signature of its kind | fix the call |
-| **`3`** | **authentication failure** | **someone tampered with the data, or the context or salt is wrong; for `verify`, the signature does not hold** · *(0.9.0)* a blob cut short of its 54-byte header — `FAFN` magic intact — is `3` too, for `open` (it was `1`) and for `inspect` (it was `0`), and so is a version 2 store file cut short of its 109-byte header, for `inspect` |
+| **`3`** | **authentication failure** | **someone tampered with the data, or the context or salt is wrong; for `verify`, the signature does not hold; for `inspect`, a krypto blob whose header names a format version or an algorithm krypto does not know** · *(0.9.0)* a blob cut short of its 54-byte header — `FAFN` magic intact — is `3` too, for `open` (it was `1`) and for `inspect` (it was `0`), and so is a version 2 store file cut short of its 109-byte header, for `inspect` |
 | `4` | the blob names another key generation | find the right key (see `keyid` and `inspect`); a changed key id is `4` too |
 
 `open` compares the key id in the blob with the key's before it opens, so another key generation
