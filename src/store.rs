@@ -347,10 +347,8 @@ impl<'a> SecretStore<'a> {
                 // → create a new, empty store.
                 let mut salt = [0u8; SALT_LEN];
                 let mut key_id = [0u8; KEY_ID_LEN];
-                getrandom::fill(&mut salt)
-                    .map_err(|e| Error::Hardening(format!("getrandom: {e}")))?;
-                getrandom::fill(&mut key_id)
-                    .map_err(|e| Error::Hardening(format!("getrandom: {e}")))?;
+                crate::util::fill_random(&mut salt)?;
+                crate::util::fill_random(&mut key_id)?;
                 let store = SecretStore {
                     path,
                     master,
@@ -566,8 +564,8 @@ impl<'a> SecretStore<'a> {
         // 2. Build the new generation in memory.
         let mut salt = [0u8; SALT_LEN];
         let mut key_id = [0u8; KEY_ID_LEN];
-        getrandom::fill(&mut salt).map_err(|e| Error::Hardening(format!("getrandom: {e}")))?;
-        getrandom::fill(&mut key_id).map_err(|e| Error::Hardening(format!("getrandom: {e}")))?;
+        crate::util::fill_random(&mut salt)?;
+        crate::util::fill_random(&mut key_id)?;
         let mut new_store = SecretStore {
             path: self.path.clone(),
             master: new_master,
@@ -1256,8 +1254,7 @@ fn atomic_write(path: &Path, data: &[u8]) -> Result<(), WriteError> {
     // file planted where the tmp file goes is refused, never followed or
     // reused, so the tmp file is always this write's own and always 0600.
     let mut nonce = [0u8; 8];
-    getrandom::fill(&mut nonce)
-        .map_err(|e| WriteError::NotReplaced(Error::Hardening(format!("getrandom: {e}"))))?;
+    crate::util::fill_random(&mut nonce).map_err(WriteError::NotReplaced)?;
     let nonce_hex = crate::hex::encode(&nonce).map_err(WriteError::NotReplaced)?;
     let tmp = dir.join(format!(".tmp-{}-{nonce_hex}-{fname}", std::process::id()));
 

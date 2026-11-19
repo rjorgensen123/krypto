@@ -256,8 +256,11 @@ work in ordinary memory.
   deriving a key, not after hashing or checking a password.
 - **Random bytes can come from the wrong place.** Where the kernel's call is unavailable,
   krypto reads the random device through a descriptor it keeps; a program that closes
-  inherited descriptors afterwards can leave that descriptor pointing at something else
-  (SPEC-primitives).
+  inherited descriptors afterwards can leave that descriptor pointing at something else.
+  Closing inherited descriptors checks the source afterwards, and where it no longer answers,
+  krypto gives no more random bytes in that process. The check does not cover other code in
+  the program that reads random bytes, nor a file another thread opens between the closing
+  and the check (SPEC-primitives).
 - **AEGIS-256, the cipher the store always uses, is the youngest of the three,** an
   Informational RFC of a research group (RFC 10032), not an IETF standard; the store cannot
   leave it without a change to krypto (SPEC-krypto).

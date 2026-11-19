@@ -38,7 +38,10 @@ krypto.drop_filesystem("/var/empty")    # irreversible; needs privileges
 ```
 
 *(0.9.0)* While a `SecretStore` holds its lock, `close_inherited_fds` raises `HardeningError` and
-closes nothing: call it before opening a store, or after every open store is gone.
+closes nothing: call it before opening a store, or after every open store is gone. *(0.9.0)* Where
+krypto reads `/dev/urandom` and had opened it before the call, `close_inherited_fds` raises
+`HardeningError`, with the descriptors closed, and krypto hands out no random bytes for the rest
+of the process's life: call it before anything asks krypto for random bytes.
 
 Why, and in what order: [Getting started](Usage.md#getting-started).
 

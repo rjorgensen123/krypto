@@ -126,10 +126,14 @@ memory or randomness that cannot be had is `Hardening`.
 
 krypto takes the bytes through the kernel's call for random bytes. Where that call is
 unavailable or blocked, the kernel's non-blocking random device is read instead, through a
-descriptor that stays open. Closing inherited descriptors then closes it, and later random
-bytes can be read from whatever the process opens next under that number; after leaving the
-file system, a device not yet opened cannot be opened (SPEC-memory). A program that runs where
-the kernel's call is unavailable, and takes either step, must know this.
+descriptor that stays open. Closing inherited descriptors then closes it, and a later read
+through that number would get whatever the process opens next under it. So that step asks
+for one random byte after closing; where the source no longer answers, the step fails, and
+krypto gives no random bytes for the rest of the process's life rather than read them from
+another file. That holds for krypto's own requests for random bytes, not for other code in
+the program, nor for a file another thread opens between the closing and the check. After
+leaving the file system, a device not yet opened cannot be opened (SPEC-memory). A program
+that runs where the kernel's call is unavailable, and takes either step, must know this.
 
 ## 7. Checked against the definitions
 

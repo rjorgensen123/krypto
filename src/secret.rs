@@ -81,8 +81,7 @@ impl SecretBuf {
         let mut s = SecretBuf {
             pages: ffi::LockedPages::new(len)?,
         };
-        getrandom::fill(s.pages.as_mut_slice())
-            .map_err(|e| Error::Hardening(format!("getrandom failed: {e}")))?;
+        crate::util::fill_random(s.pages.as_mut_slice())?;
         Ok(s)
     }
 

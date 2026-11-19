@@ -157,8 +157,7 @@ pub fn seal_with_aad(
     check_aad_len("aad", aad)?;
     check_plaintext_len(plaintext.len())?;
     let mut nonce = [0u8; NONCE_FIELD];
-    getrandom::fill(&mut nonce[..alg.nonce_len()])
-        .map_err(|e| Error::Hardening(format!("getrandom failed: {e}")))?;
+    crate::util::fill_random(&mut nonce[..alg.nonce_len()])?;
 
     let mut header = Vec::with_capacity(HEADER_LEN);
     header.extend_from_slice(MAGIC);

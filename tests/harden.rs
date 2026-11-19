@@ -67,27 +67,63 @@ mod forked {
         }
     }
 
+    /// What `/proc/self/fd` shows above stderr: for each descriptor, whether
+    /// it is open on `/dev/urandom`, and the device and inode of what it is
+    /// open on. `None` if the table cannot be read.
+    fn open_descriptors() -> Option<Vec<(bool, (u64, u64))>> {
+        use std::os::unix::fs::MetadataExt;
+        let mut open = Vec::new();
+        for entry in std::fs::read_dir("/proc/self/fd").ok()? {
+            let entry = entry.ok()?;
+            let fd: i32 = entry.file_name().to_str()?.parse().ok()?;
+            if fd > 2 {
+                let meta = std::fs::metadata(entry.path()).ok()?;
+                let urandom = std::fs::read_link(entry.path())
+                    .is_ok_and(|t| t == std::path::Path::new("/dev/urandom"));
+                open.push((urandom, (meta.dev(), meta.ino())));
+            }
+        }
+        Some(open)
+    }
+
     #[test]
     fn close_inherited_fds_closes_above_stderr() {
+        use std::os::unix::fs::MetadataExt;
         // Open the fd in the PARENT so the child does not allocate before
         // the syscall; the fork gives the child its own copy of the table.
         let f = std::fs::File::open("/etc/os-release")
             .or_else(|_| std::fs::File::open("/etc/hostname"))
             .expect("no readable /etc file for the test");
         let fd = f.as_raw_fd();
+        let meta = f.metadata().expect("metadata of the inherited file");
+        let file = (meta.dev(), meta.ino());
         let code = in_child(|| {
             if krypto::close_inherited_fds().is_err() {
                 return 3;
             }
+            // The file is recognised by what it is, not by its number: where
+            // the `getrandom` crate reads `/dev/urandom` and had not opened
+            // it yet, the call's test of the random source opens it, under
+            // the lowest free number, which can be the file's old one.
+            let Some(open) = open_descriptors() else {
+                return 5;
+            };
+            if open.iter().any(|(_, what)| *what == file) {
+                return 4;
+            }
+            // Without `/dev/urandom` open, the number itself is closed too.
             // SAFETY: fcntl on a plain integer descriptor.
             let gone = unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1;
-            if gone {
+            if gone || open.iter().any(|(urandom, _)| *urandom) {
                 0
             } else {
                 4
             }
         });
-        assert_eq!(code, 0, "3 = call failed, 4 = the fd survived");
+        assert_eq!(
+            code, 0,
+            "3 = call failed, 4 = the fd survived, 5 = /proc/self/fd unreadable"
+        );
         // The parent's copy is untouched by the child's close_range.
         drop(f);
     }

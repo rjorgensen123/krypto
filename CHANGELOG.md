@@ -262,6 +262,14 @@ While a store in the process holds its lock, `close_inherited_fds` fails with `H
 closes nothing. Before, it closed the lock, and a write could then be lost without an error.
 Call it before opening a store.
 
+### ⚠ Changed — `close_inherited_fds` tests the random source after closing *(2026-11-19)*
+
+Where random bytes are read from `/dev/urandom` and something had asked for them before the call,
+`close_inherited_fds` closed that descriptor too, and later random bytes could then come from
+another file without an error. It now fails with `Hardening`, and krypto hands out no random
+bytes in that process afterwards. Ordinary systems are not affected. Call it before anything
+asks for random bytes.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`

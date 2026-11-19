@@ -60,11 +60,31 @@ pub fn no_new_privs() -> Result<(), Error> {
 ///   count. A store that takes its lock at the same time in another thread
 ///   either counts before the check, and the call refuses, or takes the
 ///   lock after the closing.
+/// - (0.9.0) After closing, it asks the random source for one byte. Where the
+///   `getrandom` crate reads `/dev/urandom` through a descriptor it keeps (the
+///   kernel's call blocked by a seccomp filter, or not found in a program
+///   linked statically against glibc), and that descriptor was open before the
+///   call, the source no longer answers: the call returns
+///   [`Error::Hardening`], with the descriptors closed, and krypto hands out
+///   no random bytes for the rest of the process's life, so everything that
+///   needs them answers `Hardening`. Call it before anything asks for random
+///   bytes. A test that fails for another reason, such as a `/dev/urandom`
+///   that cannot be opened, is answered the same way. A call after that answer
+///   closes again and returns `Hardening` again. Where the fallback is in use
+///   and nothing had asked for random bytes before, the test itself makes the
+///   `getrandom` crate open `/dev/urandom`, so one descriptor is open above
+///   stderr when the call returns `Ok`. The test covers krypto's own requests
+///   for random bytes: not other code in the program that reads random bytes,
+///   through the `getrandom` crate or a descriptor of its own, nor a file
+///   another thread opens between the closing and the test.
 ///
 /// Requires Linux 5.9+; on an older kernel the call fails — fail-closed,
 /// like everything in this module.
 pub fn close_inherited_fds() -> Result<(), Error> {
-    crate::store::with_no_lock_held(ffi::close_inherited_fds)
+    crate::store::with_no_lock_held(|| {
+        ffi::close_inherited_fds()?;
+        crate::util::probe_random_source_after_close()
+    })
 }
 
 /// Make the filesystem disappear for this process: `chroot` into `dir` —

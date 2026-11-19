@@ -636,7 +636,11 @@ fn no_new_privs() -> PyResult<()> {
 /// Closes every descriptor above stderr in the calling process — the Python
 /// interpreter's own included. (0.9.0) While a `SecretStore` in the process
 /// holds its lock, it raises `HardeningError` and closes nothing: call it
-/// before opening a store, or after every open store is gone.
+/// before opening a store, or after every open store is gone. (0.9.0) Where
+/// krypto reads `/dev/urandom` and had opened it before the call, it raises
+/// `HardeningError`, with the descriptors closed, and krypto hands out no
+/// random bytes for the rest of the process's life: call it before anything
+/// asks krypto for random bytes.
 #[pyfunction]
 fn close_inherited_fds() -> PyResult<()> {
     krypto::close_inherited_fds().map_err(err)

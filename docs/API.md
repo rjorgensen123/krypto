@@ -886,19 +886,30 @@ open store is dropped. A store opened without a lock, on a read-only file system
 file can be made, does not count. Call it before anything has asked for random bytes, too (see
 what the steps leave open, below).
 
-What the steps leave open: a later change of user or group id resets the mark `harden_process`
-sets to the machine's setting, so call it again after one, and crash handlers inside the process
-are not reached by it. `close_inherited_fds` also closes descriptors libraries hold, and the
-`/dev/urandom` descriptor where the `getrandom` crate has fallen back to it, after which later
-random bytes are read from whatever is opened next under that number. Where
-`close_inherited_fds` works at all (Linux 5.9 and later), the kernel has the `getrandom` call
-(Linux 3.17), so that fallback is in use in two cases: where a seccomp filter blocks the call
-(`ENOSYS` or `EPERM`), and in a program linked statically against glibc, where the `getrandom`
-crate does not find the function at run time. krypto does not detect either, so the call must
-still come before anything has asked for random bytes. `drop_filesystem` does not
-hold against a process that keeps the privilege to change its root, so giving that up afterwards
-is yours, and descriptors opened before it stay usable. The steps, and what each leaves open, are
-in [SPEC-memory](../spec/SPEC-memory.md).
+What the steps leave open: a later change of user or group id resets the mark `harden_process` sets
+to the machine's setting, so call it again after one, and crash handlers inside the process are not
+reached by it. `close_inherited_fds` also closes descriptors libraries hold, and the `/dev/urandom`
+descriptor where the `getrandom` crate has fallen back to it. Where `close_inherited_fds` works at
+all (Linux 5.9 and later), the kernel has the `getrandom` call (Linux 3.17), so that fallback is in
+use in two cases: where a seccomp filter blocks the call (`ENOSYS` or `EPERM`), and in a program
+linked statically against glibc, where the `getrandom` crate does not find the function at run time.
+*(0.9.0)* After closing, `close_inherited_fds` asks the random source for one byte. Where the
+`/dev/urandom` descriptor was open before the call, the source no longer answers: the call returns
+`Hardening`, with the descriptors closed, and krypto hands out no random bytes for the rest of the
+process's life, also once another file has the descriptor's number. Everything that needs them
+answers `Hardening`: drawing random bytes, making a secret or a key, sealing, hashing a password,
+and creating or writing a store. A test that fails for another reason, such as a `/dev/urandom` that
+cannot be opened, is answered the same way. A later `close_inherited_fds` closes again and answers
+`Hardening` again. So the call must still come before anything has asked for random bytes. Where the
+fallback is in use and nothing had asked for random bytes before, the test itself makes the
+`getrandom` crate open `/dev/urandom`, so one descriptor is open above stderr when the call returns
+`Ok`. The test covers krypto's own requests for random bytes: not other code in the program that
+reads random bytes, through the `getrandom` crate or a descriptor of its own, nor a file another
+thread opens between the closing and the test. Such other code can read, without an error, from
+whatever is opened next under the closed number. `drop_filesystem` does not hold against a process
+that keeps the privilege to change its root, so giving that up afterwards is yours, and descriptors
+opened before it stay usable. The steps, and what each leaves open, are in
+[SPEC-memory](../spec/SPEC-memory.md).
 
 Hardening is process-local: it protects the process that calls it. *(0.8.0)* From Python,
 `krypto-py` hardens the Python process with these same functions.
@@ -925,7 +936,7 @@ pub enum Error { Io(io::Error), Hardening(String), Format(String), Auth, KeyNotF
 | Variant | Means |
 |---|---|
 | `Io` | file or directory: also a store that is already open through another handle, a lock file that is a symbolic link or not a regular file, and a store write whose file is replaced but whose directory could not be synced afterwards, so the change is in the file; *(0.9.0)* also a store file that `open_with_min_counter` with `min_counter` above 0 did not find |
-| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening, Argon2 failing in `password::hash`, and an internal step no input can cause — never a verdict on the data; treated fail-closed. *(0.9.0)* Also a `SecretStore` write refused because the store's counter is at its maximum: rotate the store. *(0.9.0)* Also `close_inherited_fds` while a `SecretStore` in the process holds its lock: call it before opening a store |
+| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening, Argon2 failing in `password::hash`, and an internal step no input can cause — never a verdict on the data; treated fail-closed. *(0.9.0)* Also a `SecretStore` write refused because the store's counter is at its maximum: rotate the store. *(0.9.0)* Also `close_inherited_fds` while a `SecretStore` in the process holds its lock: call it before opening a store. *(0.9.0)* Also `close_inherited_fds` when it finds the random source closed, and every request for random bytes after that: call it before anything asks for random bytes |
 | `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob, or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info`. *(0.9.0)* Not a krypto blob means shorter than its 4-byte magic, or not starting with `FAFN`. *(0.9.0)* An input over its size limit, a blob over its limit included. For a `SecretStore`: not a store file, an unknown version, an invalid structure, or *(0.9.0)* another version than the open names, and a name that breaks the name rules at `get` or `delete` |
 | `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, a header cut short past the magic included *(0.9.0)*, that leaves the blob within its size limit *(0.9.0)*, and a key id in a `SecretStore` that does not match. *(0.9.0)* At the open of a v2 store file: the file is not what was written — cut short of its header, or the master key fits and something else was changed, added or removed |
 | `KeyNotFound` | the name does not exist in the store |

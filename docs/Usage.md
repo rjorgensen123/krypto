@@ -45,7 +45,10 @@ open after the chroot if it had not opened it before. And `close_inherited_fds` 
 sockets you inherited *on purpose* (e.g. socket activation) — which is why it is its own choice
 and not part of `harden_process`. *(0.9.0)* While a [store](#a-small-encrypted-store-on-disk) you
 have opened holds its lock, it refuses with `Hardening` and closes nothing, so call it before
-opening a store, or after every open store is dropped. What each step leaves open is in
+opening a store, or after every open store is dropped. *(0.9.0)* Where krypto reads `/dev/urandom`
+and had opened it before the call, `close_inherited_fds` closes that too: it then answers
+`Hardening`, with the descriptors closed, and krypto hands out no random bytes for the rest of the
+process's life, so call it before anything asks for random bytes. What each step leaves open is in
 [API](API.md#harden--process-hardening).
 
 *In Python: [Getting started](Python.md#getting-started).*

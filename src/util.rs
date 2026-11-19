@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Small utilities every consumer was rolling on its own: plain SHA-256,
 //! constant-time comparison, and randomness for values that are NOT secrets.
-//! Also the crate's shared limit on an amount of data, [`MAX_DATA_BYTES`].
+//! Also the crate's shared limit on an amount of data, [`MAX_DATA_BYTES`], and
+//! the one path every request for random bytes in the crate takes (0.9.0).
+
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::error::Error;
 
@@ -81,8 +84,58 @@ pub fn random_bytes_with_limit(len: usize, limit: usize) -> Result<Vec<u8>, Erro
     out.try_reserve_exact(len)
         .map_err(|_| Error::Hardening(format!("cannot allocate {len} random bytes")))?;
     out.resize(len, 0);
-    getrandom::fill(&mut out).map_err(|e| Error::Hardening(format!("getrandom failed: {e}")))?;
+    fill_random(&mut out)?;
     Ok(out)
+}
+
+/// Set once `close_inherited_fds` has found that the random source no longer
+/// answers (0.9.0), and never cleared: from then on krypto hands out no random
+/// bytes in this process.
+static RANDOM_SOURCE_CLOSED: AtomicBool = AtomicBool::new(false);
+
+/// The answer to a request for random bytes once [`RANDOM_SOURCE_CLOSED`] is set.
+fn random_source_closed_error() -> Error {
+    Error::Hardening(
+        "the random source was closed by close_inherited_fds; krypto hands out no random \
+         bytes in this process any more"
+            .into(),
+    )
+}
+
+/// `Error::Hardening` once `close_inherited_fds` has found the random source
+/// closed (0.9.0). For a caller that lets a dependency draw the random bytes
+/// itself, such as the salt in `password::hash`.
+pub(crate) fn check_random_source_open() -> Result<(), Error> {
+    if RANDOM_SOURCE_CLOSED.load(Ordering::SeqCst) {
+        return Err(random_source_closed_error());
+    }
+    Ok(())
+}
+
+/// Fill `buf` from the OS CSPRNG (0.9.0). Every request for random bytes
+/// krypto makes itself goes through here, so none is answered once
+/// `close_inherited_fds` has found the random source closed.
+pub(crate) fn fill_random(buf: &mut [u8]) -> Result<(), Error> {
+    check_random_source_open()?;
+    getrandom::fill(buf).map_err(|e| Error::Hardening(format!("getrandom failed: {e}")))
+}
+
+/// Ask the random source for one byte after `close_inherited_fds` has closed
+/// the descriptors (0.9.0). Where the source reads through a descriptor that
+/// was open before, it no longer answers: the flag is set and the call is
+/// `Error::Hardening`. Once the flag is set the source is not asked again,
+/// since its number may now belong to another file, which would answer.
+pub(crate) fn probe_random_source_after_close() -> Result<(), Error> {
+    check_random_source_open()?;
+    let mut byte = [0u8; 1];
+    getrandom::fill(&mut byte).map_err(|e| {
+        RANDOM_SOURCE_CLOSED.store(true, Ordering::SeqCst);
+        Error::Hardening(format!(
+            "the random source does not answer after the descriptors were closed: {e}; krypto \
+             hands out no random bytes in this process from now on; the usual cause is that \
+             something asked for random bytes before close_inherited_fds was called"
+        ))
+    })
 }
 
 /// `Error::Format` if `len` is above the cap for this call.

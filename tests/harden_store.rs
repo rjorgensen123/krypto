@@ -41,19 +41,52 @@ fn set_mode(p: &Path, mode: u32) {
     std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
 }
 
+/// Whether a descriptor above stderr is open on `/dev/urandom`: the
+/// `getrandom` crate's fallback, opened when random bytes were drawn, as in
+/// `tests/harden_random.rs`. `None` if `/proc/self/fd` cannot be read.
+fn urandom_is_open() -> Option<bool> {
+    for entry in std::fs::read_dir("/proc/self/fd").ok()? {
+        let entry = entry.ok()?;
+        let fd: i32 = entry.file_name().to_str()?.parse().ok()?;
+        if fd > 2 && std::fs::read_link(entry.path()).is_ok_and(|t| t == Path::new("/dev/urandom"))
+        {
+            return Some(true);
+        }
+    }
+    Some(false)
+}
+
 /// What `close_inherited_fds` answers in a forked child: 0 = it closed,
-/// 3 = it refused with `Hardening`, 4 = another error. The child makes the
-/// call and `_exit`s; glibc's atfork handlers make the allocation on the
-/// error path safe.
+/// 3 = it refused with `Hardening`, 4 = another error or answer. It closed
+/// means `Ok`, except where `/dev/urandom` is open in the child: this
+/// process drew random bytes when it created its stores, so the call closes
+/// that descriptor too and must answer `Hardening` about the random source
+/// (forced with `RUSTFLAGS='--cfg getrandom_test_linux_fallback'`). The
+/// child makes the call and `_exit`s; glibc's atfork handlers make the
+/// allocations safe.
 fn close_in_child() -> i32 {
     // SAFETY: fork(); the child never returns, only _exits.
     unsafe {
         match libc::fork() {
             -1 => panic!("fork failed"),
-            0 => libc::_exit(match krypto::close_inherited_fds() {
-                Ok(()) => 0,
-                Err(Error::Hardening(_)) => 3,
-                Err(_) => 4,
+            0 => libc::_exit(match urandom_is_open() {
+                None => 4,
+                Some(false) => match krypto::close_inherited_fds() {
+                    Ok(()) => 0,
+                    Err(Error::Hardening(_)) => 3,
+                    Err(_) => 4,
+                },
+                Some(true) => match krypto::close_inherited_fds() {
+                    Err(Error::Hardening(m))
+                        if m.contains(
+                            "the random source does not answer after the descriptors were closed",
+                        ) =>
+                    {
+                        0
+                    }
+                    Err(Error::Hardening(_)) => 3,
+                    _ => 4,
+                },
             }),
             pid => {
                 let mut status = 0;

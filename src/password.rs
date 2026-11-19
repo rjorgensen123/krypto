@@ -91,6 +91,9 @@ const SCRUB_BYTES: usize = 128 * 1024;
 /// `Error::Format`, refused before Argon2 runs (0.9.0).
 pub fn hash(password: &SecretString, preset: Preset) -> Result<String, Error> {
     check_password_len(password)?;
+    // argon2 draws the salt itself, so it is refused here, like krypto's own
+    // requests for random bytes, once the random source is closed (0.9.0).
+    crate::util::check_random_source_open()?;
     let res = password.expose_str(|pw| {
         // `hash_password` draws a fresh 16-byte salt from the OS CSPRNG.
         hasher(preset)
