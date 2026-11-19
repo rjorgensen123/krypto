@@ -112,7 +112,8 @@ What krypto does not detect:
 
 - **Everything that comes in has an upper bound,** checked before it is used; the few inputs
   without one are listed in SPEC-answers. A path to a named pipe makes reading a master key
-  wait (SPEC-keys).
+  wait for the pipe's writer; a pipe is an accepted source of the key, and the wait is
+  intended (SPEC-keys).
 - **Input is validated before it is used, and no input makes the library panic.** The answer
   tells what failed and carries no secret.
 - **A stored password hash cannot make a check arbitrarily expensive:** only Argon2id within a

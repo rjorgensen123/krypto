@@ -265,9 +265,12 @@ struct MasterKey {
 
 #[pymethods]
 impl MasterKey {
+    /// A path that names a pipe makes the call wait until a writer has
+    /// delivered the key and closed. It releases the GIL while it waits, so
+    /// other threads keep running (0.9.0).
     #[staticmethod]
-    fn from_secret_file(path: PathBuf) -> PyResult<Self> {
-        krypto::MasterKey::from_secret_file(path)
+    fn from_secret_file(py: Python<'_>, path: PathBuf) -> PyResult<Self> {
+        py.detach(|| krypto::MasterKey::from_secret_file(path))
             .map(|inner| Self { inner })
             .map_err(err)
     }

@@ -45,7 +45,8 @@ It comes in two ways: read from a file, or made from a byte secret already in me
 a key derived from a password. Both apply the same limits, because two ways into one kind of
 key must not mean two rules about what it accepts. A file's bytes are the key as they are, a
 line break at the end included. A path that names something that blocks when opened, such as
-a named pipe, makes the read wait.
+a named pipe, makes the read wait. A pipe is an accepted source of the key, and waiting until
+its writer has delivered the key and closed is intended.
 
 Neither a master key nor a working key gives its bytes back: each is used inside krypto and
 leaves it only as what it computes.

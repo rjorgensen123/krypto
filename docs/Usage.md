@@ -136,7 +136,8 @@ by you, and not by anyone else.
 The key file must be at least 32 bytes, and is never read more than one byte past
 `MAX_MASTER_KEY_BYTES` (4 KiB), the byte that shows it is too big — a symlink to `/dev/zero` or a
 bloated file cannot eat the memory. Its bytes are the key as they are, a line break at the end
-included, and a named pipe at the path makes the read wait for a writer.
+included. A pipe at the path is accepted, and the read waits until the writer has delivered the key
+and closed.
 
 ### Derive one key per purpose
 

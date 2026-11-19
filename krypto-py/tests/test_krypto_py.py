@@ -112,6 +112,44 @@ def test_master_key(tmp_path):
         m.derive(b"", b"s")
 
 
+def test_from_secret_file_releases_the_gil_while_it_waits_on_a_pipe(tmp_path):
+    """While `MasterKey.from_secret_file` waits for the writer of a named pipe,
+    other threads keep running, and the call returns the key once the writer
+    has delivered it and closed (0.9.0). In a child with a time limit: a call
+    that holds the GIL stops the child's main thread, and the test fails
+    instead of hanging."""
+    code = ("import errno, os, sys, threading, time, krypto_py as k\n"
+            "fifo, key = sys.argv[1], bytes(range(32))\n"
+            "os.mkfifo(fifo, 0o600)\n"
+            "got = []\n"
+            "reader = threading.Thread(target=lambda: got.append(k.MasterKey.from_secret_file(fifo).key_id()))\n"
+            "reader.start()\n"
+            "# A non-blocking open for writing succeeds only once the reader has the pipe open.\n"
+            "deadline = time.monotonic() + 10\n"
+            "while True:\n"
+            "    try:\n"
+            "        fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)\n"
+            "        break\n"
+            "    except OSError as e:\n"
+            "        if e.errno != errno.ENXIO or time.monotonic() > deadline:\n"
+            "            raise\n"
+            "        time.sleep(0.01)\n"
+            "# The reader now waits for the key; this thread keeps running meanwhile.\n"
+            "end = time.monotonic() + 0.3\n"
+            "while time.monotonic() < end:\n"
+            "    time.sleep(0.01)\n"
+            "assert reader.is_alive(), 'the call returned before the key was delivered'\n"
+            "os.write(fd, key)\n"
+            "os.close(fd)\n"
+            "reader.join(10)\n"
+            "assert not reader.is_alive(), 'the call did not return after the key was delivered'\n"
+            "assert got == [k.MasterKey.from_bytes(k.SecretBuf.from_vec(key)).key_id()], got\n")
+    try:
+        subprocess.run([sys.executable, "-I", "-c", code, str(tmp_path / "key.fifo")], check=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        pytest.fail("the child did not finish in 30 s: from_secret_file held the GIL while it waited")
+
+
 @pytest.mark.parametrize("alg", list(ALGS.values()))
 def test_seal_open_tamper(alg):
     m = master()

@@ -211,8 +211,12 @@ MAC. Nor does krypto stop one working key from being used with every cipher and 
 
 The key must be 32..=`MAX_MASTER_KEY_BYTES` (4096) bytes, on **both** ways in *(0.7.0)*; a shorter
 or longer one is `Format`. File reads are bounded (never OOM). The file's bytes are the key as they
-are, a line break at the end included. `from_secret_file` opens the path in blocking mode, so a
-named pipe there makes it wait until something opens the pipe for writing.
+are, a line break at the end included. A pipe is an accepted source of the key for
+`from_secret_file`, for example a shell's process substitution, or `/dev/stdin` fed from a pipe:
+the call waits until the writer has delivered the key and closed. Other kinds of path answer like
+this: a directory is `Io`; an empty source such as `/dev/null` is `Format`; an endless one such as
+`/dev/zero` is `Format`, and never more than one byte past the cap is read; a symbolic link is
+followed.
 `from_bytes` **consumes** the buffer (the key cannot be read back out) and is the path for a
 key that must never touch disk.
 
@@ -1021,7 +1025,7 @@ How the Rust forms read in Python:
 | `fork` | The child's copies of locked pages are not locked | The same |
 | `harden` | Applies to the process | Applies to the Python process; `close_inherited_fds` closes the interpreter's own descriptors too |
 | The GIL | — | *(0.8.2)* The module declares that it needs the GIL (`gil_used = true`): krypto-py is built and tested only with Python that has the GIL, not on a free-threaded Python |
-| Long calls | — | `password::hash`, `verify` and `derive_key` release the GIL, so threads that run them at once each take Argon2's memory, 64 to 320 MiB per call; the salt of `derive_key` must be `bytes` (a `bytearray` or `memoryview` is a `TypeError`), so it cannot change while Argon2 runs |
+| Long calls | — | `password::hash`, `verify` and `derive_key` release the GIL, so threads that run them at once each take Argon2's memory, 64 to 320 MiB per call; the salt of `derive_key` must be `bytes` (a `bytearray` or `memoryview` is a `TypeError`), so it cannot change while Argon2 runs; *(0.9.0)* `MasterKey.from_secret_file` releases the GIL too, so other threads keep running while it waits for the writer of a pipe |
 | A panic inside krypto | Unwinds to the caller | Becomes `pyo3_runtime.PanicException`, which derives from `BaseException`, so `except Exception` does not catch it |
 
 ---

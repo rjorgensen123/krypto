@@ -270,6 +270,12 @@ another file without an error. It now fails with `Hardening`, and krypto hands o
 bytes in that process afterwards. Ordinary systems are not affected. Call it before anything
 asks for random bytes.
 
+### Changed — krypto-py: `MasterKey.from_secret_file` releases the GIL *(2026-11-19)*
+
+While the call waits for a key delivered through a pipe, other Python threads now keep running.
+Before, the whole interpreter stood still. A pipe is an accepted source of the key, and the
+documentation now says so.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`

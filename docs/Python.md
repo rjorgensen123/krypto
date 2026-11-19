@@ -80,6 +80,13 @@ key = krypto.SecretBuf.random(32)
 master = krypto.MasterKey.from_bytes(key)   # consumes `key`, also when it fails: using it afterwards is a ValueError
 ```
 
+A pipe at the path of `from_secret_file` is accepted, and the call waits until the writer has
+delivered the key and closed. *(0.9.0)* It releases the GIL while it waits, so other threads keep
+running. The call itself still does not return before then, and when it is made on the main thread,
+Ctrl-C is not acted on until then: the `KeyboardInterrupt` comes as the call returns. Made in
+another thread, the call leaves the main thread free, and Ctrl-C is acted on there at once; the
+thread that still waits keeps the process from ending unless it is a daemon thread.
+
 ### Derive one key per purpose
 
 ```python
