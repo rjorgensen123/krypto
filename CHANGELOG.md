@@ -319,6 +319,12 @@ message. More than 4096 elements in one DER structure it reads, or more than 409
 packets, is now refused with an error and exit 1, and an OID with more than 4096 arcs is shown
 as `OID too long to show`.
 
+### Fixed — `krypto-cli` answers an argument that is not UTF-8, and a hardening error is exit 1 *(2026-11-20)*
+
+An argument that is not UTF-8 made the tool panic and repeat the argument; it is now a wrong
+call, exit 2, named by its position only. A hardening error while deriving the key in `seal`,
+`open` and `mac` gave exit 2; it is now 1, as everywhere else.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`

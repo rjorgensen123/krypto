@@ -21,13 +21,15 @@
 //! ```
 //!
 //! Input comes on stdin, output goes to stdout. Each command takes only its own
-//! flags. Exit codes: 0 ok · 1 I/O, input the command cannot take, or internal
+//! flags. Exit codes: 0 ok · 1 I/O, input the command cannot take, a hardening
+//! error, or internal
 //! · 2 the call is wrong (also stdin over 64 MiB, or a flag value krypto
 //! refuses) · 3 authentication failed (tampering, or the wrong context or salt;
 //! for `verify`, the signature does not hold) · 4 the blob's key id is not this
 //! key's (another key generation, or a changed key id).
 //! Messages go to stderr, never with key material or plaintext.
 
+use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::process::ExitCode;
 use std::time::Instant;
@@ -60,7 +62,7 @@ fn main() -> ExitCode {
     if let Err(e) = krypto::harden_process() {
         eprintln!("krypto-cli: warning: process hardening failed: {e}");
     }
-    match run(std::env::args().skip(1).collect()) {
+    match utf8_args(std::env::args_os().skip(1)).and_then(run) {
         Ok(()) => ExitCode::SUCCESS,
         Err(fail) => {
             eprintln!("krypto-cli: {}", fail.msg);
@@ -105,15 +107,28 @@ impl Fail {
         }
     }
 
-    /// A krypto error about something given on the command line: the call is
-    /// wrong (2), unless it is `Auth` (3) or `WrongKey` (4).
+    /// A krypto error about something given on the command line: a `Format`
+    /// error is a value krypto refuses, so the call is wrong (2); any other
+    /// error has the code `Fail::krypto` gives it, so `Hardening` is 1.
     fn from_args(e: krypto::Error) -> Self {
+        let refused = matches!(e, krypto::Error::Format(_));
         let mut fail = Fail::krypto(e);
-        if fail.code == 1 {
+        if refused {
             fail.code = 2;
         }
         fail
     }
+}
+
+/// The arguments as text. One that is not UTF-8 is a wrong call, told by its
+/// position like an unknown flag, so nothing of it is repeated back.
+fn utf8_args(args: impl Iterator<Item = OsString>) -> Result<Vec<String>, Fail> {
+    args.enumerate()
+        .map(|(i, arg)| {
+            arg.into_string()
+                .map_err(|_| Fail::usage(format!("argument {} is not UTF-8", i + 1)))
+        })
+        .collect()
 }
 
 /// The command and its flags, checked before anything is read. `help` is set
@@ -220,7 +235,8 @@ fn overview() -> String {
          \n\
          exit codes:\n\
          \x20 0  ok\n\
-         \x20 1  I/O, input the command cannot take, or an internal error\n\
+         \x20 1  I/O, input the command cannot take, a hardening error, or an\n\
+         \x20    internal error\n\
          \x20 2  the call is wrong: also stdin over 64 MiB, or a flag value krypto\n\
          \x20    refuses\n\
          \x20 3  authentication failed: tampering, or the wrong context or salt;\n\

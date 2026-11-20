@@ -759,6 +759,41 @@ fn a_wrong_call_is_exit_2_and_help_works() {
     );
 }
 
+/// An argument that is not UTF-8 is a wrong call (0.9.0): exit 2, nothing on
+/// stdout, and its readable part is not repeated back, as a word or as the
+/// value of a flag.
+#[cfg(unix)]
+#[test]
+fn an_argument_that_is_not_utf8_is_a_wrong_call() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let key = key_file("not-utf8", 3);
+    let word = OsString::from_vec(b"hunter2-secret\xff".to_vec());
+    let calls: [Vec<OsString>; 2] = [
+        vec!["sha256".into(), word.clone()],
+        vec![
+            "mac".into(),
+            "--key-file".into(),
+            key.into_os_string(),
+            "--context".into(),
+            word,
+            "--salt".into(),
+            "s".into(),
+        ],
+    ];
+    for args in calls {
+        let out = cli().args(&args).stdin(Stdio::null()).output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {stderr}");
+        assert!(out.stdout.is_empty(), "{args:?} wrote to stdout");
+        assert!(
+            !stderr.contains("hunter2"),
+            "{args:?} repeated the argument: {stderr}"
+        );
+    }
+}
+
 /// `verify` takes `--public` of at most 130 characters and `--signature` of
 /// at most 144, the hex of a 65-byte P-256 point and a 72-byte P-256
 /// signature (0.9.0): at the limits a signature verifies, and one character
