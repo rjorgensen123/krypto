@@ -306,6 +306,12 @@ and says where no lock is taken.
 hash at random places and calls the functions that read them; none may panic. Each run draws a
 new seed, and a failure prints the seed and the input, so it can be repeated.
 
+### Fixed — `krypto-cli inspect` shows the parameters of an Argon2i or Argon2d hash without `v=` *(2026-11-20)*
+
+For such a string `inspect` showed the salt under "parameters". It now shows the parameters.
+The exit codes in `krypto-cli --help` now say that stdin over 64 MiB, or a flag value krypto
+refuses, is exit 2.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`

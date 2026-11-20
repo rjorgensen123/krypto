@@ -418,6 +418,28 @@ fn inspect_tells_what_others_made() {
     }
 }
 
+/// `inspect` shows the parameters of an Argon2i or Argon2d password hash both
+/// with a `v=` field and without one, as older strings have, and not its salt.
+#[test]
+fn inspect_shows_argon2i_and_argon2d_parameters_with_or_without_a_version() {
+    // base64 of "saltsaltsaltsalt" and of "an example hash, not a real one.",
+    // without padding.
+    const SALT: &str = "c2FsdHNhbHRzYWx0c2FsdA";
+    const HASH: &str = "YW4gZXhhbXBsZSBoYXNoLCBub3QgYSByZWFsIG9uZS4";
+    for (prefix, variant) in [("$argon2i$", "Argon2i"), ("$argon2d$", "Argon2d")] {
+        for version in ["", "v=19$"] {
+            let input = format!("{prefix}{version}m=65536,t=3,p=2${SALT}${HASH}");
+            let out = run(&["inspect"], input.as_bytes());
+            let report = text(&out);
+            assert_eq!(out.code, 0, "{input}: {}", out.stderr);
+            let what = format!("password hash (PHC string, {variant})");
+            assert_eq!(report.lines().next(), Some(what.as_str()), "{report}");
+            assert!(report.contains("parameters  m=65536,t=3,p=2"), "{report}");
+            assert!(!report.contains(SALT), "the salt is shown: {report}");
+        }
+    }
+}
+
 /// `inspect` shows only printable ASCII (0.8.2): control characters a file
 /// puts in a PGP armor label, a PHC version, an OpenSSH key's cipher and KDF,
 /// the key type in an SSH key blob or an SSH signature's hash are left out and

@@ -22,9 +22,10 @@
 //!
 //! Input comes on stdin, output goes to stdout. Each command takes only its own
 //! flags. Exit codes: 0 ok · 1 I/O, input the command cannot take, or internal
-//! · 2 the call is wrong · 3 authentication failed (tampering, or the wrong
-//! context or salt; for `verify`, the signature does not hold) · 4 the blob's
-//! key id is not this key's (another key generation, or a changed key id).
+//! · 2 the call is wrong (also stdin over 64 MiB, or a flag value krypto
+//! refuses) · 3 authentication failed (tampering, or the wrong context or salt;
+//! for `verify`, the signature does not hold) · 4 the blob's key id is not this
+//! key's (another key generation, or a changed key id).
 //! Messages go to stderr, never with key material or plaintext.
 
 use std::io::{Read, Write};
@@ -220,7 +221,8 @@ fn overview() -> String {
          exit codes:\n\
          \x20 0  ok\n\
          \x20 1  I/O, input the command cannot take, or an internal error\n\
-         \x20 2  the call is wrong\n\
+         \x20 2  the call is wrong: also stdin over 64 MiB, or a flag value krypto\n\
+         \x20    refuses\n\
          \x20 3  authentication failed: tampering, or the wrong context or salt;\n\
          \x20    for verify, the signature does not hold\n\
          \x20 4  the blob's key id is not this key's: another key generation, or a\n\

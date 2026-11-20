@@ -57,8 +57,11 @@ fn password_hash(text: &str) -> Option<Finding> {
         } else {
             "Argon2d"
         };
+        // Older strings have no `v=` field; the parameters come first then.
+        let mut fields = rest.split('$').peekable();
+        fields.next_if(|field| field.starts_with("v="));
         return found(&format!("PHC string, {variant}"))
-            .map(|f| f.fact("parameters", rest.split('$').nth(1).unwrap_or("")));
+            .map(|f| f.fact("parameters", fields.next().unwrap_or("")));
     }
     if let Some(rest) = text.strip_prefix("$scrypt$") {
         return found("PHC string, scrypt")
