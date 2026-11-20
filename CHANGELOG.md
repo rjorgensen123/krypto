@@ -337,6 +337,11 @@ the row for 0.9.0 in `docs/Usage.md` names the later changes, and the store exam
 `docs/Python.md` runs as written. `MasterKey::from_secret_file` does not check the mode or the
 owner of the key file, and the documents now say that this is deliberate.
 
+### Changed — the specification says why the password presets have their numbers *(2026-11-20)*
+
+`spec/SPEC-keys.md` says why there are three presets and how their numbers were set. The
+comments in `src/password.rs` point there; they named a document that is not part of the crate.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`

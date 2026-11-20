@@ -151,6 +151,15 @@ numbers kept in two places sooner or later disagree.
 Memory is per call, so a preset's memory times the calls that run at once is what the machine
 must have. The floor is 64 MiB, 2 passes and 1 lane.
 
+**Why these numbers.** Three levels were needed: a light and fast one, a normal one and a
+heavy one. Interactive is the light one, for a login where someone waits. Balanced is the
+normal one, and the one that works in the ordinary case. High is the heavy one, for a secret
+that is opened seldom and can be attacked offline. The numbers were set by measuring the time
+a login took in two different applications. The floor is the least that is accepted whatever
+the machine.
+
+How long a preset takes depends on the machine; `krypto-cli bench` measures it where it runs.
+
 **A preset is a public contract, not a frozen format.** A stored hash carries its own
 parameters and keeps verifying as long as they lie inside the accepted range, whose ceiling
 moves if the highest preset moves; rehashing at the next login is the caller's part. A key

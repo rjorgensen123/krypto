@@ -40,8 +40,9 @@ fn check_password_len(password: &SecretString) -> Result<(), Error> {
     Ok(())
 }
 
-/// Calibration preset. The floor follows SEC v10 (`m ≥ 64 MiB, t ≥ 2, p ≥ 1`),
-/// and [`verify`] refuses hashes below it (0.8.2).
+/// Calibration preset. The floor is `m ≥ 64 MiB, t ≥ 2, p ≥ 1`, and [`verify`]
+/// refuses hashes below it (0.8.2). Where the numbers come from is in
+/// `spec/SPEC-keys.md` §8.
 ///
 /// The crate owns the numbers; the consumer picks a profile and stores its
 /// **name**, never the parameters (they also live in the PHC string, so old
@@ -105,12 +106,14 @@ pub fn hash(password: &SecretString, preset: Preset) -> Result<String, Error> {
     res
 }
 
-/// The lowest memory cost, in KiB, a stored hash may carry (0.8.2): the SEC v10
-/// floor of 64 MiB.
+/// The lowest memory cost, in KiB, a stored hash may carry (0.8.2): the floor
+/// of 64 MiB (`spec/SPEC-keys.md` §8).
 const MIN_M_KIB: u32 = 65_536;
-/// The lowest number of passes a stored hash may carry (0.8.2): the SEC v10 floor.
+/// The lowest number of passes a stored hash may carry (0.8.2): the floor
+/// (`spec/SPEC-keys.md` §8).
 const MIN_T: u32 = 2;
-/// The lowest parallelism a stored hash may carry (0.8.2): the SEC v10 floor.
+/// The lowest parallelism a stored hash may carry (0.8.2): the floor
+/// (`spec/SPEC-keys.md` §8).
 const MIN_P: u32 = 1;
 
 /// Refuse a parsed PHC string that krypto does not make or could not make
