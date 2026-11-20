@@ -210,16 +210,35 @@ fn delete_and_list() {
     let _ = std::fs::remove_file(&path);
 }
 
+/// A store file one byte over `MAX_STORE_BYTES` is `Format`, "too big", for
+/// both `open` and `key_id_from_file`, not read in unbounded. The file is a
+/// real store grown (sparse) past the cap, so its magic and header pass and
+/// only its size refuses it.
 #[test]
 fn oversized_store_file_is_rejected_no_oom() {
-    // A bloated store file must give a Format error, not be read in unbounded.
     let mk = master("big");
     let path = store_path("big");
-    std::fs::write(&path, vec![0u8; 20 * 1024 * 1024]).unwrap(); // > the 16 MiB cap
-    assert!(matches!(
-        SecretStore::open(&path, &mk),
-        Err(Error::Format(_))
-    ));
+    drop(SecretStore::open(&path, &mk).unwrap());
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_len(krypto::MAX_STORE_BYTES as u64 + 1)
+        .unwrap();
+    for (what, result) in [
+        ("open", SecretStore::open(&path, &mk).map(|_| ())),
+        (
+            "key_id_from_file",
+            SecretStore::key_id_from_file(&path).map(|_| ()),
+        ),
+    ] {
+        match result {
+            Err(Error::Format(m)) => {
+                assert!(m.contains("too big"), "{what}: unexpected message: {m}")
+            }
+            other => panic!("{what}: expected Format, got {other:?}"),
+        }
+    }
     let _ = std::fs::remove_file(&path);
 }
 
@@ -823,6 +842,87 @@ fn put_fails_before_the_rename_when_the_directory_cannot_be_opened() {
         .filter(|n| n.starts_with(".tmp-"))
         .collect();
     assert!(left.is_empty(), "tmp files left behind: {left:?}");
+    drop(s);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A `delete` whose write fails before the rename, the same way as the `put`
+/// above, leaves the file unchanged, and the handle keeps the entry and its
+/// counter. Skipped as root.
+#[cfg(unix)]
+#[test]
+fn delete_fails_before_the_rename_when_the_directory_cannot_be_opened() {
+    // SAFETY: geteuid has no preconditions.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("skipped: root can open any directory");
+        return;
+    }
+    let mk = master("dirread-delete");
+    let dir = store_dir("dirread-delete");
+    let path = dir.join("store");
+    let mut s = SecretStore::open(&path, &mk).unwrap();
+    s.put(
+        "alpha",
+        &SecretBuf::from_vec(b"kept value".to_vec()).unwrap(),
+    )
+    .unwrap();
+    let before = std::fs::read(&path).unwrap();
+
+    set_mode(&dir, 0o300);
+    let result = s.delete("alpha");
+    let after = std::fs::read(&path).unwrap();
+    set_mode(&dir, 0o700);
+
+    match result {
+        Err(Error::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied),
+        other => panic!("expected Io(PermissionDenied), got {other:?}"),
+    }
+    assert_eq!(after, before, "the store file changed");
+    assert_eq!(s.counter(), 1, "the counter follows the file");
+    s.get("alpha")
+        .unwrap()
+        .expose(|b| assert_eq!(b, b"kept value"));
+    drop(s);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An `upgrade` of a version 1 store whose write fails before the rename, the
+/// same way as the `put` above, leaves the file unchanged, and it still opens
+/// as version 1 with what it had. Skipped as root.
+#[cfg(unix)]
+#[test]
+fn upgrade_fails_before_the_rename_when_the_directory_cannot_be_opened() {
+    // SAFETY: geteuid has no preconditions.
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("skipped: root can open any directory");
+        return;
+    }
+    let mk = master("dirread-upgrade");
+    let dir = store_dir("dirread-upgrade");
+    let path = dir.join("store");
+    let mut s = SecretStore::open_with_version(&path, &mk, 1).unwrap();
+    s.put(
+        "alpha",
+        &SecretBuf::from_vec(b"kept value".to_vec()).unwrap(),
+    )
+    .unwrap();
+    let before = std::fs::read(&path).unwrap();
+
+    set_mode(&dir, 0o300);
+    let result = s.upgrade().map(|_| ());
+    let after = std::fs::read(&path).unwrap();
+    set_mode(&dir, 0o700);
+
+    match result {
+        Err(Error::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::PermissionDenied),
+        other => panic!("expected Io(PermissionDenied), got {other:?}"),
+    }
+    assert_eq!(after, before, "the store file changed");
+    let s = SecretStore::open(&path, &mk).unwrap();
+    assert_eq!(s.version(), 1);
+    s.get("alpha")
+        .unwrap()
+        .expose(|b| assert_eq!(b, b"kept value"));
     drop(s);
     let _ = std::fs::remove_dir_all(&dir);
 }

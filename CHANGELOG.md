@@ -325,6 +325,11 @@ An argument that is not UTF-8 made the tool panic and repeat the argument; it is
 call, exit 2, named by its position only. A hardening error while deriving the key in `seal`,
 `open` and `mac` gave exit 2; it is now 1, as everywhere else.
 
+### Added — tests for five behaviours no test guarded *(2026-11-20)*
+
+An Ed25519 S that is not below the group order, a store file over the size cap, `delete` and
+`upgrade` when the write fails, and the error for a too-long `info` or `salt` in `derive`.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`

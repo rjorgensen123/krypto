@@ -117,6 +117,39 @@ fn ed25519_relaxed_roundtrip_and_failures() {
     }
 }
 
+/// An S that is not below the group order L is refused with `Auth` by both
+/// functions. RFC 8032 TEST 1 with L added to S still satisfies the signature
+/// equation, so only the check on S refuses it; the unchanged signature
+/// verifies.
+#[test]
+fn ed25519_s_not_below_the_group_order_is_refused() {
+    let seed = seed_from_hex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60");
+    let public = ed25519_public(&seed).unwrap();
+    let sig = ed25519_sign(&seed, b"").unwrap();
+    ed25519_verify(&public, b"", &sig).unwrap();
+    ed25519_verify_relaxed(&public, b"", &sig).unwrap();
+    // L = 2^252 + 27742317777372353535851937790883648493 (RFC 8032 §5.1),
+    // little-endian like S.
+    let order =
+        hex::decode("edd3f55c1a631258d69cf7a2def9de1400000000000000000000000000000010").unwrap();
+    let mut s_plus_l = sig;
+    let mut carry = 0u16;
+    for (byte, l) in s_plus_l[32..].iter_mut().zip(&order) {
+        let sum = u16::from(*byte) + u16::from(*l) + carry;
+        *byte = sum as u8;
+        carry = sum >> 8;
+    }
+    assert_eq!(carry, 0, "S + L fits in 32 bytes");
+    assert!(matches!(
+        ed25519_verify(&public, b"", &s_plus_l),
+        Err(Error::Auth)
+    ));
+    assert!(matches!(
+        ed25519_verify_relaxed(&public, b"", &s_plus_l),
+        Err(Error::Auth)
+    ));
+}
+
 // --------------------------------------------------------------------------- //
 // Ed25519 — weak keys and non-canonical keys (0.8.2)
 // --------------------------------------------------------------------------- //

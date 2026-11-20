@@ -106,10 +106,11 @@ fn master_key_file_bounds_hold_on_both_sides() {
 /// Both reach the API from command lines and config files (`krypto-cli`'s
 /// `--context` and `--salt`), and an unbounded one is work whose size an
 /// attacker chooses. The cap has room to spare over the longest real use: the
-/// store's `krypto/store/v1|` prefix plus a 512-byte key name.
+/// store's `krypto/store/v1|` prefix plus a 512-byte key name. One byte over
+/// is `Format`, with a message that names the input and its limit.
 #[test]
 fn oversized_info_and_salt_are_rejected() {
-    use krypto::MAX_DERIVE_INPUT_BYTES;
+    use krypto::{Error, MAX_DERIVE_INPUT_BYTES};
     let mk = test_master("bounds");
     let at_cap = vec![b'x'; MAX_DERIVE_INPUT_BYTES];
     let over = vec![b'x'; MAX_DERIVE_INPUT_BYTES + 1];
@@ -122,14 +123,18 @@ fn oversized_info_and_salt_are_rejected() {
         mk.derive(b"krypto/test/v1", &at_cap).is_ok(),
         "salt at the cap must pass"
     );
-    assert!(
-        mk.derive(&over, b"saltsalt").is_err(),
-        "info one byte over the cap was accepted"
-    );
-    assert!(
-        mk.derive(b"krypto/test/v1", &over).is_err(),
-        "salt one byte over the cap was accepted"
-    );
+    for (what, result) in [
+        ("`info`", mk.derive(&over, b"saltsalt")),
+        ("`salt`", mk.derive(b"krypto/test/v1", &over)),
+    ] {
+        match result {
+            Err(Error::Format(m)) => assert!(
+                m.contains(what) && m.ends_with(&format!("max {MAX_DERIVE_INPUT_BYTES}")),
+                "{what}: unexpected message: {m}"
+            ),
+            other => panic!("{what}: expected Format, got {:?}", other.map(|_| ())),
+        }
+    }
 }
 
 /// One type, one rule: `from_bytes` caps the key at the same size
