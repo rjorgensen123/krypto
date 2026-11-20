@@ -4,6 +4,8 @@
 //! except an OID's encoding: not empty, and each part minimally encoded and
 //! closed (0.8.2).
 
+use super::{one_more, too_many, MAX_ELEMENTS};
+
 /// One DER element: its tag, its content, and what follows it.
 #[derive(Clone, Copy)]
 pub struct Tlv<'a> {
@@ -45,12 +47,18 @@ pub fn whole(input: &[u8]) -> Option<Tlv<'_>> {
     rest.is_empty().then_some(tlv)
 }
 
-/// The elements inside a constructed element, in order.
+/// The elements inside a constructed element, in order. More than
+/// [`MAX_ELEMENTS`] is `None`, and is recorded so that `inspect` refuses the
+/// input; once that is recorded, nothing more is read (0.9.0).
 pub fn children(body: &[u8]) -> Option<Vec<Tlv<'_>>> {
+    if too_many() {
+        return None;
+    }
     let mut out = Vec::new();
     let mut rest = body;
     while !rest.is_empty() {
         let (tlv, next) = read(rest)?;
+        one_more(out.len(), "elements in one DER structure")?;
         out.push(tlv);
         rest = next;
     }
@@ -69,13 +77,16 @@ pub const OID: u8 = 0x06;
 /// when the OID is empty, its last part is not closed, or a part starts with
 /// the byte 0x80 (not minimally encoded); `OID too long to show` when it is
 /// valid but a part does not fit in 64 bits. So an OID is never shown as
-/// another one.
+/// another one. An OID of more than [`MAX_ELEMENTS`] arcs is also `OID too
+/// long to show`, and the parts after the limit are not read (0.9.0).
 pub fn oid_text(body: &[u8]) -> Result<String, &'static str> {
     const INVALID: &str = "invalid OID";
+    const TOO_LONG: &str = "OID too long to show";
     if body.last().is_none_or(|b| b & 0x80 != 0) {
         return Err(INVALID);
     }
-    let mut parts: Vec<u64> = Vec::new();
+    let mut dotted = String::new();
+    let mut arcs = 0usize;
     // The part being read, or `None` once it no longer fits in 64 bits.
     let mut value = Some(0u64);
     let (mut at_start, mut too_long) = (true, false);
@@ -90,25 +101,28 @@ pub fn oid_text(body: &[u8]) -> Result<String, &'static str> {
         if b & 0x80 == 0 {
             match value {
                 None => too_long = true,
-                Some(v) if parts.is_empty() => {
+                Some(v) if arcs == 0 => {
                     // The first part is 40 * X + Y, with X at most 2.
                     let first = (v / 40).min(2);
-                    parts.push(first);
-                    parts.push(v - first * 40);
+                    dotted = format!("{first}.{}", v - first * 40);
                 }
-                Some(v) => parts.push(v),
+                Some(v) => {
+                    dotted.push('.');
+                    dotted.push_str(&v.to_string());
+                }
+            }
+            // The first part holds two arcs.
+            arcs += if arcs == 0 { 2 } else { 1 };
+            if arcs > MAX_ELEMENTS {
+                return Err(TOO_LONG);
             }
             value = Some(0);
         }
     }
     if too_long {
-        return Err("OID too long to show");
+        return Err(TOO_LONG);
     }
-    Ok(parts
-        .iter()
-        .map(u64::to_string)
-        .collect::<Vec<_>>()
-        .join("."))
+    Ok(dotted)
 }
 
 /// The name of an OID, where it is one we know.

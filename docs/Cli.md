@@ -47,7 +47,7 @@ The exit code tells the kinds of failure apart:
 | Code | Means | What to do |
 |---|---|---|
 | `0` | ok | |
-| `1` | I/O, input the command cannot take (a krypto `Format` error, such as data that is not a blob or a key file that is too short), or an internal error | look at the message |
+| `1` | I/O, input the command cannot take (a krypto `Format` error, such as data that is not a blob or a key file that is too short; *(0.9.0)* for `inspect`, also a DER structure it reads or an OpenPGP input of more than 4096 elements), or an internal error | look at the message |
 | `2` | the call is wrong: also stdin over 64 MiB, and a value on the command line that krypto refuses, such as an empty `--context`, a `--context` or `--salt` over 1024 bytes, or a `--public` or `--signature` that is not a key or signature of its kind | fix the call |
 | **`3`** | **authentication failure** | **someone tampered with the data, or the context or salt is wrong; for `verify`, the signature does not hold; for `inspect`, a krypto blob whose header names a format version or an algorithm krypto does not know** · *(0.9.0)* a blob cut short of its 54-byte header — `FAFN` magic intact — is `3` too, for `open` (it was `1`) and for `inspect` (it was `0`), and so is a version 2 store file cut short of its 109-byte header, for `inspect` |
 | `4` | the blob names another key generation | find the right key (see `keyid` and `inspect`); a changed key id is `4` too |

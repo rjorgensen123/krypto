@@ -632,6 +632,83 @@ fn inspect_reads_crafted_files_right_or_says_invalid() {
     }
 }
 
+/// `inspect` reads at most 4096 elements in one structure (0.9.0): at the
+/// limit the report is as before; one DER element or OpenPGP packet more is
+/// exit 1, one message on stderr and no report, also for a structure inside
+/// another and under hex; an OID of one arc more is `OID too long to show`,
+/// and the report goes on with exit 0.
+#[test]
+fn inspect_reads_at_most_4096_elements_in_one_structure() {
+    // A DER element with a four-byte length, which `inspect` reads.
+    let tlv = |tag: u8, body: &[u8]| {
+        [&[tag, 0x84][..], &(body.len() as u32).to_be_bytes(), body].concat()
+    };
+    // An Ed25519 PKCS#8 key of `n` elements: version, algorithm, key, NULLs.
+    let pkcs8 = |n: usize| {
+        let head =
+            hex::decode(&format!("020100300506032b657004220420{}", "00".repeat(32))).unwrap();
+        tlv(0x30, &[head, b"\x05\x00".repeat(n - 3)].concat())
+    };
+    // `n` OpenPGP packets: an Ed25519 signature over SHA-256, then empty ones.
+    let pgp = |n: usize| {
+        [
+            hex::decode("c20404001b08").unwrap(),
+            b"\xc2\x00".repeat(n - 1),
+        ]
+        .concat()
+    };
+    // A public key whose algorithm is an OID of `n` arcs: 0.1, then 1s.
+    let spki = |n: usize| {
+        let alg = tlv(0x30, &tlv(0x06, &vec![1; n - 1]));
+        tlv(0x30, &[alg, vec![3, 1, 0]].concat())
+    };
+    // A public key whose algorithm holds the Ed25519 OID and 4096 NULLs.
+    let alg = tlv(
+        0x30,
+        &[tlv(0x06, &[0x2b, 0x65, 0x70]), b"\x05\x00".repeat(4096)].concat(),
+    );
+    let nested = hex::encode(&tlv(0x30, &[alg, vec![3, 1, 0]].concat())).unwrap();
+
+    let shown = |what: &str| format!("algorithm   {what}");
+    let inputs = [
+        (pkcs8(4096), "private key (PKCS#8)", shown("Ed25519")),
+        (pgp(4096), "OpenPGP signature", shown("Ed25519")),
+        (
+            spki(4096),
+            "public key (SubjectPublicKeyInfo)",
+            shown(&format!("0{}", ".1".repeat(4095))),
+        ),
+        (
+            spki(4097),
+            "public key (SubjectPublicKeyInfo)",
+            shown("OID too long to show"),
+        ),
+    ];
+    for (input, what, holds) in inputs {
+        let out = run(&["inspect"], &input);
+        let report = text(&out);
+        assert_eq!(out.code, 0, "{what}: {}", out.stderr);
+        assert_eq!(report.lines().next(), Some(what), "{report}");
+        assert!(
+            report.lines().any(|l| l.trim_start() == holds),
+            "no {holds}: {report}"
+        );
+    }
+
+    let der = "inspect reads at most 4096 elements in one DER structure; the input has more";
+    let packets = "inspect reads at most 4096 OpenPGP packets; the input has more";
+    for (input, message) in [
+        (pkcs8(4097), der),
+        (nested.into_bytes(), der),
+        (pgp(4097), packets),
+    ] {
+        let out = run(&["inspect"], &input);
+        assert_eq!(out.code, 1, "{}", out.stderr);
+        assert!(out.stdout.is_empty(), "a report: {}", text(&out));
+        assert_eq!(out.stderr.matches(message).count(), 1, "{}", out.stderr);
+    }
+}
+
 /// A wrong call is exit 2, reported before stdin is read: stdin is left open
 /// here, so a command that waited for it would hang until the deadline. A
 /// token in the wrong place is never repeated back. `--help` and `version` work.

@@ -15,6 +15,10 @@ inside it, or a leading `0x`, means it is not hex. PEM, hex and base64 are unwra
 levels deep, counted together. Below that, a PEM block is told by its label, and read only where the
 label names a format of its own: OpenSSH private keys, SSH signatures, RSA public keys and PGP
 armor. Where the limit stops the unwrapping, the report ends with a `note` that says so *(0.8.2)*.
+`inspect` reads at most 4096 elements in one structure: the DER elements inside one value, the
+OpenPGP packets of one input, and the arcs of one OID. A DER structure it reads or an OpenPGP input
+with more is refused with exit `1`, a message on stderr and no report, and an OID with more arcs is
+shown as `OID too long to show`. *(0.9.0)*
 What is inside is told, with the wrapping. Anything it cannot place is `not recognized`, with its
 length and whether it looks like text, random bytes or other binary data. Random bytes cannot be
 told apart: encrypted data, compressed data and key material all look the same.
@@ -23,7 +27,8 @@ The exit code is `0` when it has said what something is, also `not recognized`; 
 blob whose header names a format version or an algorithm krypto does not know, *(0.9.0)* for one
 that starts with `FAFN` but is cut short of its 54-byte header, as for `open`, and *(0.9.0)* for a
 version 2 store file cut short of its 109-byte header; `1` when stdin cannot be read or stdout
-cannot be written, as when the reader of a pipe is gone; and `2` when stdin is more than 64 MiB, or
+cannot be written, as when the reader of a pipe is gone, or *(0.9.0)* when a DER structure it reads
+or an OpenPGP input holds more than 4096 elements; and `2` when stdin is more than 64 MiB, or
 for a wrong call: `inspect` takes no arguments, apart from `--help` and `-h`, which print the help.
 Other changes to a blob still give a report and exit `0`; it takes `open`, with the key, to find
 them. A store file of a version krypto does not know, and a version 1 store file cut short of its

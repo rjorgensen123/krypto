@@ -250,7 +250,9 @@ fn help_of(command: &str) -> &'static str {
              fingerprint of an SSH public key. A krypto blob whose header names a format\n\
              version or an algorithm krypto does not know, or whose header is cut short,\n\
              is exit 3, as for open, and so is a version 2 store file whose header is\n\
-             cut short. docs/Inspect.md lists what it knows."
+             cut short. More than 4096 elements in one DER structure it reads, or more\n\
+             than 4096 OpenPGP packets, is exit 1 with no report; an OID of more than 4096\n\
+             arcs is shown as too long. docs/Inspect.md lists what it knows."
         }
         "keyid" => {
             "usage: krypto-cli keyid --key-file <file>\n\
@@ -326,7 +328,9 @@ fn run(argv: Vec<String>) -> Result<(), Fail> {
     match args.command.as_str() {
         "version" => line(krypto::VERSION),
         "inspect" => {
-            let found = inspect::inspect(&read_stdin()?);
+            // Too many elements in one structure is input `inspect` cannot
+            // take: exit 1, with no report (0.9.0).
+            let found = inspect::inspect(&read_stdin()?).map_err(|msg| Fail { code: 1, msg })?;
             line(&found.report())?;
             if found.changed {
                 return Err(Fail::krypto(krypto::Error::Auth));

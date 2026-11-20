@@ -312,6 +312,13 @@ For such a string `inspect` showed the salt under "parameters". It now shows the
 The exit codes in `krypto-cli --help` now say that stdin over 64 MiB, or a flag value krypto
 refuses, is exit 2.
 
+### Fixed — `krypto-cli inspect` bounds what it collects *(2026-11-20)*
+
+`inspect` used memory many times the size of a crafted input and could be aborted without a
+message. More than 4096 elements in one DER structure it reads, or more than 4096 OpenPGP
+packets, is now refused with an error and exit 1, and an OID with more than 4096 arcs is shown
+as `OID too long to show`.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`

@@ -2,7 +2,11 @@
 //! OpenPGP (GnuPG): messages, keys and signatures, binary or armored. The
 //! packets are walked and their algorithm IDs named (RFC 9580, RFC 4880).
 
-use super::Finding;
+use super::{one_more, too_many, Finding};
+
+/// What [`packets`] names when an input holds more than
+/// [`MAX_ELEMENTS`](super::MAX_ELEMENTS).
+const PACKETS: &str = "OpenPGP packets";
 
 /// One packet: its tag and its body. `body` is `None` for a body of partial
 /// length, a stream that is not followed further; `head` is the start of the
@@ -14,7 +18,13 @@ struct Packet<'a> {
 }
 
 /// All packets in `input`, or `None` if it is not a clean packet sequence.
+/// More than [`MAX_ELEMENTS`](super::MAX_ELEMENTS) packets is `None` too, and
+/// is recorded so that `inspect` refuses the input; once that is recorded,
+/// nothing more is read (0.9.0).
 fn packets(input: &[u8]) -> Option<Vec<Packet<'_>>> {
+    if too_many() {
+        return None;
+    }
     let mut out = Vec::new();
     let mut rest = input;
     while !rest.is_empty() {
@@ -64,6 +74,7 @@ fn packets(input: &[u8]) -> Option<Vec<Packet<'_>>> {
         match len {
             Some(len) => {
                 let body = after.get(..len)?;
+                one_more(out.len(), PACKETS)?;
                 out.push(Packet {
                     tag,
                     body: Some(body),
@@ -78,6 +89,7 @@ fn packets(input: &[u8]) -> Option<Vec<Packet<'_>>> {
                 if !out.iter().any(|p: &Packet| p.tag == 1 || p.tag == 3) {
                     return None;
                 }
+                one_more(out.len(), PACKETS)?;
                 out.push(Packet {
                     tag,
                     body: None,
@@ -378,8 +390,7 @@ pub fn from_armor(text: &str) -> Option<Finding> {
         .skip(1)
         .skip_while(|l| !l.trim().is_empty())
         .take_while(|l| !l.starts_with('=') && !l.starts_with("-----END"))
-        .collect::<Vec<_>>()
-        .concat();
+        .collect();
     let inner = krypto::base64::decode(body.trim())
         .ok()
         .and_then(|b| from_binary(&b));

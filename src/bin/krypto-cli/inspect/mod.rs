@@ -9,6 +9,8 @@
 //! only printable ASCII: any other character is removed where the report is
 //! written, and the line says how many were (0.8.2).
 
+use std::cell::Cell;
+
 use krypto::{base64, blob_key_id, hex};
 
 mod der;
@@ -79,14 +81,52 @@ fn visible(text: &str) -> String {
 /// unwrapping further (0.8.2).
 const TOO_DEEP: &str = "stopped at the limit of two levels of unwrapping";
 
-/// What `input` is.
-pub fn inspect(input: &[u8]) -> Finding {
+/// The most elements `inspect` reads in one structure: the DER elements inside
+/// one constructed value, the OpenPGP packets of one input, and the arcs of one
+/// OID. It keeps a crafted file from taking many times its size in memory
+/// (0.9.0).
+const MAX_ELEMENTS: usize = 4096;
+
+thread_local! {
+    /// What held more than [`MAX_ELEMENTS`] elements, once a structure has.
+    /// Every later call of `der::children` and `pgp::packets` then gives `None`
+    /// at once, and [`inspect`] refuses the input (0.9.0).
+    static TOO_MANY: Cell<Option<&'static str>> = const { Cell::new(None) };
+}
+
+/// `Some(())` while a list of `count` elements may take one more. At
+/// [`MAX_ELEMENTS`] it records `what` as too many and gives `None`, so the
+/// structure is not read further (0.9.0).
+fn one_more(count: usize, what: &'static str) -> Option<()> {
+    if count < MAX_ELEMENTS {
+        return Some(());
+    }
+    if TOO_MANY.get().is_none() {
+        TOO_MANY.set(Some(what));
+    }
+    None
+}
+
+/// Whether a structure has held more than [`MAX_ELEMENTS`] elements (0.9.0).
+fn too_many() -> bool {
+    TOO_MANY.get().is_some()
+}
+
+/// What `input` is, or the message for an input with more than
+/// [`MAX_ELEMENTS`] DER elements in one structure or OpenPGP packets, which
+/// gets no report (0.9.0).
+pub fn inspect(input: &[u8]) -> Result<Finding, String> {
     let found = inspect_at(input, 0);
-    if found.too_deep {
+    if let Some(what) = TOO_MANY.take() {
+        return Err(format!(
+            "inspect reads at most {MAX_ELEMENTS} {what}; the input has more"
+        ));
+    }
+    Ok(if found.too_deep {
         found.fact("note", TOO_DEEP)
     } else {
         found
-    }
+    })
 }
 
 fn inspect_at(input: &[u8], depth: u8) -> Finding {
@@ -99,6 +139,10 @@ fn inspect_at(input: &[u8], depth: u8) -> Finding {
     let theirs = [files::from_magic, pkix::from_der, pgp::from_binary];
     if let Some(found) = theirs.iter().find_map(|f| f(input)) {
         return found;
+    }
+    // Too many elements: the reading ends here, and `inspect` gives no report.
+    if too_many() {
+        return Finding::new(NOT_RECOGNIZED);
     }
     let mut too_deep = false;
     if let Ok(text) = std::str::from_utf8(input) {
@@ -320,12 +364,12 @@ fn store(input: &[u8]) -> Option<Finding> {
             .fact("counter", counter.to_string())
             .fact("mac", "present, not verified");
     }
-    let (names, algs, damaged) = entries_of(input, header);
-    found = found.fact("entries", names.len().to_string());
-    if !names.is_empty() {
-        let mut shown = names[..names.len().min(NAMES_SHOWN)].join(", ");
-        if names.len() > NAMES_SHOWN {
-            shown += &format!(", and {} more", names.len() - NAMES_SHOWN);
+    let (count, names, algs, damaged) = entries_of(input, header, NAMES_SHOWN);
+    found = found.fact("entries", count.to_string());
+    if count > 0 {
+        let mut shown = names.join(", ");
+        if count > NAMES_SHOWN {
+            shown += &format!(", and {} more", count - NAMES_SHOWN);
         }
         found = found
             .fact("names", shown)
@@ -338,9 +382,15 @@ fn store(input: &[u8]) -> Option<Finding> {
 }
 
 /// The entries of a store file from `at` on, in the encoding v1 and v2 share
-/// (`name_len u16LE | name | blob_len u32LE | blob`): the names, the
-/// algorithms of the blobs, and where the file is cut short, if it is.
-fn entries_of(input: &[u8], mut at: usize) -> (Vec<String>, Vec<&'static str>, Option<usize>) {
+/// (`name_len u16LE | name | blob_len u32LE | blob`): how many there are, the
+/// names of the first `keep`, the algorithms of the blobs, and where the file
+/// is cut short, if it is. Only the names that are shown are kept (0.9.0).
+fn entries_of(
+    input: &[u8],
+    mut at: usize,
+    keep: usize,
+) -> (usize, Vec<String>, Vec<&'static str>, Option<usize>) {
+    let mut count = 0;
     let mut names = Vec::new();
     let mut algs = Vec::new();
     let mut damaged = None;
@@ -357,7 +407,10 @@ fn entries_of(input: &[u8], mut at: usize) -> (Vec<String>, Vec<&'static str>, O
             damaged = Some(at);
             break;
         };
-        names.push(String::from_utf8_lossy(name).into_owned());
+        if count < keep {
+            names.push(String::from_utf8_lossy(name).into_owned());
+        }
+        count += 1;
         let alg = if blob.starts_with(b"FAFN") && blob.len() > 5 {
             alg_name(blob[5])
         } else {
@@ -368,7 +421,7 @@ fn entries_of(input: &[u8], mut at: usize) -> (Vec<String>, Vec<&'static str>, O
         }
         at = next;
     }
-    (names, algs, damaged)
+    (count, names, algs, damaged)
 }
 
 const OID_EC_PUBLIC_KEY: &[u8] = &[0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];

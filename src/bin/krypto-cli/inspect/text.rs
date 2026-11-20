@@ -147,21 +147,20 @@ fn age(text: &str) -> Option<Finding> {
     if !text.starts_with("age-encryption.org/v1") {
         return None;
     }
-    let recipients: Vec<String> = text
-        .lines()
-        .filter_map(|l| l.strip_prefix("-> "))
-        .map(|l| l.split_whitespace().next().unwrap_or("").to_string())
-        .collect();
+    // The type on each `-> ` line is appended as it is read, so no list is
+    // kept. A line with no type adds an empty name; only no line is `none`.
+    let mut recipients = String::new();
+    let mut any = false;
+    for stanza in text.lines().filter_map(|l| l.strip_prefix("-> ")) {
+        if any {
+            recipients.push_str(", ");
+        }
+        recipients.push_str(stanza.split_whitespace().next().unwrap_or(""));
+        any = true;
+    }
     Some(
         Finding::new("age encrypted file")
-            .fact(
-                "recipients",
-                if recipients.is_empty() {
-                    "none".into()
-                } else {
-                    recipients.join(", ")
-                },
-            )
+            .fact("recipients", if any { recipients } else { "none".into() })
             .fact(
                 "cipher",
                 "ChaCha20-Poly1305 (STREAM), file key from the recipients",
@@ -299,7 +298,8 @@ fn paseto(text: &str) -> Option<Finding> {
 
 /// JWS/JWT (three parts) and JWE (five parts), compact form.
 fn jose(text: &str) -> Option<Finding> {
-    let parts: Vec<&str> = text.split('.').collect();
+    // One part more than a JWE has is enough to tell the count (0.9.0).
+    let parts: Vec<&str> = text.split('.').take(6).collect();
     if parts.len() != 3 && parts.len() != 5 {
         return None;
     }
@@ -347,7 +347,13 @@ fn fingerprint(text: &str) -> Option<Finding> {
             return Some(Finding::new("SSH key fingerprint").fact("hash", "SHA-256"));
         }
     }
-    let pairs: Vec<&str> = text.trim_start_matches("MD5:").split(':').collect();
+    // Here and below, one part more than the form has is enough to tell the
+    // count (0.9.0).
+    let pairs: Vec<&str> = text
+        .trim_start_matches("MD5:")
+        .split(':')
+        .take(17)
+        .collect();
     if pairs.len() == 16
         && pairs
             .iter()
@@ -355,7 +361,7 @@ fn fingerprint(text: &str) -> Option<Finding> {
     {
         return Some(Finding::new("SSH key fingerprint").fact("hash", "MD5 (old form)"));
     }
-    let groups: Vec<&str> = text.split_whitespace().collect();
+    let groups: Vec<&str> = text.split_whitespace().take(11).collect();
     if groups.len() == 10
         && groups
             .iter()
