@@ -39,7 +39,7 @@ caller's.
 
 **Input is validated before it is used,** from every source, a file krypto wrote itself included:
 type, length, range and character set. Unknown values are refused, not ignored. No input makes the
-crate panic.
+crate panic. Guard, by inputs broken at random: `no_broken_input_makes_krypto_panic`.
 
 ## Answers
 

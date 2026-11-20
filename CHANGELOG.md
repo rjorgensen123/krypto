@@ -300,6 +300,12 @@ The spec files no longer carry a status; `spec/README.md` says which document is
 SPEC-krypto says why AEGIS-256 was chosen, and SPEC-secretstore refers to the other documents
 and says where no lock is taken.
 
+### Added — a test that breaks valid input at random *(2026-11-20)*
+
+`tests/mutation.rs` breaks valid blobs, store files, keys, signatures, hex, base64 and a password
+hash at random places and calls the functions that read them; none may panic. Each run draws a
+new seed, and a failure prints the seed and the input, so it can be repeated.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`
