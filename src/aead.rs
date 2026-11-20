@@ -80,7 +80,7 @@ const AEAD_SCRUB_BYTES: usize = 96 * 1024;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[non_exhaustive]
 pub enum Alg {
-    /// Default — `alg_id` 1.
+    /// The first choice (the library has no default) — `alg_id` 1.
     Aegis256,
     /// Variant (format-preserving exit) — `alg_id` 2.
     XChaCha20Poly1305,
@@ -186,10 +186,10 @@ pub fn seal_with_aad(
 
 /// Read a blob's header (0.7.3). Not starting with `FAFN` (or shorter than the
 /// 4-byte magic) is not a krypto blob: `Format`. Starting with `FAFN` but cut
-/// short of the 54-byte header is a changed blob: `Auth` (0.9.0) — the alarm
-/// class is no longer the tamperer's choice. Past the magic, a version or an
-/// algorithm this krypto does not know is `Auth`, like every other change to
-/// a blob: a sealed blob that says otherwise has been altered.
+/// short of the 54-byte header is a changed blob: `Auth` (0.9.0) — past the
+/// magic, the alarm class is no longer the tamperer's choice. Past the magic, a
+/// version or an algorithm this krypto does not know is `Auth`, like every
+/// other change to a blob: a sealed blob that says otherwise has been altered.
 ///
 /// A blob longer than `MAX_BLOB_BYTES` is `Format`, before the magic is looked
 /// at (0.9.0).

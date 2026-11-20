@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 //! Master key and key derivation (HKDF-SHA256).
 //!
-//! The master key comes from OUTSIDE krypto (Docker secret / passphrase). It is
-//! never used directly on data — only to derive purpose-specific working keys.
+//! The master key comes from OUTSIDE krypto: read from a file, or made from
+//! bytes already in memory, such as a key derived from a password. It is never
+//! used directly on data — only to derive purpose-specific working keys.
 
 use hkdf::Hkdf;
 use sha2::Sha256;
@@ -61,9 +62,9 @@ impl MasterKey {
     /// From a key already in memory — typically derived from a password with
     /// [`crate::password::derive_key`].
     ///
-    /// Exists because unlock of data at rest (SIKKERHETSMODELL §8) takes the
-    /// root from a **human**, not from a file on the same disk as the
-    /// ciphertext. A file next to what it locks is obfuscation, not protection.
+    /// Exists because unlock of data at rest takes the root from a **human**,
+    /// not from a file on the same disk as the ciphertext. A file next to what
+    /// it locks is obfuscation, not protection.
     pub fn from_bytes(key: SecretBuf) -> Result<Self, Error> {
         let len = key.expose(|b| b.len());
         if len < 32 {

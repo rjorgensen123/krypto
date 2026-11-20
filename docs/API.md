@@ -216,7 +216,8 @@ are, a line break at the end included. A pipe is an accepted source of the key f
 the call waits until the writer has delivered the key and closed. Other kinds of path answer like
 this: a directory is `Io`; an empty source such as `/dev/null` is `Format`; an endless one such as
 `/dev/zero` is `Format`, and never more than one byte past the cap is read; a symbolic link is
-followed.
+followed. The file's mode and owner are not checked, and that is deliberate: who may read the key
+file is the caller's to arrange.
 `from_bytes` **consumes** the buffer (the key cannot be read back out) and is the path for a
 key that must never touch disk.
 
@@ -318,9 +319,9 @@ so how many large operations run at once is yours to limit.
 > — *(0.7.3)* a version or algorithm krypto does not know included. Only data that is not a krypto
 > blob at all gives `Format`. *(0.9.0)* That is data shorter than its 4-byte magic, or not starting
 > with `FAFN`; a blob starting with `FAFN` but cut short of the 54-byte header is a changed blob
-> and gives `Auth` too, so the alarm class is not the tamperer's choice. The one exception is
-> size: data longer than the blob limit above gives `Format`, whatever it starts with. Never wrong
-> plaintext is an absolute guarantee, not a detail.
+> and gives `Auth` too, so past the magic the alarm class is not the tamperer's choice. The one
+> exception there is size: data longer than the blob limit above gives `Format`, whatever it starts
+> with. Never wrong plaintext is an absolute guarantee, not a detail.
 
 ### The blob format (`FAFN`, format_ver 1)
 
@@ -373,8 +374,8 @@ impl<'a> SecretStore<'a> {
     pub fn put(&mut self, name: &str, secret: &SecretBuf) -> Result<(), Error>;
     pub fn get(&self, name: &str) -> Result<SecretBuf, Error>;   // Auth if the key id does not match the store's (0.7.3); a name that breaks the rules: Format (0.9.0)
     pub fn delete(&mut self, name: &str) -> Result<(), Error>;   // a name that breaks the rules: Format (0.9.0)
-    pub fn contains(&self, name: &str) -> bool;   // a name that breaks the rules: false (0.9.0)
-    pub fn list(&self, prefix: &str) -> Vec<String>;   // a prefix no name can start with: empty (0.9.0)
+    pub fn contains(&self, name: &str) -> bool;   // a name that breaks the rules: false
+    pub fn list(&self, prefix: &str) -> Vec<String>;   // a prefix no name can start with: empty
     pub fn version(&self) -> u8;    // 0.9.0: the file's format version, 1 or 2
     pub fn counter(&self) -> u64;   // 0.9.0: the write counter, 0 on a v1 store
     pub fn key_id(&self) -> [u8; 16];   // 0.9.0: the store's key_id, not secret
@@ -389,10 +390,10 @@ therefore cannot be moved to another name — the open fails. Writes are atomic 
 rename), and the file is private (0600). *(0.7.2)* The tmp file is new, with an unpredictable name,
 so nothing planted at that name is followed or reused, and the directory is synced after the
 rename. A crash after the tmp file is written and before the rename, or a failed rename whose tmp
-file cannot be removed, leaves that tmp file (`.tmp-…` beside the store): a complete store file
-with the next counter. The next write
-uses that counter again, so two different states of a v2 store can carry one counter, and whoever
-can write in the directory can put the leftover file in place past an anchor at that counter.
+file cannot be removed, leaves that tmp file (`.tmp-…` beside the store): a complete store file.
+*(0.9.0)* In a v2 store it carries the next counter, and the next write uses that counter again,
+so two different states of a v2 store can carry one counter, and whoever can write in the
+directory can put the leftover file in place past an anchor at that counter.
 *(0.7.2)* An existing file with any other mode gets 0600 when opened. If the process may
 not change it — it does not own the file, or *(0.8.2)* the file system is read-only — the file is
 left as it is and `open` goes on. *(0.8.2)* The mode is changed only once `open` has read the file
@@ -409,13 +410,14 @@ whole file, header included — 37 bytes in v1, 109 in v2 — and *(0.9.0)* `put
 prospective file size before the value is sealed.
 Name rules: non-empty, ≤ 512 bytes, printable ASCII only (`[\x20-\x7e]`) — names are
 addresses, not secrets, and get listed out. Checked on read as well as on write
-*(0.7.0)*: a store file need not have come from `put`.
+*(0.7.0)*: a store file need not have come from `put`, so `contains` gives `false` for a name that
+breaks them, and `list` gives an empty list for a prefix longer than 512 bytes or with a character
+outside printable ASCII, since no name can start with it.
 
-`put` checks in this order: the name, then the size cap — both `Format` — then it seals the value,
-and last the counter (below). *(0.9.0)* The name rules hold at lookup too, checked first: `get`
-and `delete` give `Format` for a name that breaks them, and `delete` then writes nothing;
-`contains` gives `false`; and `list` gives an empty list for a prefix longer than 512 bytes or with
-a character outside printable ASCII, since no name can start with it. A legal name that is not in
+*(0.9.0)* `put` checks in this order: the name, then the size cap — both `Format` — then it seals
+the value, and last the counter (below). The name rules hold at lookup too, checked first: `get`
+and `delete` give `Format` for a name that breaks them, and `delete` then writes nothing.
+A legal name that is not in
 the store is `KeyNotFound` from `get`. An entry whose blob is not a krypto blob gives `Format` from
 `get`, and stops `rotate` and `upgrade` with the same error. `delete` of a legal name that is not
 in the store returns `Ok`, writes nothing and leaves the counter where it was. `list` gives the
@@ -447,7 +449,8 @@ frozen. MACs are compared in constant time. The v2 header is 109 bytes.
 
 *(0.9.0)* **What `open` verifies.** If there is no file at the path, a new store is created and
 the checks below do not apply, except that an open anchored above counter 0 fails with `Io`
-(below). The lock is taken before the file is looked at (below; a failure there is `Io`).
+(below). The lock is taken before the file is looked at (below; a failure there is `Io`); an open
+anchored above counter 0 first looks only whether there is a file (below).
 Otherwise the checks run in this order: the path opens, else `Io`, and is a regular file,
 else `Format`; the size is within `MAX_STORE_BYTES` (the whole file, header included, on read and
 on write), else `Format`; the file holds the magic `FST1` and the version byte, else `Format`; the
@@ -611,7 +614,7 @@ fresh salt and a fresh key id, all entries re-sealed, and on a v2 file the `coun
 with `key_check` and `container_mac` recomputed.
 
 `rotate` holds every value of the store in locked memory at once, so the locked-memory limit
-bounds how many entries a store can rotate; `upgrade` decrypts them one at a time.
+bounds how many entries a store can rotate; *(0.9.0)* `upgrade` decrypts them one at a time.
 
 ---
 
@@ -940,7 +943,7 @@ pub enum Error { Io(std::io::Error), Hardening(String), Format(String), Auth, Ke
 | Variant | Means |
 |---|---|
 | `Io` | file or directory: also a store that is already open through another handle, a lock file that is a symbolic link or not a regular file, and a store write whose file is replaced but whose directory could not be synced afterwards, so the change is in the file; *(0.9.0)* also a store file that `open_with_min_counter` with `min_counter` above 0 did not find |
-| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening, Argon2 failing in `password::hash`, and an internal step no input can cause — never a verdict on the data; treated fail-closed. *(0.9.0)* Also a `SecretStore` write refused because the store's counter is at its maximum: rotate the store. *(0.9.0)* Also `close_inherited_fds` while a `SecretStore` in the process holds its lock: call it before opening a store. *(0.9.0)* Also `close_inherited_fds` when it finds the random source closed, and every request for random bytes after that: call it before anything asks for random bytes |
+| `Hardening` | a protection step or the environment failed: locked or protected memory, randomness, process hardening, Argon2 failing in `password::hash`, and an internal step no input can cause — never a verdict on the data; treated fail-closed. *(0.9.0)* Also `password::derive_key` when the working memory for Argon2 cannot be had. *(0.9.0)* Also a `SecretStore` write refused because the store's counter is at its maximum: rotate the store. *(0.9.0)* Also `close_inherited_fds` while a `SecretStore` in the process holds its lock: call it before opening a store. *(0.9.0)* Also `close_inherited_fds` when it finds the random source closed, and every request for random bytes after that: call it before anything asks for random bytes |
 | `Format` | the input had the wrong shape. *(0.7.3)* Data that is not a krypto blob, or a malformed key, signature, PHC string, encoding or parameter, such as an empty `info`. *(0.9.0)* Not a krypto blob means shorter than its 4-byte magic, or not starting with `FAFN`. *(0.9.0)* An input over its size limit, a blob over its limit included. For a `SecretStore`: not a store file, an unknown version, an invalid structure, or *(0.9.0)* another version than the open names, and a name that breaks the name rules at `get` or `delete` |
 | `Auth` | **wrong key, wrong password, or someone tampered** — *(0.7.3)* any change to a blob past its `FAFN` magic, a header cut short past the magic included *(0.9.0)*, that leaves the blob within its size limit *(0.9.0)*, and a key id in a `SecretStore` that does not match. *(0.9.0)* At the open of a v2 store file: the file is not what was written — cut short of its header, or the master key fits and something else was changed, added or removed |
 | `KeyNotFound` | the name does not exist in the store |
@@ -949,7 +952,8 @@ pub enum Error { Io(std::io::Error), Hardening(String), Format(String), Auth, Ke
 
 No variant carries key material or plaintext.
 
-In a blob every change past the magic is `Auth`, except a blob made larger than its limit. Outside
+*(0.9.0)* In a blob every change past the magic is `Auth`, except a blob made larger than its
+limit. Outside
 the blob, a writer of stored data can sometimes get another answer: `Format` for a store file with
 a changed magic or version byte, or cut to less than those five bytes, a v1 file cut short or
 broken, or a PHC string changed until it no longer reads; `WrongKey` for a changed salt or

@@ -330,6 +330,13 @@ call, exit 2, named by its position only. A hardening error while deriving the k
 An Ed25519 S that is not below the group order, a store file over the size cap, `delete` and
 `upgrade` when the write fails, and the error for a too-long `info` or `salt` in `derive`.
 
+### Changed — the documents are corrected against the code *(2026-11-20)*
+
+Sentences, version markers and five code comments that did not match the code are corrected,
+the row for 0.9.0 in `docs/Usage.md` names the later changes, and the store example in
+`docs/Python.md` runs as written. `MasterKey::from_secret_file` does not check the mode or the
+owner of the key file, and the documents now say that this is deliberate.
+
 ## [0.8.2] — 2026-11-18
 
 *Stricter answers and less left in memory. `ed25519_verify` refuses weak keys, `password::verify`

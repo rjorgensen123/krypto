@@ -25,7 +25,7 @@ check, base64 beside hex.
 | Scheme | Private key | Public key | Signature |
 |---|---|---|---|
 | Ed25519 | a 32-byte seed | 32 bytes | 64 bytes |
-| ECDSA over P-256 with SHA-256 | PKCS#8 in DER, at most 512 bytes | a SEC 1 point: 65 bytes uncompressed; 33 bytes compressed is also taken when verifying | ASN.1 DER, at most 72 bytes |
+| ECDSA over P-256 with SHA-256 | PKCS#8 in DER, at most 512 bytes | a SEC 1 point: 65 bytes uncompressed; 33 bytes, compressed or compact, is also taken when verifying | ASN.1 DER, at most 72 bytes |
 
 **Why these forms.** For Ed25519, raw keys are the form public keys are usually handed out in.
 For P-256, these are the forms a widely used library puts on the wire, so a program can move

@@ -141,6 +141,8 @@ krypto has been reviewed by AI models. These are not audits by a security firm.
 | 2026-11-18 | MiMo V2.6 Flash | 0.9.0, before release | security audit |
 | 2026-11-18 | Mistral Vibe, mistral-large-4-0 | 0.9.0, before release | code review, read only |
 | 2026-11-18 | Mistral Vibe | 0.9.0, before release | bug hunt |
+| 2026-11-20 | Mistral Vibe, mistral-large-4-0 | 0.9.0, before release | code review |
+| 2026-11-20 | Claude Fable 5.2 with Claude Opus 5.5 agents | 0.9.0, before release | code review |
 
 Earlier versions were also reviewed by DeepSeek, Qwen, Gemini and Fable.
 

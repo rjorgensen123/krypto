@@ -48,6 +48,11 @@ line break at the end included. A path that names something that blocks when ope
 a named pipe, makes the read wait. A pipe is an accepted source of the key, and waiting until
 its writer has delivered the key and closed is intended.
 
+The file is read as it is given: krypto does not look at its mode or its owner. That is
+deliberate. Who may read the key file is decided where the file is placed, and a secret handed
+to a container is often readable by everyone inside it, so refusing such a file would refuse
+the common case.
+
 Neither a master key nor a working key gives its bytes back: each is used inside krypto and
 leaves it only as what it computes.
 

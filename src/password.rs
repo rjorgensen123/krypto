@@ -245,7 +245,7 @@ impl Drop for WorkingMemory {
     }
 }
 
-/// Derive a 32-byte key from a password (SPEC SIKKERHETSMODELL §8.4).
+/// Derive a 32-byte key from a password.
 ///
 /// # This is not the same as [`hash`]
 ///

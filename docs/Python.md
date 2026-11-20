@@ -135,9 +135,9 @@ except krypto.AuthError:
 ```
 
 *(0.9.0)* A blob that starts with `FAFN` but is cut short of its 54-byte header raises
-`AuthError` too, not `FormatError` — the alarm class is no longer the tamperer's choice. Only data
-that cannot carry the magic (shorter than 4 bytes, or not starting with `FAFN`) is `FormatError`,
-and data longer than the blob limit above, whatever it starts with.
+`AuthError` too, not `FormatError` — past the magic, the alarm class is no longer the tamperer's
+choice. Only data that cannot carry the magic (shorter than 4 bytes, or not starting with `FAFN`)
+is `FormatError`, and data longer than the blob limit above, whatever it starts with.
 
 The algorithms and the tampering rules: [Encrypt and decrypt](Usage.md#encrypt-and-decrypt).
 
@@ -157,9 +157,9 @@ store.delete("api-token")
 store.key_id()                # the store's key_id, 16 bytes, not secret (0.9.0)
 ```
 
-*(0.9.0)* A name that breaks the name rules raises `FormatError` from `get` and `delete` as it does
-from `put`; `contains` gives `False` for it, and `list` gives `[]` for a prefix no name can start
-with.
+`contains` gives `False` for a name that breaks the name rules, and `list` gives `[]` for a prefix
+no name can start with. *(0.9.0)* Such a name raises `FormatError` from `get` and `delete` as it
+does from `put`.
 
 In Rust the store borrows the master key; here it keeps the `MasterKey` object alive for as long as
 it lives. One handle per file holds as in Rust, with the same limits: a second `open` of the same
@@ -195,13 +195,15 @@ a changed file. On a v1 file the old rule stands: `open` does not check the mast
 key raises `AuthError` from `get`.
 
 ```python
-store.version()    # 1 or 2 — the file's format version
-store.counter()    # the write counter (v2); 0 on a v1 store
+store.version()          # 1 or 2 — the file's format version
+seen = store.counter()   # the write counter (v2); 0 on a v1 store
 
-store = krypto.SecretStore.open_with_version("/data/secrets", master, 1)        # v1 only, created as v1 when new; a v2 file is FormatError
-store = krypto.SecretStore.open_with_min_counter("/data/secrets", master, seen)  # v2 only; RollbackError if the file is older
-store = store.upgrade()                                                          # v1 → v2, one-way; consumes the handle
-krypto.SecretStore.key_id_from_file("/data/secrets")                             # the key_id the file says it has, not authenticated
+del store   # one handle per file: an open raises IoError while another handle on the file lives
+store = krypto.SecretStore.open_with_min_counter("/data/secrets", new_master, seen)  # v2 only; RollbackError if the file is older
+
+old_store = krypto.SecretStore.open_with_version("/data/old-secrets", master, 1)     # v1 only, created as v1 when new; a v2 file is FormatError
+old_store = old_store.upgrade()                                                      # v1 → v2, one-way; consumes the handle
+krypto.SecretStore.key_id_from_file("/data/secrets")                                 # the key_id the file says it has, not authenticated
 ```
 
 Writes keep the file's version. An open that names a version accepts only a file of that version;

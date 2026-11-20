@@ -120,7 +120,9 @@ anything. A wrong key, context or salt also gives `Auth`: for a single blob it c
 from a change.
 
 The plaintext is given out in protected memory. Opening can still fail after the blob
-verified, with `Hardening`, when protected memory cannot be had.
+verified: with `Format` when the plaintext is over 64 MiB, which a blob within the size limit
+can hold with a 16-byte tag and krypto never seals, and with `Hardening` when protected memory
+cannot be had.
 
 **The unused bytes of the nonce field** are zero when krypto seals. They are authenticated as
 part of the header, and not otherwise checked when a blob is opened.
