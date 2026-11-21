@@ -121,33 +121,13 @@ PYO3_PYTHON=$PWD/.venv/bin/python cargo test -p krypto-py
 
 ## Reviews
 
-krypto has been reviewed by AI models. These are not audits by a security firm.
-
-| Date | Reviewer | Version | Kind |
-|---|---|---|---|
-| 2026-10-09 | MiMo V2.6 Flash | 0.7.0 | code review, read only |
-| 2026-10-30 | MiMo V2.6 Flash | 0.8.0, before release | code review, read only |
-| 2026-11-08 | Mistral Vibe | 0.8.0 | code review |
-| 2026-11-12 | Gemini | 0.8.0 | security audit |
-| 2026-11-12 | MiMo V2.6 Flash | 0.8.0 | security audit |
-| 2026-11-18 | MiMo V2.6 Flash | 0.9.0, before release | security audit |
-| 2026-11-18 | Mistral Vibe, mistral-large-4-0 | 0.9.0, before release | code review, read only |
-| 2026-11-18 | Mistral Vibe | 0.9.0, before release | bug hunt |
-| 2026-11-20 | Mistral Vibe, mistral-large-4-0 | 0.9.0, before release | code review |
-| 2026-11-20 | Claude Fable 5.2 with Claude Opus 5.5 agents | 0.9.0, before release | code review |
-
-Earlier versions were also reviewed by DeepSeek, Qwen, Gemini and Fable.
-
-The MiMo security audits used Cloudflare's
-[`security-audit`](https://github.com/cloudflare/security-audit-skill) skill.
+Reviewed independently by DeepSeek, Qwen, Gemini, Fable, MiMo and Mistral. Each review is
+listed with its date and version in [docs/Reviews.md](docs/Reviews.md).
 
 A person with long experience in cryptography has also read parts of the code and the design and
 given comments. That was not a full review, and it is not an endorsement. The store file format
 version 2 comes directly from those comments: they pointed at the same weakness in version 1 that
 several of the reviews above had pointed at over time.
-
-Each finding is assessed against the code, and the ones that hold are fixed;
-the CHANGELOG records the fixes.
 
 ## Author
 
@@ -157,7 +137,8 @@ Design, architecture and structure; the security model and what it means to fail
 contracts the crate presents outwards; and the decisions about what it does and deliberately
 does not do. 
 
-The code is written by Claude AI (Opus and Fable).
+The code is written by Claude AI (Opus and Fable) and, since 0.9.0, also by Mistral AI (Mistral
+Vibe).
 
 ## License
 

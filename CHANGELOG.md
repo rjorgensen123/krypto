@@ -6,6 +6,12 @@ Every notable change to this crate is recorded here. The format follows
 
 ## [0.9.1]
 
+### Changed — the list of reviews moves to `docs/Reviews.md` *(2026-11-21)*
+
+The README and `docs/Home.md` name the models that have reviewed krypto; the table with dates
+and versions is in `docs/Reviews.md`. The Author section says that Mistral AI also writes code
+since 0.9.0.
+
 ## [0.9.0] — 2026-11-21
 
 *A new store file format, upper bounds on input, and a specification. `SecretStore` files get
