@@ -4,7 +4,17 @@ Every notable change to this crate is recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
-## [0.9.0]
+## [0.9.0] — 2026-11-21
+
+*A new store file format, upper bounds on input, and a specification. `SecretStore` files get
+format version 2: the whole file is authenticated, the master key is checked at `open`, and a
+write counter lets a caller detect rollback; new stores are version 2, which older krypto
+cannot read. Blobs take caller-supplied associated data. Upper bounds are put on what krypto
+takes in: data, blobs, passwords, keys and signatures above them are refused.
+`close_inherited_fds` refuses while a store is open and tests the random source, and
+`password::derive_key` wipes Argon2's working memory. `krypto-cli inspect` bounds what it
+collects. krypto has a specification in `spec/`, the documents are checked against the code,
+and the entries marked ⚠ say what can break a user.*
 
 ### Added — store file format version 2, with whole-file authentication and rollback detection *(2026-11-16)*
 
