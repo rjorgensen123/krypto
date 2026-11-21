@@ -4,6 +4,8 @@ Every notable change to this crate is recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the crate follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.9.1]
+
 ## [0.9.0] — 2026-11-21
 
 *A new store file format, upper bounds on input, and a specification. `SecretStore` files get
